@@ -1013,7 +1013,7 @@ export const getAccountSpendTrend = async (accountId: number, days = 30): Promis
   const rows = await db.getAllAsync<{ date: string; total: number }>(
     `SELECT DATE(t.date) as date, SUM(${EFFECTIVE_DEBIT_AMOUNT}) as total
      FROM transactions t
-     WHERE t.accountId = ? AND t.type = 'debit' AND t.isConfirmed = 1 AND (t.isTransfer = 0 OR t.isTransfer IS NULL) AND t.date >= ?
+     WHERE (t.accountId = ?) AND (t.type = 'debit' OR t.type = 'transfer') AND t.isConfirmed = 1 AND t.date >= ?
      GROUP BY DATE(t.date)
      ORDER BY DATE(t.date) ASC`,
     accountId, since.toISOString()
@@ -1036,8 +1036,20 @@ export const getAccountCategoryBreakdown = async (
   startDate?: string,
   endDate?: string,
 ): Promise<CategoryBreakdown[]> => {
-  const conditions = [`t.accountId = ?`, `t.type = ?`, `t.isConfirmed = 1`, `(t.isTransfer = 0 OR t.isTransfer IS NULL)`];
-  const params: any[] = [accountId, type];
+  // For a specific account, include transfers that involve that account
+  const conditions = [`(t.accountId = ? OR t.toAccountId = ?)`, `t.isConfirmed = 1`];
+  const params: any[] = [accountId, accountId];
+
+  if (type === 'debit') {
+    // Expense: either a direct debit or a transfer OUT of this account
+    conditions.push(`((t.type = 'debit' AND t.accountId = ?) OR (t.type = 'transfer' AND t.accountId = ?))`);
+    params.push(accountId, accountId);
+  } else {
+    // Income: either a direct credit or a transfer INTO this account
+    conditions.push(`((t.type = 'credit' AND t.accountId = ?) OR (t.type = 'transfer' AND t.toAccountId = ?))`);
+    params.push(accountId, accountId);
+  }
+
   if (startDate) { conditions.push('t.date >= ?'); params.push(startDate); }
   if (endDate) { conditions.push('t.date <= ?'); params.push(endDate); }
 
@@ -1071,11 +1083,16 @@ export const getAccountInsights = async (
 
   const row = await db.getFirstAsync<{ expense: number; income: number; count: number }>(
     `SELECT
-       SUM(CASE WHEN t.type='debit' AND (t.isTransfer=0 OR t.isTransfer IS NULL) THEN ${EFFECTIVE_DEBIT_AMOUNT} ELSE 0 END) as expense,
-       SUM(CASE WHEN t.type='credit' AND (t.isTransfer=0 OR t.isTransfer IS NULL) THEN t.amount ELSE 0 END) as income,
+       SUM(CASE 
+         WHEN (t.type = 'debit' AND t.accountId = ?) OR (t.type = 'transfer' AND t.accountId = ?) 
+         THEN ${EFFECTIVE_DEBIT_AMOUNT} ELSE 0 END) as expense,
+       SUM(CASE 
+         WHEN (t.type = 'credit' AND t.accountId = ?) OR (t.type = 'transfer' AND t.toAccountId = ?) 
+         THEN t.amount ELSE 0 END) as income,
        COUNT(*) as count
-     FROM transactions t WHERE ${conditions.join(' AND ')}`,
-    ...params
+     FROM transactions t 
+     WHERE (t.accountId = ? OR t.toAccountId = ?) AND t.isConfirmed = 1`,
+    accountId, accountId, accountId, accountId, accountId, accountId
   );
   const expense = row?.expense ?? 0;
   const income = row?.income ?? 0;

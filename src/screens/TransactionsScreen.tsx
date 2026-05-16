@@ -60,7 +60,6 @@ interface Filters {
   source: SourceFilter;
   recurring: boolean;
   sort: SortOption;
-  confirmedOnly: boolean;
 }
 
 const DEFAULT_FILTERS: Filters = {
@@ -76,7 +75,6 @@ const DEFAULT_FILTERS: Filters = {
   source: 'all',
   recurring: false,
   sort: 'newest',
-  confirmedOnly: true,
 };
 
 const PAGE_SIZE = 50;
@@ -123,7 +121,6 @@ const countActiveFilters = (f: Filters): number => {
   if (f.minAmount || f.maxAmount) count++;
   if (f.source !== 'all') count++;
   if (f.recurring) count++;
-  if (!f.confirmedOnly) count++; // showing unconfirmed is non-default (we default to true now)
   return count;
 };
 
@@ -201,19 +198,17 @@ const TransactionsScreen = () => {
         startDate,
         endDate,
         isRecurring: f.recurring ? true : undefined,
-        confirmedOnly: f.confirmedOnly,
+        confirmedOnly: true, // Only show confirmed transactions on this screen
+        accountId: f.accountId ?? undefined,
       };
     },
     []
   );
 
-  // ── Client-side filters (account, source, sort) ───────────────────────────
+  // ── Client-side filters (source, sort) ────────────────────────────────────
   const applyClientFilters = useCallback(
     (raw: Transaction[], f: Filters): Transaction[] => {
       let result = raw;
-      if (f.accountId !== null) {
-        result = result.filter(t => t.accountId === f.accountId);
-      }
       if (f.source !== 'all') {
         result = result.filter(t => t.source === f.source);
       }
@@ -297,10 +292,29 @@ const TransactionsScreen = () => {
 
   // ── Stats ─────────────────────────────────────────────────────────────────
   const stats = useMemo(() => {
-    const expenses = transactions.filter(t => t.type === 'debit').reduce((s, t) => s + t.amount, 0);
-    const income = transactions.filter(t => t.type === 'credit').reduce((s, t) => s + t.amount, 0);
+    let expenses = 0;
+    let income = 0;
+
+    transactions.forEach(t => {
+      if (t.type === 'debit') {
+        expenses += t.amount;
+      } else if (t.type === 'credit') {
+        income += t.amount;
+      } else if (t.type === 'transfer') {
+        // If we are looking at a specific account, classify transfer as income/expense
+        if (filters.accountId) {
+          if (t.toAccountId === filters.accountId) {
+            income += t.amount;
+          } else if (t.accountId === filters.accountId) {
+            expenses += t.amount;
+          }
+        }
+        // If we are looking at all accounts, transfers are neutral (ignore for stats)
+      }
+    });
+
     return { count: transactions.length, expenses, income };
-  }, [transactions]);
+  }, [transactions, filters.accountId]);
 
   // ── Open detail ───────────────────────────────────────────────────────────
   const openDetail = (tx: Transaction) => {
@@ -700,26 +714,6 @@ const TransactionsScreen = () => {
                   style={{ color: filters.recurring ? colors.accent : colors.secondary }}
                 >
                   Recurring Only
-                </ThemedText>
-              </TouchableOpacity>
-
-              {/* Include unconfirmed */}
-              <TouchableOpacity
-                onPress={() => setFilters(f => ({ ...f, confirmedOnly: !f.confirmedOnly }))}
-                style={[
-                  themedStyles.toggleChip,
-                  {
-                    backgroundColor: !filters.confirmedOnly ? colors.warning + '20' : colors.translucent,
-                    borderColor: !filters.confirmedOnly ? colors.warning : colors.border,
-                  },
-                ]}
-              >
-                <LucideAlertCircle color={!filters.confirmedOnly ? colors.warning : colors.secondary} size={14} />
-                <ThemedText
-                  className="ml-1.5 text-xs font-bold"
-                  style={{ color: !filters.confirmedOnly ? colors.warning : colors.secondary }}
-                >
-                  Incl. Pending
                 </ThemedText>
               </TouchableOpacity>
             </View>
