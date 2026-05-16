@@ -338,8 +338,18 @@ const SplitDetailScreen = ({ navigation, route }: any) => {
               )}
             </View>
             {linkedSub && (
-              <TouchableOpacity onPress={() => navigation.navigate('Main', { screen: 'Finances' })}>
+              <TouchableOpacity onPress={() => navigation.navigate('AddSubscription', { subscriptionToEdit: linkedSub })}>
                 <LucideChevronRight color="#5AC8FA" size={14} />
+              </TouchableOpacity>
+            )}
+            {linkedGoal && (
+              <TouchableOpacity onPress={() => navigation.navigate('AddGoal', { goalToEdit: linkedGoal })}>
+                <LucideChevronRight color="#34C759" size={14} />
+              </TouchableOpacity>
+            )}
+            {linkedLoan && (
+              <TouchableOpacity onPress={() => navigation.navigate('AddLoan', { loanToEdit: linkedLoan })}>
+                <LucideChevronRight color="#FF9500" size={14} />
               </TouchableOpacity>
             )}
           </MotiView>
