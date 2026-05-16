@@ -56,6 +56,7 @@ export const ReviewTransactionCard = ({
     tx.type === 'credit' ? 'income' : tx.type === 'transfer' ? 'transfer' : 'expense'
   );
   const [showAccPicker, setShowAccPicker] = useState(false);
+  const [showToAccPicker, setShowToAccPicker] = useState(false);
   const [showTagPicker, setShowTagPicker] = useState(false);
 
   const [isEditingName, setIsEditingName] = useState(false);
@@ -63,9 +64,23 @@ export const ReviewTransactionCard = ({
 
   const handleTypeChange = async (newType: 'credit' | 'debit' | 'transfer') => {
     if (newType === tx.type) return;
-    await updateTransaction(tx.id, { type: newType });
-    onTransactionUpdated({ ...tx, type: newType });
+    const updates: any = { type: newType };
+    if (newType === 'transfer') {
+      updates.isTransfer = 1;
+      if (tx.category !== 'Transfer') updates.category = 'Transfer';
+    } else {
+      updates.isTransfer = 0;
+    }
+    await updateTransaction(tx.id, updates);
+    onTransactionUpdated({ ...tx, ...updates, isTransfer: !!updates.isTransfer });
     setCatTab(newType === 'credit' ? 'income' : newType === 'transfer' ? 'transfer' : 'expense');
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
+
+  const changeToAccount = async (toAccountId: number) => {
+    await updateTransaction(tx.id, { toAccountId });
+    onTransactionUpdated({ ...tx, toAccountId });
+    setShowToAccPicker(false);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
 
@@ -260,14 +275,14 @@ export const ReviewTransactionCard = ({
         </View>
 
         {/* Row 2: category + account chips */}
-        <View className="flex-row mt-2">
+        <View className="flex-row flex-wrap mt-2">
           <TouchableOpacity
             onPress={() => {
               setShowCatPicker(!showCatPicker);
               setShowAccPicker(false);
               setShowTagPicker(false);
             }}
-            className="flex-row items-center px-3 py-1.5 rounded-full mr-2"
+            className="flex-row items-center px-3 py-1.5 rounded-full mr-2 mb-2"
             style={{ backgroundColor: `${colors.accent}15` }}
           >
             <ThemedText className="text-[11px] font-bold mr-1" style={{ color: colors.accent }}>
@@ -282,17 +297,35 @@ export const ReviewTransactionCard = ({
               setShowCatPicker(false);
               setShowTagPicker(false);
             }}
-            className="flex-row items-center px-3 py-1.5 rounded-full mr-2"
+            className="flex-row items-center px-3 py-1.5 rounded-full mr-2 mb-2"
             style={{ backgroundColor: colors.translucent }}
           >
             <ThemedText type="secondary" className="text-[11px] font-bold mr-1">
-              {effectiveAcc?.name ?? 'No account'}
+              {tx.type === 'transfer' ? 'From: ' : ''}{effectiveAcc?.name ?? 'No account'}
             </ThemedText>
             <LucideChevronDown color={colors.muted} size={11} />
           </TouchableOpacity>
 
+          {tx.type === 'transfer' && (
+            <TouchableOpacity
+              onPress={() => {
+                setShowToAccPicker(!showToAccPicker);
+                setShowCatPicker(false);
+                setShowAccPicker(false);
+                setShowTagPicker(false);
+              }}
+              className="flex-row items-center px-3 py-1.5 rounded-full mr-2 mb-2"
+              style={{ backgroundColor: `${colors.success}15` }}
+            >
+              <ThemedText className="text-[11px] font-bold mr-1" style={{ color: colors.success }}>
+                To: {accounts.find(a => a.id === tx.toAccountId)?.name ?? 'Select…'}
+              </ThemedText>
+              <LucideChevronDown color={colors.success} size={11} />
+            </TouchableOpacity>
+          )}
+
           {(tx.tags || []).map(tag => (
-            <View key={tag} className="flex-row items-center px-3 py-1.5 rounded-full mr-2" style={{ backgroundColor: `${colors.accent}10`, borderWidth: 1, borderColor: `${colors.accent}30` }}>
+            <View key={tag} className="flex-row items-center px-3 py-1.5 rounded-full mr-2 mb-2" style={{ backgroundColor: `${colors.accent}10`, borderWidth: 1, borderColor: `${colors.accent}30` }}>
               <ThemedText className="text-[11px] font-bold" style={{ color: colors.accent }}>#{tag}</ThemedText>
             </View>
           ))}
@@ -303,7 +336,7 @@ export const ReviewTransactionCard = ({
               setShowCatPicker(false);
               setShowAccPicker(false);
             }}
-            className="flex-row items-center px-3 py-1.5 rounded-full"
+            className="flex-row items-center px-3 py-1.5 rounded-full mb-2"
             style={{ backgroundColor: colors.translucent, borderStyle: 'dashed', borderWidth: 1, borderColor: colors.border }}
           >
             <LucidePlus color={colors.secondary} size={11} />
@@ -441,7 +474,7 @@ export const ReviewTransactionCard = ({
             style={{ borderTopColor: colors.border }}
           >
             <ThemedText type="secondary" className="text-[10px] font-bold uppercase tracking-widest mb-2">
-              Assign Account
+              {tx.type === 'transfer' ? 'Source Account' : 'Assign Account'}
             </ThemedText>
             <View className="flex-row flex-wrap">
               {accounts.map(acc => {
@@ -458,6 +491,49 @@ export const ReviewTransactionCard = ({
                       backgroundColor: active ? colors.accent : colors.translucent,
                       borderWidth: 1,
                       borderColor: active ? colors.accent : colors.border,
+                    }}
+                  >
+                    <ThemedText
+                      className="text-[11px] font-bold"
+                      style={{ color: active ? '#FFF' : colors.secondary }}
+                    >
+                      {acc.name}
+                    </ThemedText>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </MotiView>
+        )}
+
+        {/* To Account picker */}
+        {showToAccPicker && (
+          <MotiView
+            from={{ opacity: 0, scale: 0.97 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="mt-3 pt-3 border-t"
+            style={{ borderTopColor: colors.border }}
+          >
+            <ThemedText type="secondary" className="text-[10px] font-bold uppercase tracking-widest mb-2">
+              Destination Account
+            </ThemedText>
+            <View className="flex-row flex-wrap">
+              {accounts.map(acc => {
+                const active = tx.toAccountId === acc.id;
+                // Don't allow selecting same account for From and To
+                const isFrom = (accountOverride ?? tx.accountId) === acc.id;
+                
+                return (
+                  <TouchableOpacity
+                    key={acc.id}
+                    onPress={() => !isFrom && changeToAccount(acc.id)}
+                    disabled={isFrom}
+                    className="mr-2 mb-2 px-3 py-1.5 rounded-full"
+                    style={{
+                      backgroundColor: active ? colors.success : colors.translucent,
+                      borderWidth: 1,
+                      borderColor: active ? colors.success : colors.border,
+                      opacity: isFrom ? 0.3 : 1,
                     }}
                   >
                     <ThemedText
