@@ -139,24 +139,27 @@ export const AddAccountScreen = () => {
       return;
     }
 
-    const payload: Omit<Account, 'id'> = {
+    const payload: Partial<Account> = {
       name: name.trim(),
-      balance: parseFloat(balance),
       accountType,
       creditLimit: isCC && creditLimit ? parseFloat(creditLimit) : undefined,
       statementDay: isCC && statementDay ? statementDay : undefined,
       billDueDay: isCC && billDueDay ? billDueDay : undefined,
       startDate,
       last4Digits: last4Digits.trim() || undefined,
-      startingBalance: parseFloat(balance),
     };
+
+    if (!accountToEdit) {
+      payload.balance = parseFloat(balance);
+      payload.startingBalance = parseFloat(balance);
+    }
 
     try {
       if (accountToEdit) {
         await updateAccount(accountToEdit.id, payload);
         notify.success('Account updated');
       } else {
-        await addAccount(payload);
+        await addAccount(payload as Omit<Account, 'id'>);
         notify.success('Account added');
       }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -343,33 +346,35 @@ export const AddAccountScreen = () => {
               </View>
             )}
 
-            {/* Balance / Outstanding */}
-            <View style={themedStyles.field}>
-              <ThemedText type="secondary" style={themedStyles.label}>
-                {isCC ? 'Current Outstanding (₹)' : 'Opening Balance (₹)'}
-              </ThemedText>
-              <TextInput
-                style={[
-                  themedStyles.input,
-                  themedStyles.balanceInput,
-                  { backgroundColor: colors.translucent, borderColor: colors.border, color: colors.primary },
-                  errors.balance && { borderColor: colors.danger },
-                ]}
-                placeholder="0.00"
-                placeholderTextColor={colors.muted}
-                keyboardType="numeric"
-                value={balance}
-                onChangeText={v => { setBalance(v); setErrors(e => ({ ...e, balance: undefined })); }}
-              />
-              {errors.balance
-                ? <ThemedText style={{ color: colors.danger, fontSize: 12, marginTop: 4 }}>{errors.balance}</ThemedText>
-                : <ThemedText type="secondary" className="text-[11px] mt-1 italic">
-                  {isCC
-                    ? 'How much you owe right now. Enter 0 if your card is fully paid.'
-                    : 'Your account balance right now. We\'ll track all changes after this.'}
+            {/* Balance / Outstanding — ONLY SHOW ON CREATE */}
+            {!accountToEdit && (
+              <View style={themedStyles.field}>
+                <ThemedText type="secondary" style={themedStyles.label}>
+                  {isCC ? 'Current Outstanding (₹)' : 'Opening Balance (₹)'}
                 </ThemedText>
-              }
-            </View>
+                <TextInput
+                  style={[
+                    themedStyles.input,
+                    themedStyles.balanceInput,
+                    { backgroundColor: colors.translucent, borderColor: colors.border, color: colors.primary },
+                    errors.balance && { borderColor: colors.danger },
+                  ]}
+                  placeholder="0.00"
+                  placeholderTextColor={colors.muted}
+                  keyboardType="numeric"
+                  value={balance}
+                  onChangeText={v => { setBalance(v); setErrors(e => ({ ...e, balance: undefined })); }}
+                />
+                {errors.balance
+                  ? <ThemedText style={{ color: colors.danger, fontSize: 12, marginTop: 4 }}>{errors.balance}</ThemedText>
+                  : <ThemedText type="secondary" className="text-[11px] mt-1 italic">
+                    {isCC
+                      ? 'How much you owe right now. Enter 0 if your card is fully paid.'
+                      : 'Your account balance right now. We\'ll track all changes after this.'}
+                  </ThemedText>
+                }
+              </View>
+            )}
 
             {/* Credit card specific fields */}
             {isCC && (

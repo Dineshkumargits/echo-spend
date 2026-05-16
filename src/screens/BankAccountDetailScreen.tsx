@@ -12,6 +12,10 @@ import {
   LayoutAnimation,
   Platform,
   UIManager,
+  Modal,
+  TextInput,
+  KeyboardAvoidingView,
+  Pressable,
 } from 'react-native';
 import { MotiView } from 'moti';
 import { LineChart } from 'react-native-wagmi-charts';
@@ -48,6 +52,7 @@ import {
   getAccountSpendTrend,
   syncAccountBalanceFromSms,
   recalculateAccountBalance,
+  addTransaction,
 } from '../services/database';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -442,6 +447,9 @@ const BankAccountDetailScreen = ({ navigation, route }: any) => {
   // ── Tab-level state (only changes on tab/dateRange switch) ───────────────
   const [categoryGroups, setCategoryGroups] = useState<CategoryGroup[]>([]);
   const [tabLoading, setTabLoading] = useState(false);
+  const [adjustModalVisible, setAdjustModalVisible] = useState(false);
+  const [adjustAmount, setAdjustAmount] = useState('');
+  const [isAdjusting, setIsAdjusting] = useState(false);
 
   const isFirstMount = useRef(true);
 
@@ -490,7 +498,7 @@ const BankAccountDetailScreen = ({ navigation, route }: any) => {
 
       // Group by category (with hierarchy awareness)
       const parentMap = new Map<string, { total: number; count: number; transactions: Transaction[]; icon: string; color: string; subs: Set<string> }>();
-      
+
       txs.forEach(tx => {
         const catDef = cats.find(c => c.name === tx.category);
         const parent = catDef?.parentId ? cats.find(c => c.id === catDef.parentId) : null;
@@ -608,6 +616,50 @@ const BankAccountDetailScreen = ({ navigation, route }: any) => {
     }
   };
 
+  const onAdjustBalance = async () => {
+    if (!account || !adjustAmount) return;
+    const realBal = parseFloat(adjustAmount.replace(/,/g, ''));
+    if (isNaN(realBal)) {
+      notify.error('Invalid amount');
+      return;
+    }
+
+    setIsAdjusting(true);
+    try {
+      const diff = realBal - account.balance;
+      if (Math.abs(diff) < 0.01) {
+        setAdjustModalVisible(false);
+        return;
+      }
+
+      const type = diff > 0 ? 'credit' : 'debit';
+      const absDiff = Math.abs(diff);
+
+      await addTransaction({
+        amount: absDiff,
+        category: 'Others',
+        merchant: 'Balance Adjustment',
+        type,
+        date: new Date().toISOString(),
+        accountId,
+        isConfirmed: true,
+        source: 'manual',
+        notes: `Manual adjustment to match real balance (${fmt(realBal)})`,
+        confidence: 'high'
+      });
+
+      notify.success('Balance adjusted');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setAdjustModalVisible(false);
+      setAdjustAmount('');
+      loadAll(dateRange, activeTab);
+    } catch (err) {
+      notify.error('Failed to adjust balance');
+    } finally {
+      setIsAdjusting(false);
+    }
+  };
+
   // ── Derived ──────────────────────────────────────────────────────────────
   const chartData = trend.map((p, i) => ({
     timestamp: new Date(p.date).getTime() + i,
@@ -691,8 +743,20 @@ const BankAccountDetailScreen = ({ navigation, route }: any) => {
             <View style={{ width: 48, height: 48, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: `${colors.accent}20` }}>
               <AccountIcon color={colors.accent} size={22} />
             </View>
-            <View style={{ paddingHorizontal: 12, paddingVertical: 4, borderRadius: 99, backgroundColor: `${colors.accent}15` }}>
-              <ThemedText style={{ fontSize: 11, fontWeight: '700', color: colors.accent }}>{accountTypeLabel}</ThemedText>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <TouchableOpacity
+                onPress={() => {
+                  setAdjustAmount(account.balance.toString());
+                  setAdjustModalVisible(true);
+                }}
+                className="w-8 h-8 rounded-full items-center justify-center"
+                style={{ backgroundColor: colors.translucent }}
+              >
+                <LucideIcons.LucideSlidersHorizontal color={colors.secondary} size={14} />
+              </TouchableOpacity>
+              <View style={{ paddingHorizontal: 12, paddingVertical: 4, borderRadius: 99, backgroundColor: `${colors.accent}15` }}>
+                <ThemedText style={{ fontSize: 11, fontWeight: '700', color: colors.accent }}>{accountTypeLabel}</ThemedText>
+              </View>
             </View>
           </View>
           <ThemedText style={{ fontSize: 11, fontWeight: '600', color: colors.secondary, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>
@@ -701,18 +765,6 @@ const BankAccountDetailScreen = ({ navigation, route }: any) => {
           <ThemedText style={{ fontSize: 36, fontWeight: '700' }}>
             {preferences.hideAmounts ? '****' : `${account.accountType === 'credit_card' ? '-' : ''}${preferences.currency}${account.balance.toLocaleString('en-IN')}`}
           </ThemedText>
-          {(account.accountType === 'bank' || account.accountType === 'credit_card') && (
-            <TouchableOpacity
-              onPress={onSyncBalance}
-              activeOpacity={0.6}
-              style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8 }}
-            >
-              <LucideIcons.LucideRefreshCcw color={colors.accent} size={12} />
-              <ThemedText style={{ fontSize: 11, color: colors.accent, fontWeight: '600', marginLeft: 6 }}>
-                Sync with latest SMS
-              </ThemedText>
-            </TouchableOpacity>
-          )}
           {account.accountType === 'credit_card' && account.creditLimit ? (
             <View style={{ marginTop: 12 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
@@ -884,6 +936,75 @@ const BankAccountDetailScreen = ({ navigation, route }: any) => {
 
         <View style={{ height: 32 }} />
       </ScrollView>
+
+      {/* Adjustment Modal */}
+      <Modal
+        visible={adjustModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setAdjustModalVisible(false)}
+      >
+        <Pressable
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 }}
+          onPress={() => setAdjustModalVisible(false)}
+        >
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+            <Pressable
+              onPress={e => e.stopPropagation()}
+              style={{ backgroundColor: colors.surface, borderRadius: 24, padding: 24, borderWidth: 1, borderColor: colors.border }}
+            >
+              <View className="flex-row justify-between items-center mb-6">
+                <ThemedText className="text-xl font-bold">Adjust Balance</ThemedText>
+                <TouchableOpacity onPress={() => setAdjustModalVisible(false)}>
+                  <LucideIcons.LucideX color={colors.secondary} size={20} />
+                </TouchableOpacity>
+              </View>
+
+              <ThemedText type="secondary" className="text-sm mb-4">
+                Enter the actual current balance for <ThemedText className="font-bold" style={{ color: colors.primary }}>{account.name}</ThemedText>. We'll create an adjustment transaction to match this.
+              </ThemedText>
+
+              <View
+                className="p-4 rounded-xl mb-6 flex-row items-center border"
+                style={{ backgroundColor: colors.translucent, borderColor: colors.border }}
+              >
+                <ThemedText className="text-2xl font-bold mr-2" style={{ color: colors.accent }}>{preferences.currency}</ThemedText>
+                <TextInput
+                  value={adjustAmount}
+                  onChangeText={setAdjustAmount}
+                  keyboardType="numeric"
+                  placeholder="0.00"
+                  placeholderTextColor={colors.secondary}
+                  autoFocus
+                  style={{ flex: 1, fontSize: 24, fontWeight: '700', color: colors.primary }}
+                />
+              </View>
+
+              <View className="flex-row gap-3">
+                <TouchableOpacity
+                  onPress={() => setAdjustModalVisible(false)}
+                  className="flex-1 p-4 rounded-xl items-center border"
+                  style={{ borderColor: colors.border }}
+                >
+                  <ThemedText className="font-bold">Cancel</ThemedText>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={onAdjustBalance}
+                  disabled={isAdjusting || !adjustAmount}
+                  className="flex-[2] p-4 rounded-xl items-center"
+                  style={{ backgroundColor: colors.accent, opacity: isAdjusting || !adjustAmount ? 0.6 : 1 }}
+                >
+                  {isAdjusting ? (
+                    <ActivityIndicator color="#FFF" size="small" />
+                  ) : (
+                    <ThemedText className="font-bold" style={{ color: '#FFF' }}>Save Adjustment</ThemedText>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </Pressable>
+          </KeyboardAvoidingView>
+        </Pressable>
+      </Modal>
     </ThemedSafeAreaView>
   );
 };
