@@ -1,16 +1,23 @@
 import * as Notifications from 'expo-notifications';
-import { Platform } from 'react-native';
+import { Platform, AppState } from 'react-native';
 
-// Single authoritative handler — keeps badge, plays sound, shows alert in all states.
+// Single authoritative handler — keeps badge, plays sound, shows alert.
+// Refactored to silence alerts when the app is active to prevent "notification bombing"
+// while the user is already looking at their data.
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
+  handleNotification: async () => {
+    const isActive = AppState.currentState === 'active';
+    return {
+      shouldShowAlert: !isActive,
+      shouldPlaySound: !isActive,
+      shouldSetBadge: true,
+      shouldShowBanner: !isActive,
+      shouldShowList: true,
+    };
+  },
 });
+
+import { notify } from '../utils/notify';
 
 export const NotificationService = {
   async requestPermissions() {
@@ -63,10 +70,17 @@ export const NotificationService = {
   async notifyNewTransaction(amount: number, merchant: string, category?: string) {
     try {
       const categoryLabel = category ? ` · ${category}` : '';
+      const text = `₹${amount.toLocaleString('en-IN')} at ${merchant}${categoryLabel}`;
+      
+      if (AppState.currentState === 'active') {
+        notify.info('New Transaction Found', text);
+        return;
+      }
+
       await Notifications.scheduleNotificationAsync({
         content: {
           title: 'New Transaction Detected',
-          body: `₹${amount.toLocaleString('en-IN')} at ${merchant}${categoryLabel} — tap to review`,
+          body: `${text} — tap to review`,
           data: { screen: 'SmartInbox' },
           sound: 'default',
           ...(Platform.OS === 'android' && { channelId: 'transactions' }),
@@ -80,10 +94,17 @@ export const NotificationService = {
   async notifyBatchTransactions(count: number, totalAmount: number, topMerchant?: string) {
     try {
       const merchantLine = topMerchant ? ` Top: ${topMerchant}.` : '';
+      const body = `₹${totalAmount.toLocaleString('en-IN')} total detected.${merchantLine} Tap to review.`;
+
+      if (AppState.currentState === 'active') {
+        notify.info(`${count} New Transactions`, body);
+        return;
+      }
+
       await Notifications.scheduleNotificationAsync({
         content: {
-          title: `${count} New Transaction${count > 1 ? 's' : ''} Found`,
-          body: `₹${totalAmount.toLocaleString('en-IN')} total detected.${merchantLine} Tap to review.`,
+          title: `${count} New Transactions Found`,
+          body,
           data: { screen: 'SmartInbox' },
           sound: 'default',
           ...(Platform.OS === 'android' && { channelId: 'transactions' }),
@@ -97,12 +118,20 @@ export const NotificationService = {
     try {
       const pct = Math.round((spent / budget) * 100);
       const over = spent >= budget;
+      const title = over ? 'Budget Exceeded!' : `Budget at ${pct}%`;
+      const body = over
+        ? `You've spent ${currency}${spent.toLocaleString('en-IN')} — ${currency}${(spent - budget).toLocaleString('en-IN')} over your ${currency}${budget.toLocaleString('en-IN')} budget.`
+        : `${pct}% of your monthly budget used (${currency}${spent.toLocaleString('en-IN')} / ${currency}${budget.toLocaleString('en-IN')}).`;
+
+      if (AppState.currentState === 'active') {
+        notify.info(title, body);
+        return;
+      }
+
       await Notifications.scheduleNotificationAsync({
         content: {
-          title: over ? 'Budget Exceeded!' : `Budget at ${pct}%`,
-          body: over
-            ? `You've spent ${currency}${spent.toLocaleString('en-IN')} — ${currency}${(spent - budget).toLocaleString('en-IN')} over your ${currency}${budget.toLocaleString('en-IN')} budget.`
-            : `${pct}% of your monthly budget used (${currency}${spent.toLocaleString('en-IN')} / ${currency}${budget.toLocaleString('en-IN')}).`,
+          title,
+          body,
           data: { screen: 'Home' },
           sound: 'default',
           ...(Platform.OS === 'android' && { channelId: 'alerts' }),
@@ -261,6 +290,11 @@ export const NotificationService = {
 
   async scheduleLocalNotification(title: string, body: string, channelId = 'default', data?: any) {
     try {
+      if (AppState.currentState === 'active') {
+        notify.info(title, body);
+        return;
+      }
+
       await Notifications.scheduleNotificationAsync({
         content: {
           title,

@@ -171,7 +171,7 @@ function AppContent() {
         try {
           const hasPermission = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_SMS);
           if (hasPermission) {
-            await performBackgroundSmsScan();
+            await performBackgroundSmsScan(true); // Silent on launch — user is about to see the dashboard
           }
         } catch (e) {
           // Silent fail for background scan

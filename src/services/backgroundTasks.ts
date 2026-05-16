@@ -100,7 +100,7 @@ TaskManager.defineTask(BACKGROUND_SYNC_TASK, async () => {
 
 // ─── 2. Auto SMS Scan Task ───────────────────────────────────────────────────
 
-export const performBackgroundSmsScan = async () => {
+export const performBackgroundSmsScan = async (silent = false) => {
   // Skip if the user is actively running SmartScan in the foreground — no need
   // to scan in the background and send spurious notifications while they're reviewing.
   if (_foregroundScanActive) return BackgroundFetch.BackgroundFetchResult.NoData;
@@ -109,13 +109,13 @@ export const performBackgroundSmsScan = async () => {
   _scanRunning = true;
 
   try {
-    return await _doSmsScan();
+    return await _doSmsScan(silent);
   } finally {
     _scanRunning = false;
   }
 };
 
-const _doSmsScan = async (): Promise<BackgroundFetch.BackgroundFetchResult> => {
+const _doSmsScan = async (silent = false): Promise<BackgroundFetch.BackgroundFetchResult> => {
   const { preferences } = useStore.getState();
 
   if (!preferences.autoSmsScan || Platform.OS !== 'android') {
@@ -266,7 +266,7 @@ const _doSmsScan = async (): Promise<BackgroundFetch.BackgroundFetchResult> => {
   // Only notify when we actually found new transactions from new SMS.
   // No nudge/suggestion notifications — those are noise when the user
   // hasn't received a new bank SMS.
-  if (newTxCount > 0) {
+  if (newTxCount > 0 && !silent) {
     if (newTxCount === 1) {
       await NotificationService.notifyNewTransaction(
         totalAmount,
