@@ -165,6 +165,47 @@ export const NotificationService = {
     }
   },
 
+  /**
+   * Schedules a silent "ping" notification that triggers the background cloud sync.
+   * Uses DATE trigger for AlarmManager.setExact precision on Android.
+   */
+  async scheduleSyncTask(timeStr: string) {
+    try {
+      await NotificationService.cancelSyncTask();
+
+      const [hour, min] = timeStr.split(':').map(Number);
+      const now = new Date();
+      const target = new Date(now);
+      target.setHours(hour, min, 0, 0);
+      if (target.getTime() <= now.getTime()) {
+        target.setDate(target.getDate() + 1);
+      }
+
+      // Silent notification (no title/body) still triggers the ReceivedListener
+      // on Android and iOS while allowing us to run code at an exact time.
+      await Notifications.scheduleNotificationAsync({
+        identifier: 'echo-sync-ping',
+        content: {
+          title: '', // Empty = silent on most OS
+          body: '',
+          data: { triggerSync: true, rescheduleSync: true, syncTime: timeStr },
+        },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.DATE,
+          date: target,
+        },
+      });
+    } catch (e) {
+      console.error('[Notifications] Failed to schedule sync task:', e);
+    }
+  },
+
+  async cancelSyncTask() {
+    try {
+      await Notifications.cancelScheduledNotificationAsync('echo-sync-ping');
+    } catch {}
+  },
+
   async cancelDailyReminder() {
     // Fast path: cancel by known identifier.
     try {

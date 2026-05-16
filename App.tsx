@@ -19,6 +19,7 @@ import * as Notifications from 'expo-notifications';
 import { createNavigationContainerRef } from '@react-navigation/native';
 import { NotificationService } from "./src/services/notifications";
 import { performBackgroundSmsScan } from './src/services/backgroundTasks';
+import { SyncService } from './src/services/sync';
 
 export const navigationRef = createNavigationContainerRef<any>();
 
@@ -31,7 +32,7 @@ function AppContent() {
   // reminder effect only runs after they exist (prevents scheduling before
   // permissions, which causes the notification to mis-fire on every startup).
   const [notifPermGranted, setNotifPermGranted] = useState(false);
-  const { preferences, updateLastActiveAt, dbReloadKey } = useStore();
+  const { preferences, updateLastActiveAt, dbReloadKey, googleUser } = useStore();
   const { authenticate, checkSupport } = useBiometric();
   const { requestPermissions } = useNotifications();
   const { isDark } = useTheme();
@@ -96,6 +97,13 @@ function AppContent() {
         } else {
           await NotificationService.cancelDailyReminder();
         }
+
+        // Schedule exact background sync if enabled
+        if (googleUser && preferences.syncSchedule !== 'none') {
+          await NotificationService.scheduleSyncTask(preferences.syncTime);
+        } else {
+          await NotificationService.cancelSyncTask();
+        }
       }
 
       // Re-schedule the daily reminder whenever it fires. Since we use a one-shot
@@ -103,8 +111,20 @@ function AppContent() {
       // we must chain the next occurrence each time the notification is received.
       receivedSub = Notifications.addNotificationReceivedListener(notification => {
         const data = notification.request.content.data;
+        
+        // Handle Daily Reminder
         if (data?.rescheduleDaily && preferences.dailyReminder) {
           NotificationService.scheduleDailyReminder();
+        }
+
+        // Handle Background Sync
+        if (data?.triggerSync) {
+          SyncService.shouldAutoSync().then(due => {
+            if (due) SyncService.syncToGoogleDrive().catch(() => {});
+          });
+        }
+        if (data?.rescheduleSync && data?.syncTime && googleUser && preferences.syncSchedule !== 'none') {
+          NotificationService.scheduleSyncTask(data.syncTime as string);
         }
       });
 
@@ -125,16 +145,23 @@ function AppContent() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dbInitialized]);
 
-  // React to the user toggling the daily reminder preference AFTER startup.
+  // React to the user toggling preferences AFTER startup.
   // Only runs once permissions have been confirmed; never fires at launch.
   useEffect(() => {
     if (!notifPermGranted) return;
+    
     if (preferences.dailyReminder) {
       NotificationService.scheduleDailyReminder();
     } else {
       NotificationService.cancelDailyReminder();
     }
-  }, [preferences.dailyReminder, notifPermGranted]);
+
+    if (googleUser && preferences.syncSchedule !== 'none') {
+      NotificationService.scheduleSyncTask(preferences.syncTime);
+    } else {
+      NotificationService.cancelSyncTask();
+    }
+  }, [preferences.dailyReminder, preferences.syncTime, preferences.syncSchedule, googleUser, notifPermGranted]);
 
   // Near-instant SMS polling while active/recent-background (Android only)
   useEffect(() => {

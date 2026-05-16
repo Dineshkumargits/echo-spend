@@ -9,6 +9,7 @@ import {
   saveInternalPreferences,
   getInternalPreferences,
   setLastSyncTimeInDb,
+  getLastSyncTimeFromDb,
 } from './database';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import {
@@ -56,6 +57,34 @@ export class SyncService {
     } catch (error) {
       console.error('[Sync] Failed to get valid access token:', error);
       return null;
+    }
+  }
+
+  /**
+   * Checks if an automated sync is due based on user preferences and 
+   * the last successful sync time stored in SQLite.
+   */
+  static async shouldAutoSync(): Promise<boolean> {
+    const { preferences, googleUser } = useStore.getState();
+    if (!googleUser || preferences.syncSchedule === 'none') return false;
+
+    try {
+      const lastSyncIso = await getLastSyncTimeFromDb();
+      if (!lastSyncIso) return true; // Never synced before
+
+      const lastSyncMs = new Date(lastSyncIso).getTime();
+      const elapsedMs = Date.now() - lastSyncMs;
+
+      if (preferences.syncSchedule === 'daily') {
+        // Require at least 20 hours since last sync to allow for some drift
+        return elapsedMs >= 20 * 60 * 60 * 1000;
+      } else if (preferences.syncSchedule === 'weekly') {
+        // Require at least 6 days since last sync
+        return elapsedMs >= 6 * 24 * 60 * 60 * 1000;
+      }
+      return false;
+    } catch {
+      return true; // Fallback to attempting sync on error
     }
   }
 

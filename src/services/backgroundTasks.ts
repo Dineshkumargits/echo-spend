@@ -73,25 +73,10 @@ TaskManager.defineTask(BACKGROUND_SYNC_TASK, async () => {
       return BackgroundFetch.BackgroundFetchResult.NoData;
     }
 
-    // ── Frequency gate: use SQLite-persisted last sync time ──────────────
-    // Zustand store may not be hydrated in headless background JS contexts,
-    // so we read from SQLite which is always available.
-    const lastSyncIso = await getLastSyncTimeFromDb();
-    if (lastSyncIso) {
-      const lastSyncMs = new Date(lastSyncIso).getTime();
-      const elapsedMs = Date.now() - lastSyncMs;
-
-      if (preferences.syncSchedule === 'daily') {
-        // Skip if already synced in the last 20 hours (tolerates schedule drift)
-        if (elapsedMs < 20 * 60 * 60 * 1000) {
-          return BackgroundFetch.BackgroundFetchResult.NoData;
-        }
-      } else if (preferences.syncSchedule === 'weekly') {
-        // Skip if already synced in the last 6 days
-        if (elapsedMs < 6 * 24 * 60 * 60 * 1000) {
-          return BackgroundFetch.BackgroundFetchResult.NoData;
-        }
-      }
+    // ── Frequency gate: use shared logic in SyncService ──────────────────
+    const isDue = await SyncService.shouldAutoSync();
+    if (!isDue) {
+      return BackgroundFetch.BackgroundFetchResult.NoData;
     }
 
     // ── Actually sync ────────────────────────────────────────────────────
