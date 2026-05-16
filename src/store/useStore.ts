@@ -72,6 +72,7 @@ interface AppState {
   updateLastActiveAt: () => void;
   completeOnboarding: () => void;
   resetOnboarding: () => void;
+  fullLogout: () => Promise<void>;
 }
 
 const secureStorage = {
@@ -106,7 +107,7 @@ const DEFAULT_PREFERENCES: UserPreferences = {
 
 export const useStore = create<AppState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       preferences: DEFAULT_PREFERENCES,
       lastSynced: null,
       isOnboarded: false,
@@ -258,8 +259,22 @@ export const useStore = create<AppState>()(
         set({
           isOnboarded: false,
           lastSynced: null,
+          googleUser: null,
           preferences: DEFAULT_PREFERENCES,
         }),
+
+      fullLogout: async () => {
+        // 1. Clear Zustand state in memory
+        set({
+          isOnboarded: false,
+          lastSynced: null,
+          googleUser: null,
+          preferences: DEFAULT_PREFERENCES,
+          dbReloadKey: (get() as any).dbReloadKey + 1,
+        });
+        // 2. Wipe the SecureStore persistence
+        await SecureStore.deleteItemAsync('echo-spend-storage');
+      },
     }),
     {
       name: 'echo-spend-storage',

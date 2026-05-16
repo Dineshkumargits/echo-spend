@@ -66,6 +66,7 @@ const SettingsScreen = ({ navigation }: any) => {
     setGoogleUser,
     updateLastSynced,
     resetOnboarding,
+    fullLogout,
     toggleAutoApprove,
     setAutoApproveThreshold,
     toggleBiometricLock,
@@ -261,19 +262,34 @@ const SettingsScreen = ({ navigation }: any) => {
     toggleBiometricLock();
   };
 
-  const handleResetData = () => {
+  const handleLogout = () => {
     Alert.alert(
-      'Reset All Data',
-      'This will permanently delete everything.',
+      'Logout & Wipe Data',
+      'This will PERMANENTLY delete all local transactions, accounts, and settings.\n\nIMPORTANT: Please ensure you have synced your data to Google Drive before proceeding, as this local data cannot be recovered once deleted.\n\nAre you absolutely sure?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Reset Everything',
+          text: 'Logout & Delete Everything',
           style: 'destructive',
           onPress: async () => {
-            await resetAllData();
-            resetOnboarding();
-            notify.success('All data cleared');
+            try {
+              // 1. Sign out of Google if linked
+              if (googleUser) {
+                await GoogleSignin.signOut();
+              }
+              
+              // 2. Wipe the SQLite database (includes categories/settings)
+              await resetAllData();
+              
+              // 3. Clear all persisted store state and SecureStore
+              await fullLogout();
+              
+              notify.success('Logged out and data wiped');
+              triggerHaptic(Haptics.ImpactFeedbackStyle.Heavy);
+            } catch (error) {
+              console.error('Logout failed', error);
+              notify.error('Logout failed partially');
+            }
           },
         },
       ]
@@ -580,7 +596,7 @@ const SettingsScreen = ({ navigation }: any) => {
         <Section title="Data & Privacy" />
         <View className="rounded-apple-md overflow-hidden mb-24" style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
           <Row icon={<LucideDownload color={colors.primary} size={20} />} label="Export to CSV" onPress={() => SyncService.exportToCSV()} />
-          <Row icon={<LucideRefreshCcw color={colors.danger} size={18} />} label="Reset App Data" onPress={handleResetData} danger />
+          <Row icon={<LucideLogOut color={colors.danger} size={18} />} label="Logout & Reset" onPress={handleLogout} danger />
         </View>
 
         {/* ── Developer Testing ── (Hidden in Release) */}

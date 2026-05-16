@@ -168,12 +168,14 @@ export interface CategoryBreakdown {
 }
 
 let db: SQLite.SQLiteDatabase;
+let initPromise: Promise<void> | null = null;
 
 /** Close the current DB connection (call before overwriting the DB file on restore) */
 export const closeDatabase = async () => {
   if (db) {
     try { await db.closeAsync(); } catch (_) { }
   }
+  initPromise = null;
 };
 
 /**
@@ -188,180 +190,202 @@ export const checkpointWal = async () => {
 };
 
 export const initDatabase = async () => {
-  db = await SQLite.openDatabaseAsync('echospend.db');
+  if (initPromise) return initPromise;
 
-  // Run pragmas individually — combining them in one execAsync call causes
-  // a NullPointerException on some Android versions.
-  await db.execAsync('PRAGMA journal_mode = WAL;');
-  await db.execAsync('PRAGMA foreign_keys = ON;');
+  initPromise = (async () => {
+    try {
+      db = await SQLite.openDatabaseAsync('echospend.db');
 
-  // Create each table in its own execAsync — a single large multi-statement
-  // block with FOREIGN KEY constraints reliably throws NullPointerException
-  // on Android in expo-sqlite v2.
-  await db.execAsync(`CREATE TABLE IF NOT EXISTS accounts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    balance REAL NOT NULL DEFAULT 0,
-    accountType TEXT NOT NULL DEFAULT 'bank',
-    creditLimit REAL,
-    statementDay INTEGER,
-    billDueDay INTEGER,
-    startDate TEXT NOT NULL,
-    lastScannedDate TEXT,
-    last4Digits TEXT,
-    displayOrder INTEGER DEFAULT 0,
-    startingBalance REAL DEFAULT 0
-  );`);
+      // Run pragmas individually — combining them in one execAsync call causes
+      // a NullPointerException on some Android versions.
+      await db.execAsync('PRAGMA journal_mode = WAL;');
+      await db.execAsync('PRAGMA foreign_keys = ON;');
 
-  await db.execAsync(`CREATE TABLE IF NOT EXISTS categories (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    icon TEXT NOT NULL,
-    color TEXT NOT NULL,
-    type TEXT NOT NULL DEFAULT 'expense',
-    parentId INTEGER,
-    FOREIGN KEY(parentId) REFERENCES categories(id) ON DELETE CASCADE,
-    UNIQUE(name, parentId)
-  );`);
+      // Create each table in its own execAsync — a single large multi-statement
+      // block with FOREIGN KEY constraints reliably throws NullPointerException
+      // on Android in expo-sqlite v2.
+      await db.execAsync(`CREATE TABLE IF NOT EXISTS accounts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        balance REAL NOT NULL DEFAULT 0,
+        accountType TEXT NOT NULL DEFAULT 'bank',
+        creditLimit REAL,
+        statementDay INTEGER,
+        billDueDay INTEGER,
+        startDate TEXT NOT NULL,
+        lastScannedDate TEXT,
+        last4Digits TEXT,
+        displayOrder INTEGER DEFAULT 0,
+        startingBalance REAL DEFAULT 0
+      );`);
 
-  await db.execAsync(`CREATE TABLE IF NOT EXISTS transactions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    amount REAL NOT NULL,
-    category TEXT NOT NULL,
-    merchant TEXT NOT NULL,
-    type TEXT NOT NULL DEFAULT 'debit',
-    date TEXT NOT NULL,
-    accountId INTEGER,
-    isConfirmed INTEGER DEFAULT 0,
-    rawSms TEXT,
-    isRecurring INTEGER DEFAULT 0,
-    recurrenceRule TEXT,
-    notes TEXT,
-    subscriptionId INTEGER,
-    goalId INTEGER,
-    loanId INTEGER,
-    confidence TEXT DEFAULT 'medium',
-    source TEXT DEFAULT 'manual',
-    isTransfer INTEGER DEFAULT 0,
-    tags TEXT,
-    balanceAfter REAL,
-    toAccountId INTEGER,
-    FOREIGN KEY(accountId) REFERENCES accounts(id) ON DELETE SET NULL,
-    FOREIGN KEY(toAccountId) REFERENCES accounts(id) ON DELETE SET NULL
-  );`);
+      await db.execAsync(`CREATE TABLE IF NOT EXISTS categories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        icon TEXT NOT NULL,
+        color TEXT NOT NULL,
+        type TEXT NOT NULL DEFAULT 'expense',
+        parentId INTEGER,
+        FOREIGN KEY(parentId) REFERENCES categories(id) ON DELETE CASCADE,
+        UNIQUE(name, parentId)
+      );`);
 
-  await db.execAsync(`CREATE TABLE IF NOT EXISTS budgets (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    categoryName TEXT NOT NULL,
-    amount REAL NOT NULL,
-    period TEXT NOT NULL DEFAULT 'monthly',
-    startDate TEXT NOT NULL
-  );`);
+      await db.execAsync(`CREATE TABLE IF NOT EXISTS transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        amount REAL NOT NULL,
+        category TEXT NOT NULL,
+        merchant TEXT NOT NULL,
+        type TEXT NOT NULL DEFAULT 'debit',
+        date TEXT NOT NULL,
+        accountId INTEGER,
+        isConfirmed INTEGER DEFAULT 0,
+        rawSms TEXT,
+        isRecurring INTEGER DEFAULT 0,
+        recurrenceRule TEXT,
+        notes TEXT,
+        subscriptionId INTEGER,
+        goalId INTEGER,
+        loanId INTEGER,
+        confidence TEXT DEFAULT 'medium',
+        source TEXT DEFAULT 'manual',
+        isTransfer INTEGER DEFAULT 0,
+        tags TEXT,
+        balanceAfter REAL,
+        toAccountId INTEGER,
+        FOREIGN KEY(accountId) REFERENCES accounts(id) ON DELETE SET NULL,
+        FOREIGN KEY(toAccountId) REFERENCES accounts(id) ON DELETE SET NULL
+      );`);
 
-  await db.execAsync(`CREATE TABLE IF NOT EXISTS insights (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    type TEXT NOT NULL,
-    title TEXT NOT NULL,
-    body TEXT NOT NULL,
-    generatedAt TEXT NOT NULL,
-    dismissedAt TEXT
-  );`);
+      await db.execAsync(`CREATE TABLE IF NOT EXISTS budgets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        categoryName TEXT NOT NULL,
+        amount REAL NOT NULL,
+        period TEXT NOT NULL DEFAULT 'monthly',
+        startDate TEXT NOT NULL
+      );`);
 
-  await db.execAsync(`CREATE TABLE IF NOT EXISTS merchant_mappings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    merchantRaw TEXT NOT NULL,
-    merchantClean TEXT NOT NULL,
-    categoryName TEXT NOT NULL,
-    usageCount INTEGER DEFAULT 1,
-    UNIQUE(merchantRaw)
-  );`);
+      await db.execAsync(`CREATE TABLE IF NOT EXISTS insights (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        generatedAt TEXT NOT NULL,
+        dismissedAt TEXT
+      );`);
 
-  await db.execAsync(`CREATE TABLE IF NOT EXISTS sms_hashes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    hash TEXT NOT NULL UNIQUE,
-    processedAt TEXT NOT NULL
-  );`);
+      await db.execAsync(`CREATE TABLE IF NOT EXISTS merchant_mappings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        merchantRaw TEXT NOT NULL,
+        merchantClean TEXT NOT NULL,
+        categoryName TEXT NOT NULL,
+        usageCount INTEGER DEFAULT 1,
+        UNIQUE(merchantRaw)
+      );`);
 
-  await db.execAsync(`CREATE TABLE IF NOT EXISTS subscriptions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    amount REAL NOT NULL,
-    category TEXT NOT NULL,
-    frequency TEXT NOT NULL DEFAULT 'monthly',
-    nextDueDate TEXT NOT NULL,
-    lastPaidDate TEXT,
-    isActive INTEGER DEFAULT 1,
-    debitAccountId INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
-    splitEnabled INTEGER DEFAULT 0,
-    splitMembers TEXT,
-    notes TEXT
-  );`);
+      await db.execAsync(`CREATE TABLE IF NOT EXISTS sms_hashes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        hash TEXT NOT NULL UNIQUE,
+        processedAt TEXT NOT NULL
+      );`);
 
-  await db.execAsync(`CREATE TABLE IF NOT EXISTS goals (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    targetAmount REAL NOT NULL,
-    currentAmount REAL NOT NULL DEFAULT 0,
-    deadline TEXT,
-    category TEXT NOT NULL,
-    isActive INTEGER DEFAULT 1,
-    linkedAccountId INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
-    monthlyContribution REAL,
-    notes TEXT
-  );`);
+      await db.execAsync(`CREATE TABLE IF NOT EXISTS subscriptions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        amount REAL NOT NULL,
+        category TEXT NOT NULL,
+        frequency TEXT NOT NULL DEFAULT 'monthly',
+        nextDueDate TEXT NOT NULL,
+        lastPaidDate TEXT,
+        isActive INTEGER DEFAULT 1,
+        debitAccountId INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
+        splitEnabled INTEGER DEFAULT 0,
+        splitMembers TEXT,
+        notes TEXT
+      );`);
 
-  await db.execAsync(`CREATE TABLE IF NOT EXISTS loans (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    lender TEXT NOT NULL,
-    totalAmount REAL NOT NULL,
-    remainingAmount REAL NOT NULL,
-    emiAmount REAL NOT NULL,
-    nextDueDate TEXT NOT NULL,
-    interestRate REAL,
-    isActive INTEGER DEFAULT 1,
-    type TEXT DEFAULT 'borrowed',
-    linkedAccountId INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
-    tenure INTEGER,
-    notes TEXT
-  );`);
+      await db.execAsync(`CREATE TABLE IF NOT EXISTS goals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        targetAmount REAL NOT NULL,
+        currentAmount REAL NOT NULL DEFAULT 0,
+        deadline TEXT,
+        category TEXT NOT NULL,
+        isActive INTEGER DEFAULT 1,
+        linkedAccountId INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
+        monthlyContribution REAL,
+        notes TEXT
+      );`);
 
-  await db.execAsync(`CREATE TABLE IF NOT EXISTS splits (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    transactionId INTEGER,
-    title TEXT NOT NULL,
-    totalAmount REAL NOT NULL,
-    paidByAccountId INTEGER,
-    receiveToAccountId INTEGER,
-    date TEXT NOT NULL,
-    notes TEXT,
-    FOREIGN KEY(transactionId) REFERENCES transactions(id) ON DELETE SET NULL,
-    FOREIGN KEY(paidByAccountId) REFERENCES accounts(id) ON DELETE SET NULL,
-    FOREIGN KEY(receiveToAccountId) REFERENCES accounts(id) ON DELETE SET NULL
-  );`);
+      await db.execAsync(`CREATE TABLE IF NOT EXISTS loans (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        lender TEXT NOT NULL,
+        totalAmount REAL NOT NULL,
+        remainingAmount REAL NOT NULL,
+        emiAmount REAL NOT NULL,
+        nextDueDate TEXT NOT NULL,
+        interestRate REAL,
+        isActive INTEGER DEFAULT 1,
+        type TEXT DEFAULT 'borrowed',
+        linkedAccountId INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
+        tenure INTEGER,
+        notes TEXT
+      );`);
 
-  await db.execAsync(`CREATE TABLE IF NOT EXISTS split_members (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    splitId INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    share REAL NOT NULL,
-    isMe INTEGER NOT NULL DEFAULT 0,
-    isPaid INTEGER NOT NULL DEFAULT 0,
-    paidDate TEXT,
-    repaidToAccountId INTEGER,
-    FOREIGN KEY(splitId) REFERENCES splits(id) ON DELETE CASCADE,
-    FOREIGN KEY(repaidToAccountId) REFERENCES accounts(id) ON DELETE SET NULL
-  );`);
+      await db.execAsync(`CREATE TABLE IF NOT EXISTS splits (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        transactionId INTEGER,
+        title TEXT NOT NULL,
+        totalAmount REAL NOT NULL,
+        paidByAccountId INTEGER,
+        receiveToAccountId INTEGER,
+        date TEXT NOT NULL,
+        notes TEXT,
+        FOREIGN KEY(transactionId) REFERENCES transactions(id) ON DELETE SET NULL,
+        FOREIGN KEY(paidByAccountId) REFERENCES accounts(id) ON DELETE SET NULL,
+        FOREIGN KEY(receiveToAccountId) REFERENCES accounts(id) ON DELETE SET NULL
+      );`);
 
+      await db.execAsync(`CREATE TABLE IF NOT EXISTS split_members (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        splitId INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        share REAL NOT NULL,
+        isMe INTEGER NOT NULL DEFAULT 0,
+        isPaid INTEGER NOT NULL DEFAULT 0,
+        paidDate TEXT,
+        repaidToAccountId INTEGER,
+        FOREIGN KEY(splitId) REFERENCES splits(id) ON DELETE CASCADE,
+        FOREIGN KEY(repaidToAccountId) REFERENCES accounts(id) ON DELETE SET NULL
+      );`);
+
+      await db.execAsync(`CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT
+      );`);
+
+      // Run Migrations & Seeding
+      await runMigrations();
+      await seedDatabase();
+    } catch (err) {
+      initPromise = null; // Reset on failure so we can retry
+      throw err;
+    }
+  })();
+
+  return initPromise;
+};
+
+const runMigrations = async () => {
+  // Indexes
   await db.execAsync('CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date DESC);');
   await db.execAsync('CREATE INDEX IF NOT EXISTS idx_transactions_category ON transactions(category);');
   await db.execAsync('CREATE INDEX IF NOT EXISTS idx_transactions_confirmed ON transactions(isConfirmed);');
   await db.execAsync('CREATE INDEX IF NOT EXISTS idx_subscriptions_next ON subscriptions(nextDueDate);');
   await db.execAsync('CREATE INDEX IF NOT EXISTS idx_goals_category ON goals(category);');
-  // Dedup indexes — keep semantic and rawSms duplicate checks fast
   await db.execAsync('CREATE INDEX IF NOT EXISTS idx_transactions_dedup ON transactions(amount, type, accountId, date);');
   await db.execAsync('CREATE INDEX IF NOT EXISTS idx_transactions_rawsms ON transactions(rawSms);');
 
-  // Migrations — safe to re-run
+  // Legacy migrations (catch failures if columns already exist)
   const migrations = [
     'ALTER TABLE transactions ADD COLUMN isRecurring INTEGER DEFAULT 0',
     'ALTER TABLE transactions ADD COLUMN recurrenceRule TEXT',
@@ -381,21 +405,16 @@ export const initDatabase = async () => {
     'ALTER TABLE transactions ADD COLUMN isTransfer INTEGER DEFAULT 0',
     'ALTER TABLE transactions ADD COLUMN tags TEXT',
     'ALTER TABLE accounts ADD COLUMN last4Digits TEXT',
-    // Subscription enhancements
     'ALTER TABLE subscriptions ADD COLUMN debitAccountId INTEGER REFERENCES accounts(id) ON DELETE SET NULL',
     'ALTER TABLE subscriptions ADD COLUMN splitEnabled INTEGER DEFAULT 0',
     'ALTER TABLE subscriptions ADD COLUMN splitMembers TEXT',
     'ALTER TABLE subscriptions ADD COLUMN notes TEXT',
-    // Goal enhancements
     'ALTER TABLE goals ADD COLUMN linkedAccountId INTEGER REFERENCES accounts(id) ON DELETE SET NULL',
     'ALTER TABLE goals ADD COLUMN monthlyContribution REAL',
     'ALTER TABLE goals ADD COLUMN notes TEXT',
-    // Loan enhancements
     'ALTER TABLE loans ADD COLUMN linkedAccountId INTEGER REFERENCES accounts(id) ON DELETE SET NULL',
     'ALTER TABLE loans ADD COLUMN tenure INTEGER',
     'ALTER TABLE loans ADD COLUMN notes TEXT',
-    // Tags
-    'ALTER TABLE transactions ADD COLUMN tags TEXT',
     'ALTER TABLE accounts ADD COLUMN displayOrder INTEGER DEFAULT 0',
     'ALTER TABLE transactions ADD COLUMN balanceAfter REAL',
     'ALTER TABLE accounts ADD COLUMN startingBalance REAL DEFAULT 0',
@@ -410,17 +429,11 @@ export const initDatabase = async () => {
   const dbVersion = versionRow?.user_version ?? 0;
 
   if (dbVersion < 1) {
-    // v1: sms_hashes was recording every parsed SMS, not just confirmed/saved ones.
-    // This caused Smart Scan to show "Nothing Found" on every scan after the first.
-    // Clear the table — new code only writes here when user saves a transaction.
     await db.execAsync('DELETE FROM sms_hashes');
     await db.execAsync('PRAGMA user_version = 1');
   }
 
   if (dbVersion < 2) {
-    // v2: categories.name had a global UNIQUE constraint which prevents subcategories
-    // from sharing a name with any other category (e.g. "Other" under Food AND Transport).
-    // Recreate the table with UNIQUE(name, parentId) instead.
     await db.execAsync('PRAGMA foreign_keys = OFF');
     await db.execAsync(`
       CREATE TABLE IF NOT EXISTS categories_new (
@@ -444,9 +457,7 @@ export const initDatabase = async () => {
     await db.execAsync('PRAGMA user_version = 2');
   }
 
-  // v3: Migrate legacy Lucide icon names → emoji for seeded categories
-  const v3 = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
-  if (v3 && v3.user_version < 3) {
+  if (dbVersion < 3) {
     const lucideToEmoji: Record<string, string> = {
       Coffee: '☕', Car: '🚗', ShoppingBag: '🛍️', Zap: '⚡', Tv: '📺',
       Heart: '❤️', TrendingUp: '📈', Briefcase: '💼', RotateCw: '🔄',
@@ -466,19 +477,12 @@ export const initDatabase = async () => {
       Moon: '🌙', Star: '⭐', Disc: '💿', Printer: '🖨️',
     };
     for (const [lucideName, emoji] of Object.entries(lucideToEmoji)) {
-      // Only update rows where icon is exactly the PascalCase Lucide name (safe — emoji never match PascalCase)
-      await db.runAsync(
-        'UPDATE categories SET icon = ? WHERE icon = ?',
-        emoji, lucideName
-      );
+      await db.runAsync('UPDATE categories SET icon = ? WHERE icon = ?', emoji, lucideName);
     }
     await db.execAsync('PRAGMA user_version = 3');
   }
 
   if (dbVersion < 4) {
-    // v4: Cleanup duplicated categories caused by seeding bug.
-    // Group by name and parentId (coalescing NULL to 0 for grouping).
-    // Keep only the one with the smallest ID.
     await db.execAsync(`
       DELETE FROM categories 
       WHERE id NOT IN (
@@ -489,84 +493,60 @@ export const initDatabase = async () => {
     `);
     await db.execAsync('PRAGMA user_version = 4');
   }
+};
 
+export const seedDatabase = async () => {
   // Seed initial categories (ensure base defaults always exist)
-  // [name, emoji, color, type]
   const seedCategories: [string, string, string, string][] = [
-      // Expense — root categories
-      ['Food & Dining', '🍽️', '#FF9500', 'expense'],
-      ['Transport', '🚗', '#30D158', 'expense'],
-      ['Shopping', '🛍️', '#BF5AF2', 'expense'],
-      ['Housing', '🏠', '#0A84FF', 'expense'],
-      ['Utilities', '💡', '#32ADE6', 'expense'],
-      ['Health', '💊', '#FF375F', 'expense'],
-      ['Entertainment', '🎬', '#FF453A', 'expense'],
-      ['Education', '🎓', '#5856D6', 'expense'],
-      ['Travel', '🌍', '#00C7BE', 'expense'],
-      ['Family', '❤️', '#FF2D55', 'expense'],
-      ['Subscriptions', '📡', '#AF52DE', 'expense'],
-      ['Personal Care', '🧴', '#FFCC00', 'expense'],
-      ['Other', '⭐', '#8E8E93', 'expense'],
-      // Income — root categories
-      ['Salary', '💰', '#34C759', 'income'],
-      ['Freelance', '💻', '#5AC8FA', 'income'],
-      ['Investments', '📈', '#30D158', 'income'],
-      ['Other Income', '⭐', '#8E8E93', 'income'],
-      // Transfer
-      ['Transfer', '🔄', '#FF9500', 'transfer'],
-    ];
+    ['Food & Dining', '🍽️', '#FF9500', 'expense'],
+    ['Transport', '🚗', '#30D158', 'expense'],
+    ['Shopping', '🛍️', '#BF5AF2', 'expense'],
+    ['Housing', '🏠', '#0A84FF', 'expense'],
+    ['Utilities', '💡', '#32ADE6', 'expense'],
+    ['Health', '💊', '#FF375F', 'expense'],
+    ['Entertainment', '🎬', '#FF453A', 'expense'],
+    ['Education', '🎓', '#5856D6', 'expense'],
+    ['Travel', '🌍', '#00C7BE', 'expense'],
+    ['Family', '❤️', '#FF2D55', 'expense'],
+    ['Subscriptions', '📡', '#AF52DE', 'expense'],
+    ['Personal Care', '🧴', '#FFCC00', 'expense'],
+    ['Other', '⭐', '#8E8E93', 'expense'],
+    ['Salary', '💰', '#34C759', 'income'],
+    ['Freelance', '💻', '#5AC8FA', 'income'],
+    ['Investments', '📈', '#30D158', 'income'],
+    ['Other Income', '⭐', '#8E8E93', 'income'],
+    ['Transfer', '🔄', '#FF9500', 'transfer'],
+  ];
 
-    for (const [name, icon, color, type] of seedCategories) {
-      const exists = await db.getFirstAsync('SELECT id FROM categories WHERE name = ? AND parentId IS NULL', name);
-      if (!exists) {
-        await db.runAsync(
-          'INSERT INTO categories (name, icon, color, type, parentId) VALUES (?, ?, ?, ?, NULL)',
-          name, icon, color, type
-        );
-      }
+  for (const [name, icon, color, type] of seedCategories) {
+    const exists = await db.getFirstAsync('SELECT id FROM categories WHERE name = ? AND parentId IS NULL', name);
+    if (!exists) {
+      await db.runAsync('INSERT INTO categories (name, icon, color, type, parentId) VALUES (?, ?, ?, ?, NULL)', name, icon, color, type);
     }
+  }
 
-    // Seed subcategories — Food
-    const foodRow = await db.getFirstAsync<{ id: number }>('SELECT id FROM categories WHERE name = ? AND parentId IS NULL', 'Food & Dining');
-    if (foodRow) {
-      const foodSubs: [string, string][] = [['Coffee & Cafes', '☕'], ['Groceries', '🛒'], ['Fast Food', '🍔'], ['Restaurants', '🍜'], ['Takeout & Delivery', '🥡'], ['Drinks & Alcohol', '🍺']];
-      for (const [n, i] of foodSubs) {
-        const exists = await db.getFirstAsync('SELECT id FROM categories WHERE name = ? AND parentId = ?', n, foodRow.id);
-        if (!exists) await db.runAsync('INSERT INTO categories (name, icon, color, type, parentId) VALUES (?, ?, ?, ?, ?)', n, i, '#FF9500', 'expense', foodRow.id);
+  const seedSub = async (parentName: string, subs: [string, string][], color: string) => {
+    const parent = await db.getFirstAsync<{ id: number }>('SELECT id FROM categories WHERE name = ? AND parentId IS NULL', parentName);
+    if (parent) {
+      for (const [n, i] of subs) {
+        const exists = await db.getFirstAsync('SELECT id FROM categories WHERE name = ? AND parentId = ?', n, parent.id);
+        if (!exists) await db.runAsync('INSERT INTO categories (name, icon, color, type, parentId) VALUES (?, ?, ?, ?, ?)', n, i, color, 'expense', parent.id);
       }
     }
-    // Transport subs
-    const txRow = await db.getFirstAsync<{ id: number }>('SELECT id FROM categories WHERE name = ? AND parentId IS NULL', 'Transport');
-    if (txRow) {
-      const txSubs: [string, string][] = [['Fuel', '⛽'], ['Taxi & Rides', '🚕'], ['Public Transit', '🚌'], ['Parking', '🅿️'], ['Flight', '✈️'], ['Maintenance', '🔧']];
-      for (const [n, i] of txSubs) {
-        const exists = await db.getFirstAsync('SELECT id FROM categories WHERE name = ? AND parentId = ?', n, txRow.id);
-        if (!exists) await db.runAsync('INSERT INTO categories (name, icon, color, type, parentId) VALUES (?, ?, ?, ?, ?)', n, i, '#30D158', 'expense', txRow.id);
-      }
-    }
-    // Shopping subs
-    const shopRow = await db.getFirstAsync<{ id: number }>('SELECT id FROM categories WHERE name = ? AND parentId IS NULL', 'Shopping');
-    if (shopRow) {
-      const shopSubs: [string, string][] = [['Clothing', '👗'], ['Electronics', '📱'], ['Groceries', '🛒'], ['Gifts', '🎁'], ['Online Orders', '📦']];
-      for (const [n, i] of shopSubs) {
-        const exists = await db.getFirstAsync('SELECT id FROM categories WHERE name = ? AND parentId = ?', n, shopRow.id);
-        if (!exists) await db.runAsync('INSERT INTO categories (name, icon, color, type, parentId) VALUES (?, ?, ?, ?, ?)', n, i, '#BF5AF2', 'expense', shopRow.id);
-      }
-    }
-    // Health subs
-    const healthRow = await db.getFirstAsync<{ id: number }>('SELECT id FROM categories WHERE name = ? AND parentId IS NULL', 'Health');
-    if (healthRow) {
-      const healthSubs: [string, string][] = [['Doctor / Clinic', '🩺'], ['Pharmacy', '💊'], ['Gym & Fitness', '💪'], ['Dental', '🦷'], ['Lab Tests', '🧬']];
-      for (const [n, i] of healthSubs) {
-        const exists = await db.getFirstAsync('SELECT id FROM categories WHERE name = ? AND parentId = ?', n, healthRow.id);
-        if (!exists) await db.runAsync('INSERT INTO categories (name, icon, color, type, parentId) VALUES (?, ?, ?, ?, ?)', n, i, '#FF375F', 'expense', healthRow.id);
-      }
-    }
+  };
 
-  await db.execAsync(`CREATE TABLE IF NOT EXISTS app_settings (
-    key TEXT PRIMARY KEY,
-    value TEXT
-  );`);
+  await seedSub('Food & Dining', [['Coffee & Cafes', '☕'], ['Groceries', '🛒'], ['Fast Food', '🍔'], ['Restaurants', '🍜'], ['Takeout & Delivery', '🥡'], ['Drinks & Alcohol', '🍺']], '#FF9500');
+  await seedSub('Transport', [['Fuel', '⛽'], ['Taxi & Rides', '🚕'], ['Public Transit', '🚌'], ['Parking', '🅿️'], ['Flight', '✈️'], ['Maintenance', '🔧']], '#30D158');
+  await seedSub('Shopping', [['Clothing', '👗'], ['Electronics', '📱'], ['Groceries', '🛒'], ['Gifts', '🎁'], ['Online Orders', '📦']], '#BF5AF2');
+  await seedSub('Health', [['Doctor / Clinic', '🩺'], ['Pharmacy', '💊'], ['Gym & Fitness', '💪'], ['Dental', '🦷'], ['Lab Tests', '🧬']], '#FF375F');
+  await seedSub('Housing', [['Rent', '🏠'], ['Maintenance', '🔧'], ['Property Tax', '🏦'], ['Home Insurance', '🛡️'], ['Furniture', '🪑']], '#0A84FF');
+  await seedSub('Utilities', [['Electricity', '⚡'], ['Water', '💧'], ['Gas', '🔥'], ['Internet', '🌐'], ['Phone', '📱']], '#32ADE6');
+  await seedSub('Entertainment', [['Movies', '🎬'], ['Gaming', '🎮'], ['Streaming', '📺'], ['Events / Tickets', '🎫'], ['Hobbies', '🎨']], '#FF453A');
+  await seedSub('Education', [['Tuition / Fees', '🎓'], ['Books', '📚'], ['Courses', '📖'], ['School Supplies', '✏️']], '#5856D6');
+  await seedSub('Travel', [['Flights', '✈️'], ['Hotels', '🏨'], ['Activities', '🏄'], ['Visa Fees', '🛂']], '#00C7BE');
+  await seedSub('Family', [['Kids', '👶'], ['Spouse', '❤️'], ['Parents', '👨‍🦳'], ['Gifts', '🎁']], '#FF2D55');
+  await seedSub('Subscriptions', [['OTT Apps', '📡'], ['Magazines', '📰'], ['Software', '💻'], ['Gym Membership', '💪']], '#AF52DE');
+  await seedSub('Personal Care', [['Salon', '💇'], ['Cosmetics', '💄'], ['Spa', '🧖'], ['Laundry', '🧺']], '#FFCC00');
 };
 
 /** 
@@ -1464,7 +1444,10 @@ export const getAccountScanRanges = async (): Promise<AccountScanRange[]> => {
       ? Math.max(...candidates)
       : new Date(a.startDate).getTime();
 
-    ranges.push({ account: a, fromMs });
+    // Safety overlap: re-scan the last 1 hour to catch delayed SMS or minor clock skews.
+    // Our hash-based and semantic deduplication layers safely handle any overlapping results.
+    const overlapMs = 60 * 60 * 1000; 
+    ranges.push({ account: a, fromMs: Math.max(0, fromMs - overlapMs) });
   }
   return ranges;
 };
@@ -2098,6 +2081,7 @@ export const debugDump = async (): Promise<string> => {
 
 export const resetAllData = async () => {
   // Delete in dependency order to satisfy FK constraints (children before parents).
+  // We use DELETE instead of DROP to maintain a stable connection and avoid NullPointerExceptions in SQLite v2.
   await db.execAsync('DELETE FROM split_members;');
   await db.execAsync('DELETE FROM splits;');
   await db.execAsync('DELETE FROM transactions;');
@@ -2109,6 +2093,11 @@ export const resetAllData = async () => {
   await db.execAsync('DELETE FROM insights;');
   await db.execAsync('DELETE FROM merchant_mappings;');
   await db.execAsync('DELETE FROM sms_hashes;');
+  await db.execAsync('DELETE FROM app_settings;');
+  await db.execAsync('DELETE FROM categories;');
+  
+  // Re-seed default categories so the app isn't empty after reset
+  await seedDatabase();
 };
 
 

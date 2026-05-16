@@ -63,14 +63,20 @@ export function hashSms(str: string): string {
 
 /** Normalize a merchant name */
 function normalizeMerchant(raw: string): string {
-  return raw
+  // If it's all caps and long, title-case it. Otherwise preserve casing.
+  const clean = raw
     .replace(/\*[A-Z0-9]+/g, '')
     .replace(/\d{6,}/g, '')
     .replace(/\s+/g, ' ')
-    .trim()
-    .split(' ')
-    .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-    .join(' ');
+    .trim();
+  
+  if (clean === clean.toUpperCase() && clean.length > 3) {
+    return clean
+      .split(' ')
+      .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join(' ');
+  }
+  return clean;
 }
 
 export class OllamaUnreachableError extends Error {
@@ -127,18 +133,18 @@ const BALANCE_RE = /(?:avail(?:able)?\s*(?:bal(?:ance)?)?|avl\.?\s*bal\.?|avbl\.
 // "declined", "failed", etc. — these are NOT completed transactions
 const DECLINED_RE = /\b(?:declined|failed|rejected|unsuccessful|not\s+processed|reversal|reversed|could\s+not\s+process)\b/i;
 
-const DEBIT_WORDS = ['debited', 'debit', 'spent', 'paid', 'payment', 'purchase', 'withdrawn', 'withdrawal', 'used', 'charged', 'dr '];
-const CREDIT_WORDS = ['credited', 'credit', 'received', 'deposited', 'deposit', 'refund', 'cashback', 'cr '];
-const TRANSFER_WORDS = ['transfer', 'neft', 'imps', 'rtgs'];
+const DEBIT_WORDS = ['debited', 'debit', 'spent', 'paid', 'payment', 'purchase', 'withdrawn', 'withdrawal', 'used', 'charged', 'dr'];
+const CREDIT_WORDS = ['credited', 'credit', 'received', 'deposited', 'deposit', 'refund', 'cashback', 'cr', 'salary', 'income', 'stipend'];
+const TRANSFER_WORDS = ['transfer', 'neft', 'imps', 'rtgs', 'own a/c'];
 
 // Ordered from most-specific to least-specific.
 // "from MERCHANT" added for credit-style SMS ("received from Infosys").
 // UPI VPA pattern anchored with word boundary to avoid matching email addresses.
 const MERCHANT_PATTERNS = [
-  /\bat\s+([A-Za-z][A-Za-z0-9 &'.\-]{2,30}?)(?:\s+on\b|\s+for\b|\s+ref|\s+txn|\s+upi|[,.]|$)/i,
-  /\bto\s+([A-Za-z][A-Za-z0-9 &'.\-]{2,30}?)(?:\s+on\b|\s+for\b|\s+ref|\s+upi|[,.]|$)/i,
-  /\bfrom\s+([A-Za-z][A-Za-z0-9 &'.\-]{2,30}?)(?:\s+on\b|\s+for\b|\s+ref|\s+upi|[,.]|$)/i,
-  /\bfor\s+([A-Za-z][A-Za-z0-9 &'.\-]{2,30}?)(?:\s+on\b|\s+ref|\s+upi|[,.]|$)/i,
+  /\bat\s+([A-Za-z][A-Za-z0-9 &'.\-]{2,30}?)(?:\s+on\b|\s+for\b|\s+ref|\s+txn|\s+upi|\s+at\b|[,.]|$)/i,
+  /\bto\s+([A-Za-z][A-Za-z0-9 &'.\-]{2,30}?)(?:\s+on\b|\s+for\b|\s+ref|\s+txn|\s+upi|\s+at\b|[,.]|$)/i,
+  /\bfrom\s+([A-Za-z][A-Za-z0-9 &'.\-]{2,30}?)(?:\s+on\b|\s+for\b|\s+ref|\s+txn|\s+upi|\s+at\b|[,.]|$)/i,
+  /\bfor\s+([A-Za-z][A-Za-z0-9 &'.\-]{2,30}?)(?:\s+on\b|\s+ref|\s+txn|\s+upi|\s+at\b|[,.]|$)/i,
   /\b([A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z]{2,})\b/i,  // UPI VPA (e.g. merchant@okaxis)
 ];
 
@@ -164,8 +170,8 @@ const CATEGORY_KEYWORDS: Array<{ keys: string[]; category: string }> = [
   { keys: ['school', 'college', 'university', 'tuition', 'coaching', 'udemy', 'coursera', 'byju', 'unacademy', 'fees', 'admission'], category: 'Education' },
   { keys: ['insurance', 'lic', 'premium', 'policy', 'star health', 'hdfc life', 'max life', 'bajaj allianz'], category: 'Insurance' },
   { keys: ['mutual fund', 'zerodha', 'groww', 'kuvera', 'navi', 'coin', 'sip', 'investment', 'demat', 'nps', 'ppf', 'elss'], category: 'Investments' },
-  { keys: ['salary', 'payroll', 'income', 'stipend'], category: 'Salary' },
-  { keys: ['neft', 'imps', 'rtgs', 'upi', 'transfer', 'wallet'], category: 'Transfer' },
+  { keys: ['salary', 'payroll', 'income', 'stipend', 'dividends', 'interests'], category: 'Salary' },
+  { keys: ['neft', 'imps', 'rtgs', 'upi', 'transfer', 'wallet', 'own a/c', 'self transfer'], category: 'Transfer' },
   { keys: ['emi', 'loan', 'repayment', 'instalment', 'installment'], category: 'Loan Payment' },
 ];
 
@@ -336,6 +342,13 @@ function parseSmsFallback(
     if (hint?.category) category = hint.category;
   }
 
+  // ── 6. Confidence adjustment ─────────────────────────────────────────────
+  // If we have a last4 match AND a clear amount, boost confidence
+  let confidence: 'high' | 'medium' | 'low' = 'medium';
+  if (amount > 0 && matchedAccount?.matchType === 'last4') {
+    confidence = 'high';
+  }
+
   return {
     isTransaction: true,
     transaction: {
@@ -347,11 +360,11 @@ function parseSmsFallback(
       isConfirmed: false,
       rawSms: smsBody,
       isRecurring: false,
-      confidence: 'medium',
+      confidence,
       source: 'sms',
       balanceAfter,
     },
-    confidence: 'medium',
+    confidence,
     alreadySaved: false,
     suggestedAccountId: matchedAccount?.id ?? accounts[0]?.id,
     isAnomaly: false,
@@ -519,7 +532,8 @@ Return ONLY valid JSON in this exact format:
 
 Rules:
 - isTransaction MUST be true ONLY for a completed, executed money movement (debit/credit/transfer actually happened).
-  Set isTransaction to false for: credit card due reminders, minimum due alerts, payment reminders, bill statements, balance alerts, promotional offers, cashback earned notices, OTPs, limit change alerts, loan disbursal pending notifications.
+- Note: Many valid Indian bank SMS include a security footer like "Trxn. not done by you? Report at..." or "If not done by you, call...". These are NOT failure notices; if the SMS also says "spent", "debited", or "charged", it IS a valid transaction.
+- Set isTransaction to false for: credit card due reminders, minimum due alerts, payment reminders, bill statements, balance alerts, promotional offers, cashback earned notices, OTPs, limit change alerts, loan disbursal pending notifications.
 - confidence "high" = amount + merchant + type all clearly stated; "low" = SMS is ambiguous or some fields must be inferred.
 - amount must be a positive number (absolute value). Set 0 if isTransaction is false.
 - type: "credit" if money entered the account, "debit" if money left, "transfer" if between user's own accounts. UPI sent = debit, UPI received = credit.
@@ -709,35 +723,36 @@ export function matchSmsToAccount(smsBody: string, accounts: Account[]): SmsAcco
 
   const lower = smsBody.toLowerCase();
 
-  // ── 1. Last-4-digits match (strongest signal) ──────────────────────────────
-  // Covers: "a/c XX1234", "card 1234", "ending 1234", "ending in 1234",
-  //         "no. 1234", "xx 1234", "X 1234", "thru 1234"
+  // ── 0. High-Priority: Absolute Last-4 match ──────────────────────────────
+  // If any 4-digit sequence in the SMS exactly matches a registered account's 
+  // last4Digits, we prioritize that above all else. This handles non-standard 
+  // bank formats that might skip "ending" or "a/c" keywords.
+  const accountsWith4 = trackable.filter(a => a.last4Digits);
+  if (accountsWith4.length > 0) {
+    const all4DigitGroups = smsBody.match(/\b\d{4}\b/g) ?? [];
+    for (const d of all4DigitGroups) {
+      const hit = accountsWith4.find(a => a.last4Digits === d);
+      if (hit) return { ...hit, matchType: 'last4' };
+    }
+    // Also check last 4 of masked runs (e.g. "X6060", "*6060", "xxxx6060")
+    const maskedRuns = smsBody.match(/[*xX\d]{5,}/g) ?? [];
+    for (const run of maskedRuns) {
+      const digits = run.replace(/[^0-9]/g, '');
+      const suffix = digits.slice(-4);
+      if (suffix.length === 4) {
+        const hit = accountsWith4.find(a => a.last4Digits === suffix);
+        if (hit) return { ...hit, matchType: 'last4' };
+      }
+    }
+  }
+
+  // ── 1. Keyword-anchored Last-4-digits match ──────────────────────────────
   const last4Pattern = /(?:a\/c|acct?|account|card|ending|ending\s+with|ending\s+in|no\.?|xx+|x+|thru|on)(?:\s+with|\s+number)?\s*[*xX\d]*?(\d{4})\b/gi;
   let m: RegExpExecArray | null;
   while ((m = last4Pattern.exec(smsBody)) !== null) {
     const digits = m[1];
     const hit = trackable.find(a => a.last4Digits && a.last4Digits === digits);
     if (hit) return { ...hit, matchType: 'last4' };
-  }
-
-  // Also catch bare 4-digit groups (e.g. "linked to 4321", "VPA xxxxxx4321")
-  // Only check accounts that have last4Digits set to avoid false positives.
-  const accountsWith4 = trackable.filter(a => a.last4Digits);
-  if (accountsWith4.length > 0) {
-    const bareDigits = smsBody.match(/\b\d{4}\b/g) ?? [];
-    for (const d of bareDigits) {
-      const hit = accountsWith4.find(a => a.last4Digits === d);
-      if (hit) return { ...hit, matchType: 'last4' };
-    }
-    // Also check last 4 of longer digit runs (e.g. "xxxxxx1234")
-    const longRuns = smsBody.match(/[xX*\d]{6,}/g) ?? [];
-    for (const run of longRuns) {
-      const suffix = run.replace(/[^0-9]/g, '').slice(-4);
-      if (suffix.length === 4) {
-        const hit = accountsWith4.find(a => a.last4Digits === suffix);
-        if (hit) return { ...hit, matchType: 'last4' };
-      }
-    }
   }
 
   // ── 2. UPI VPA / handle → bank name keyword ────────────────────────────────

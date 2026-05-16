@@ -70,7 +70,8 @@ const BANK_KEYWORDS = [
   'withdrawn', 'deposited', 'paid', 'payment', 'purchase',
   'rs.', 'rs ', '₹', 'inr', 'upi', 'vpa', 'neft', 'imps', 'rtgs',
   'atm', 'pos', 'txn', 'transaction', 'a/c', 'acct', 'account', 'bal',
-  'deducted', 'charged', 'sent', 'amount', 'amt', 'dr ', 'cr ', 'card',
+  'deducted', 'charged', 'sent', 'amount', 'amt', 'dr', 'cr', 'card',
+  'salary', 'refund', 'cashback', 'deposited', 'deposit',
 ];
 // Always skip OTPs — never send them to AI.
 const OTP_KEYWORDS = ['otp', 'one time', 'password', 'verification code', 'one-time'];
@@ -221,8 +222,8 @@ const SmartScanScreen = ({ navigation }: any) => {
 
     // Two regexes used to gate unmatched SMS against false positives.
     // An ad may contain "50,000" but will rarely contain a banking verb.
-    const BANK_AMOUNT_RE = /(?:(?:inr|rs\.?|₹)\s*[\d,]+(?:\.\d{1,2})?)|([\d,]+(?:\.\d{1,2})?\s*(?:inr|rs\.?|₹))/i;
-    const BANK_VERB_RE   = /\b(?:debited|credited|spent|withdrawn|received|transferred|paid|deducted|charged|sent)\b/i;
+    const BANK_AMOUNT_RE = /(?:(?:inr|rs\.?|₹)\s*[\d,]+(?:\.\d{1,2})?)|([\d,]+(?:\.\d{1,2})?\s*(?:inr|rs\.?|₹))|(?:\b(?:amt|amount|of)\s+([\d,]+(?:\.\d{1,2})?))/i;
+    const BANK_VERB_RE   = /\b(?:debited|credited|spent|withdrawn|received|transferred|paid|deducted|charged|sent|deposited|deposit|salary)\b/i;
 
     let smsInbox: { body: string; date: number }[] = [];
 
@@ -264,7 +265,8 @@ const SmartScanScreen = ({ navigation }: any) => {
       }
     }
 
-    smsInbox.sort((a, b) => a.date - b.date);
+    // Sort newest first so the user sees their latest transactions immediately.
+    smsInbox.sort((a, b) => b.date - a.date);
 
     // Step 1 — cheap pre-filter: skip OTPs, skip already-processed hashes,
     // require at least one financial keyword so we don't send unrelated SMS to AI.
@@ -304,8 +306,8 @@ const SmartScanScreen = ({ navigation }: any) => {
       filtered.push({ body: sms.body, date: sms.date, matchedAccount: matched ?? undefined });
     }
 
-    // Cap at 50 messages per scan (oldest first, already sorted)
-    const capped = filtered.slice(0, 50);
+    // Cap at 100 messages per foreground scan (now newest first)
+    const capped = filtered.slice(0, 100);
     setScanTotal(capped.length);
 
     if (capped.length === 0) {

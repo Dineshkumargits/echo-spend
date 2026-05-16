@@ -44,7 +44,8 @@ const BANK_KEYWORDS = [
   'debited', 'credited', 'spent', 'received', 'transferred', 'withdrawn',
   'paid', 'payment', 'purchase', 'txn', 'upi', 'vpa', 'neft', 'imps', 'atm', 'pos',
   'inr', 'rs.', 'rs ', '₹', 'transaction', 'a/c', 'acct', 'account', 'bal',
-  'deducted', 'charged', 'sent', 'amount', 'amt', 'dr ', 'cr ', 'card',
+  'deducted', 'charged', 'sent', 'amount', 'amt', 'dr', 'cr', 'card',
+  'salary', 'refund', 'cashback', 'deposited', 'deposit',
 ];
 const OTP_KEYWORDS = ['otp', 'password', 'verification code', 'one time', 'one-time'];
 // Due reminders, promos, and balance alerts are sent to AI for classification — no EXCLUDE_KEYWORDS here.
@@ -137,8 +138,8 @@ const _doSmsScan = async (silent = false): Promise<BackgroundFetch.BackgroundFet
   const rangeByAccountId = Object.fromEntries(trackableRanges.map(r => [r.account.id, r]));
   const accountsForMatch = trackableRanges.map(r => r.account);
 
-  const BANK_AMOUNT_RE = /(?:(?:inr|rs\.?|₹)\s*[\d,]+(?:\.\d{1,2})?)|([\d,]+(?:\.\d{1,2})?\s*(?:inr|rs\.?|₹))/i;
-  const BANK_VERB_RE   = /\b(?:debited|credited|spent|withdrawn|received|transferred|paid|deducted|charged|sent)\b/i;
+  const BANK_AMOUNT_RE = /(?:(?:inr|rs\.?|₹)\s*[\d,]+(?:\.\d{1,2})?)|([\d,]+(?:\.\d{1,2})?\s*(?:inr|rs\.?|₹))|(?:\b(?:amt|amount|of)\s+([\d,]+(?:\.\d{1,2})?))/i;
+  const BANK_VERB_RE   = /\b(?:debited|credited|spent|withdrawn|received|transferred|paid|deducted|charged|sent|deposited|deposit|salary)\b/i;
 
   let smsInbox: { body: string; date: number }[] = [];
   try {
@@ -153,7 +154,7 @@ const _doSmsScan = async (silent = false): Promise<BackgroundFetch.BackgroundFet
 
     smsInbox = await new Promise<{ body: string; date: number }[]>((resolve) => {
       SmsAndroid.list(
-        JSON.stringify({ box: 'inbox', maxCount: 50, indexFrom: 0, minDate: fetchFromMs }),
+        JSON.stringify({ box: 'inbox', maxCount: 250, indexFrom: 0, minDate: fetchFromMs }),
         () => resolve([]),
         (_: number, list: string) => {
           const parsed = JSON.parse(list) as any[];
