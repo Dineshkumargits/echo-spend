@@ -24,6 +24,7 @@ import {
   Loan,
   getSubscriptions,
   Subscription,
+  getSplits,
 } from '../services/database';
 
 const DashboardScreen = ({ navigation }: any) => {
@@ -41,7 +42,7 @@ const DashboardScreen = ({ navigation }: any) => {
   const totalBalance = useMemo(() =>
     accounts.reduce((sum, acc) =>
       acc.accountType === 'credit_card' ? sum - acc.balance : sum + acc.balance
-    , 0),
+      , 0),
     [accounts]
   );
 
@@ -56,6 +57,24 @@ const DashboardScreen = ({ navigation }: any) => {
     budgetPct >= 100 ? colors.danger : budgetPct >= 80 ? colors.warning : colors.accent,
     [budgetPct, colors]
   );
+
+  const triggerHaptic = useCallback((style = Haptics.ImpactFeedbackStyle.Light) => {
+    if (preferences.hapticsEnabled) Haptics.impactAsync(style);
+  }, [preferences.hapticsEnabled]);
+
+  const formatAmount = useCallback((val: number) => {
+    if (preferences.hideAmounts) return '****';
+    return `${preferences.currency}${val.toLocaleString('en-IN')}`;
+  }, [preferences.hideAmounts, preferences.currency]);
+
+  const getDaysLeft = (date: string) => {
+    const diff = new Date(date).getTime() - new Date().getTime();
+    const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
+    if (days === 0) return 'Today';
+    if (days === 1) return 'Tomorrow';
+    if (days < 0) return 'Overdue';
+    return `${days} days left`;
+  };
 
   const loadData = useCallback(async () => {
     const [txs, accs, cats, spend, gs, ls, ss] = await Promise.all([
@@ -82,7 +101,7 @@ const DashboardScreen = ({ navigation }: any) => {
     ].sort((a, b) => new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime());
 
     setUpcoming(up);
-  }, [preferences.salaryDay]);
+  }, [preferences.salaryDay, preferences.currency, preferences.hideAmounts]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -94,15 +113,6 @@ const DashboardScreen = ({ navigation }: any) => {
   React.useEffect(() => {
     if (isFocused) loadData();
   }, [isFocused, loadData]);
-
-  const formatAmount = useCallback((val: number) => {
-    if (preferences.hideAmounts) return '****';
-    return `${preferences.currency}${val.toLocaleString('en-IN')}`;
-  }, [preferences.hideAmounts, preferences.currency]);
-
-  const triggerHaptic = useCallback((style = Haptics.ImpactFeedbackStyle.Light) => {
-    if (preferences.hapticsEnabled) Haptics.impactAsync(style);
-  }, [preferences.hapticsEnabled]);
 
   // Memoize category lookup map to avoid O(n) find on every transaction row render
   const categoryMap = useMemo(() =>
@@ -148,15 +158,15 @@ const DashboardScreen = ({ navigation }: any) => {
 
   return (
     <ThemedSafeAreaView>
-      <ScrollView 
-        className="flex-1 px-6" 
+      <ScrollView
+        className="flex-1 px-6"
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl 
-            refreshing={refreshing} 
-            onRefresh={onRefresh} 
-            colors={[colors.accent]} 
-            tintColor={colors.accent} 
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[colors.accent]}
+            tintColor={colors.accent}
           />
         }
       >
@@ -315,39 +325,64 @@ const DashboardScreen = ({ navigation }: any) => {
         {upcoming.length > 0 && (
           <View className="mb-8">
             <ThemedText className="text-xl font-bold mb-4">Upcoming Commitments</ThemedText>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} className="-mx-6 px-6">
-              {upcoming.map((item, idx) => (
-                <MotiView
-                  key={idx}
-                  from={{ opacity: 0, translateX: 20 }}
-                  animate={{ opacity: 1, translateX: 0 }}
-                  className="p-4 rounded-apple-md mr-3 w-56 border"
-                  style={{ backgroundColor: colors.surface, borderColor: colors.border }}
-                >
-                  <View className="flex-row items-center mb-3">
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              className="-mx-6 px-6"
+              contentContainerStyle={{ paddingRight: 40 }}
+            >
+              {upcoming.map((item, idx) => {
+                const color = item.type === 'goal' ? '#34C759' : (item.type === 'loan' ? '#FF9500' : '#5AC8FA');
+                const daysLeft = getDaysLeft(item.date);
+                const isOverdue = daysLeft === 'Overdue';
+
+                return (
+                  <MotiView
+                    key={idx}
+                    from={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="p-4 rounded-apple-md mr-3 w-60 border overflow-hidden"
+                    style={{ backgroundColor: colors.surface, borderColor: colors.border }}
+                  >
+                    {/* Left Accent Strip */}
                     <View
-                      className="w-8 h-8 rounded-full items-center justify-center mr-2"
-                      style={{ backgroundColor: item.type === 'goal' ? '#34C75920' : (item.type === 'loan' ? '#FF950020' : '#5AC8FA20') }}
-                    >
-                      {item.type === 'goal' ? <LucideTarget color="#34C759" size={14} /> :
-                        item.type === 'loan' ? <LucideLandmark color="#FF9500" size={14} /> :
-                          <LucideRepeat color="#5AC8FA" size={14} />}
+                      style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 4, backgroundColor: color }}
+                    />
+
+                    <View className="flex-row justify-between items-start mb-3">
+                      <View className="flex-row items-center">
+                        <View
+                          className="w-7 h-7 rounded-full items-center justify-center mr-2"
+                          style={{ backgroundColor: `${color}20` }}
+                        >
+                          {item.type === 'goal' ? <LucideTarget color={color} size={14} /> :
+                            item.type === 'loan' ? <LucideLandmark color={color} size={14} /> :
+                              <LucideRepeat color={color} size={14} />}
+                        </View>
+                        <ThemedText type="secondary" className="text-[10px] font-bold uppercase tracking-tight">
+                          {item.type === 'goal' ? 'Goal' : item.type === 'loan' ? 'EMI' : 'Subscription'}
+                        </ThemedText>
+                      </View>
+                      <View className={`px-2 py-0.5 rounded-full ${isOverdue ? 'bg-red-500/10' : 'bg-gray-500/10'}`}>
+                        <ThemedText style={{ color: isOverdue ? colors.danger : colors.secondary }} className="text-[9px] font-bold">
+                          {daysLeft}
+                        </ThemedText>
+                      </View>
                     </View>
-                    <ThemedText type="secondary" className="text-[10px] font-bold uppercase tracking-tighter">
-                      {item.type === 'goal' ? 'Goal' : item.type === 'loan' ? 'EMI' : 'Subscription'}
-                    </ThemedText>
-                  </View>
-                  <ThemedText className="font-bold" numberOfLines={1}>{item.name}</ThemedText>
-                  <View className="flex-row justify-between items-end mt-2">
-                    <View>
-                      <ThemedText className="text-xs">{new Date(item.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</ThemedText>
+
+                    <ThemedText className="font-bold text-sm" numberOfLines={1}>{item.name}</ThemedText>
+
+                    <View className="flex-row justify-between items-end mt-3">
+                      <ThemedText type="secondary" className="text-xs">
+                        {new Date(item.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                      </ThemedText>
+                      <ThemedText className="font-bold text-base" style={{ color: colors.primary }}>
+                        {formatAmount(item.amount || item.emiAmount || 0)}
+                      </ThemedText>
                     </View>
-                    <ThemedText className="font-bold text-sm">
-                      {formatAmount(item.amount || item.emiAmount || 0)}
-                    </ThemedText>
-                  </View>
-                </MotiView>
-              ))}
+                  </MotiView>
+                );
+              })}
             </ScrollView>
           </View>
         )}
@@ -363,18 +398,17 @@ const DashboardScreen = ({ navigation }: any) => {
             </TouchableOpacity>
           </View>
 
-          <View style={{ height: 400 }}>
-            <FlashList
-              data={transactions}
-              keyExtractor={item => item.id.toString()}
-              renderItem={renderTransaction}
-              contentContainerStyle={{ paddingBottom: 16 }}
-              ListEmptyComponent={
-                <View className="pt-12 items-center">
-                  <ThemedText type="secondary">No transactions yet.</ThemedText>
-                </View>
-              }
-            />
+          <View className="space-y-1">
+            {transactions.slice(0, 10).map((tx) => (
+              <React.Fragment key={tx.id}>
+                {renderTransaction({ item: tx })}
+              </React.Fragment>
+            ))}
+            {transactions.length === 0 && (
+              <View className="pt-12 items-center">
+                <ThemedText type="secondary">No transactions yet.</ThemedText>
+              </View>
+            )}
           </View>
         </View>
       </ScrollView>
