@@ -437,6 +437,7 @@ export const FinancesScreen = ({ navigation }: any) => {
               key={goal.id}
               style={styles.card}
               activeOpacity={0.8}
+              onPress={() => navigation.navigate('AddGoal', { goalToEdit: goal })}
             >
               <View style={styles.cardHeader}>
                 <View style={[styles.iconContainer, { backgroundColor: '#34C75915' }]}>
@@ -586,6 +587,7 @@ export const FinancesScreen = ({ navigation }: any) => {
         key={loan.id}
         style={[styles.card, isUrgent && { borderColor: `${colors.danger}50` }]}
         activeOpacity={0.8}
+        onPress={() => navigation.navigate('AddLoan', { loanToEdit: loan })}
       >
         <View style={styles.cardHeader}>
           <View style={[styles.iconContainer, { backgroundColor: `${color}15` }]}>

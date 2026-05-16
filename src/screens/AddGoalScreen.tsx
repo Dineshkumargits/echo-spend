@@ -1,44 +1,49 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, StyleSheet, TextInput, TouchableOpacity, ScrollView,
-  Platform, KeyboardAvoidingView,
+  Platform, KeyboardAvoidingView, Alert,
 } from 'react-native';
 import { ThemedSafeAreaView, ThemedText } from '../components/ThemedSafeAreaView';
 import {
   LucideX, LucideCheck, LucideCalendar, LucideChevronDown,
-  LucideCreditCard, LucideTarget, LucidePlus,
+  LucideCreditCard, LucideTarget, LucidePlus, LucideTrash2,
 } from 'lucide-react-native';
 import * as LucideIcons from 'lucide-react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Haptics from 'expo-haptics';
 import { notify } from '../utils/notify';
-import { useNavigation } from '@react-navigation/native';
-import { addGoal, getAccounts, getCategories, Account, Category } from '../services/database';
+import { useNavigation, useRoute } from '@react-navigation/native';
+import { 
+  addGoal, updateGoal, deleteGoal,
+  getAccounts, getCategories, Account, Category, Goal 
+} from '../services/database';
 import { useTheme } from '../theme/ThemeProvider';
 import { useStore } from '../store/useStore';
 import { CategoryPicker } from '../components/CategoryPicker';
-
 
 
 export const AddGoalScreen = () => {
   const { colors, isDark } = useTheme();
   const { preferences } = useStore();
   const navigation = useNavigation();
+  const route = useRoute();
+  const { goalToEdit } = (route.params as { goalToEdit?: Goal }) ?? {};
+  const isEditing = !!goalToEdit;
 
-  const [name, setName] = useState('');
-  const [targetAmount, setTargetAmount] = useState('');
-  const [currentAmount, setCurrentAmount] = useState('0');
-  const [monthlyContribution, setMonthlyContribution] = useState('');
-  const [category, setCategory] = useState('');
+  const [name, setName] = useState(goalToEdit?.name ?? '');
+  const [targetAmount, setTargetAmount] = useState(goalToEdit?.targetAmount ? String(goalToEdit.targetAmount) : '');
+  const [currentAmount, setCurrentAmount] = useState(goalToEdit?.currentAmount ? String(goalToEdit.currentAmount) : '0');
+  const [monthlyContribution, setMonthlyContribution] = useState(goalToEdit?.monthlyContribution ? String(goalToEdit.monthlyContribution) : '');
+  const [category, setCategory] = useState(goalToEdit?.category ?? '');
   const [date, setDate] = useState<Date>(
-    new Date(new Date().setFullYear(new Date().getFullYear() + 1))
+    goalToEdit?.deadline ? new Date(goalToEdit.deadline) : new Date(new Date().setFullYear(new Date().getFullYear() + 1))
   );
   const [showDatePicker, setShowDatePicker] = useState(false);
-  const [notes, setNotes] = useState('');
+  const [notes, setNotes] = useState(goalToEdit?.notes ?? '');
 
   // Linked account
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [linkedAccountId, setLinkedAccountId] = useState<number | undefined>();
+  const [linkedAccountId, setLinkedAccountId] = useState<number | undefined>(goalToEdit?.linkedAccountId);
   const [showAccountPicker, setShowAccountPicker] = useState(false);
 
   // Categories from DB
@@ -63,12 +68,6 @@ export const AddGoalScreen = () => {
 
 
   const selectedAccount = accounts.find(a => a.id === linkedAccountId);
-  const selectedCategory = categories.find(c => c.name === category);
-
-  const renderCategoryIcon = (iconName: string, color: string, size = 14) => {
-    const Icon = (LucideIcons as any)[iconName] || LucideIcons.Zap;
-    return <Icon color={color} size={size} />;
-  };
 
   const handleDateChange = (event: any, selectedDate?: Date) => {
     if (Platform.OS === 'android') setShowDatePicker(false);
@@ -91,7 +90,7 @@ export const AddGoalScreen = () => {
       return;
     }
 
-    await addGoal({
+    const goalData = {
       name: name.trim(),
       targetAmount: parseFloat(targetAmount),
       currentAmount: parseFloat(currentAmount) || 0,
@@ -101,11 +100,39 @@ export const AddGoalScreen = () => {
       linkedAccountId,
       monthlyContribution: monthlyContribution ? parseFloat(monthlyContribution) : undefined,
       notes: notes.trim() || undefined,
-    });
+    };
+
+    if (isEditing) {
+      await updateGoal(goalToEdit.id, goalData);
+      notify.success('Goal updated!');
+    } else {
+      await addGoal(goalData);
+      notify.success('Goal created!');
+    }
 
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    notify.success('Goal created!');
     navigation.goBack();
+  };
+
+  const handleDelete = () => {
+    if (!isEditing) return;
+    Alert.alert(
+      'Delete Goal',
+      'Are you sure you want to delete this goal? This will not affect existing transactions.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Delete', 
+          style: 'destructive',
+          onPress: async () => {
+            await deleteGoal(goalToEdit.id);
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            notify.success('Goal deleted');
+            navigation.goBack();
+          }
+        }
+      ]
+    );
   };
 
   // Estimate months to reach goal
@@ -129,6 +156,7 @@ export const AddGoalScreen = () => {
     pickerItem: { flexDirection: 'row', alignItems: 'center', padding: 14, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 10 },
     catChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, marginRight: 8, marginBottom: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, flexDirection: 'row', alignItems: 'center', gap: 6 },
     saveButton: { height: 60, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 16, backgroundColor: '#34C759' },
+    deleteButton: { height: 56, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 12, borderWidth: 1, borderColor: colors.danger },
     estimateBox: { backgroundColor: '#34C75912', borderRadius: 12, padding: 12, marginTop: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
     splitRow: { flexDirection: 'row', gap: 16 },
     halfField: { flex: 1 },
@@ -139,7 +167,7 @@ export const AddGoalScreen = () => {
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <View style={s.content}>
           <View style={s.header}>
-            <ThemedText className="text-2xl font-bold">New Goal</ThemedText>
+            <ThemedText className="text-2xl font-bold">{isEditing ? 'Edit Goal' : 'New Goal'}</ThemedText>
             <TouchableOpacity onPress={() => navigation.goBack()}>
               <LucideX color={colors.secondary} size={24} />
             </TouchableOpacity>
@@ -158,7 +186,7 @@ export const AddGoalScreen = () => {
                   keyboardType="numeric"
                   value={targetAmount}
                   onChangeText={v => { setTargetAmount(v); setErrors(e => ({ ...e, target: undefined })); }}
-                  autoFocus
+                  autoFocus={!isEditing}
                 />
                 {errors.target && <ThemedText style={{ color: colors.danger, fontSize: 12, marginTop: 4 }}>{errors.target}</ThemedText>}
               </View>
@@ -316,9 +344,18 @@ export const AddGoalScreen = () => {
             <TouchableOpacity style={s.saveButton} onPress={handleSave}>
               <LucideCheck color="#FFFFFF" size={24} />
               <ThemedText style={{ color: '#FFFFFF', fontWeight: 'bold', fontSize: 18, marginLeft: 8 }}>
-                Create Goal
+                {isEditing ? 'Save Changes' : 'Create Goal'}
               </ThemedText>
             </TouchableOpacity>
+
+            {isEditing && (
+              <TouchableOpacity style={s.deleteButton} onPress={handleDelete}>
+                <LucideTrash2 color={colors.danger} size={20} />
+                <ThemedText style={{ color: colors.danger, fontWeight: 'bold', fontSize: 16, marginLeft: 8 }}>
+                  Delete Goal
+                </ThemedText>
+              </TouchableOpacity>
+            )}
 
           </ScrollView>
         </View>

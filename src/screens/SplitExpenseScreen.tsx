@@ -14,8 +14,8 @@ import { useTheme } from '../theme/ThemeProvider';
 import { useStore } from '../store/useStore';
 import { notify } from '../utils/notify';
 import {
-  getAccounts, createSplit,
-  Account, Transaction,
+  getAccounts, createSplit, updateSplit,
+  Account, Transaction, Split, SplitMember,
 } from '../services/database';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -24,33 +24,57 @@ interface MemberRow {
   key: string;
   name: string;
   share: string;
+  isMe?: boolean;
+  isPaid?: boolean;
+  paidDate?: string;
+  repaidToAccountId?: number;
 }
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 const SplitExpenseScreen = ({ navigation, route }: any) => {
-  const { transaction }: { transaction?: Transaction } = route.params ?? {};
+  const { 
+    transaction,
+    splitToEdit,
+    membersToEdit
+  }: { 
+    transaction?: Transaction;
+    splitToEdit?: Split;
+    membersToEdit?: SplitMember[];
+  } = route.params ?? {};
+
+  const isEditing = !!splitToEdit;
   const { colors } = useTheme();
   const { preferences } = useStore();
   const cur = preferences.currency;
 
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [title, setTitle] = useState(transaction?.merchant ?? '');
-  const [totalStr, setTotalStr] = useState(String(transaction?.amount ?? ''));
-  const [date] = useState(transaction?.date?.split('T')[0] ?? new Date().toISOString().split('T')[0]);
-  const [paidByAccountId, setPaidByAccountId] = useState<number | null>(transaction?.accountId ?? null);
-  const [receiveToAccountId, setReceiveToAccountId] = useState<number | null>(null);
-  const [members, setMembers] = useState<MemberRow[]>([
-    { key: 'p1', name: '', share: '' },
-  ]);
-  const [splitEqually, setSplitEqually] = useState(true);
+  const [title, setTitle] = useState(splitToEdit?.title ?? transaction?.merchant ?? '');
+  const [totalStr, setTotalStr] = useState(String(splitToEdit?.totalAmount ?? transaction?.amount ?? ''));
+  const [date] = useState(splitToEdit?.date ?? transaction?.date?.split('T')[0] ?? new Date().toISOString().split('T')[0]);
+  const [paidByAccountId, setPaidByAccountId] = useState<number | null>(splitToEdit?.paidByAccountId ?? transaction?.accountId ?? null);
+  const [receiveToAccountId, setReceiveToAccountId] = useState<number | null>(splitToEdit?.receiveToAccountId ?? null);
+  
+  const initialMembers: MemberRow[] = membersToEdit 
+    ? membersToEdit.filter(m => !m.isMe).map(m => ({
+        key: String(m.id),
+        name: m.name,
+        share: String(m.share),
+        isPaid: m.isPaid,
+        paidDate: m.paidDate,
+        repaidToAccountId: m.repaidToAccountId,
+      }))
+    : [{ key: 'p1', name: '', share: '' }];
+
+  const [members, setMembers] = useState<MemberRow[]>(initialMembers);
+  const [splitEqually, setSplitEqually] = useState(!isEditing); // Default to true for new, false for edit (preserve manual shares)
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     getAccounts().then(accs => {
       setAccounts(accs);
       if (!paidByAccountId && accs.length) setPaidByAccountId(accs[0].id);
-      if (accs.length) setReceiveToAccountId(accs[0].id);
+      if (!receiveToAccountId && accs.length) setReceiveToAccountId(accs[0].id);
     });
   }, []);
 
@@ -106,32 +130,56 @@ const SplitExpenseScreen = ({ navigation, route }: any) => {
     try {
       const allMembers = [
         // "Me" row — already paid (I paid the full bill)
-        { name: 'Me', share: myShare, isMe: true, isPaid: true },
+        { 
+          name: 'Me', 
+          share: myShare, 
+          isMe: true, 
+          isPaid: true,
+          paidDate: membersToEdit?.find(m => m.isMe)?.paidDate,
+          repaidToAccountId: membersToEdit?.find(m => m.isMe)?.repaidToAccountId,
+        },
         ...members.map(m => ({
           name: m.name.trim(),
           share: parseFloat(m.share),
           isMe: false,
-          isPaid: false,
+          isPaid: m.isPaid ?? false,
+          paidDate: m.paidDate,
+          repaidToAccountId: m.repaidToAccountId,
         })),
       ];
 
-      await createSplit(
-        {
-          transactionId: transaction?.id,
-          title: title.trim(),
-          totalAmount: total,
-          paidByAccountId: paidByAccountId ?? undefined,
-          receiveToAccountId: receiveToAccountId ?? undefined,
-          date,
-          notes: undefined,
-        },
-        allMembers,
-      );
+      if (isEditing && splitToEdit) {
+        await updateSplit(
+          splitToEdit.id,
+          {
+            title: title.trim(),
+            totalAmount: total,
+            paidByAccountId: paidByAccountId ?? undefined,
+            receiveToAccountId: receiveToAccountId ?? undefined,
+            notes: splitToEdit.notes,
+          },
+          allMembers
+        );
+        notify.success('Split updated');
+      } else {
+        await createSplit(
+          {
+            transactionId: transaction?.id,
+            title: title.trim(),
+            totalAmount: total,
+            paidByAccountId: paidByAccountId ?? undefined,
+            receiveToAccountId: receiveToAccountId ?? undefined,
+            date,
+            notes: undefined,
+          },
+          allMembers,
+        );
+        notify.success('Split created');
+      }
 
-      notify.success('Split created');
       navigation.goBack();
     } catch (e) {
-      notify.error('Failed to create split');
+      notify.error(isEditing ? 'Failed to update split' : 'Failed to create split');
     }
     setSaving(false);
   };
@@ -178,14 +226,14 @@ const SplitExpenseScreen = ({ navigation, route }: any) => {
         </TouchableOpacity>
         <View style={{ flex: 1, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
           <LucideSplit color={colors.accent} size={18} />
-          <ThemedText style={{ fontSize: 16, fontWeight: '700' }}>Split Expense</ThemedText>
+          <ThemedText style={{ fontSize: 16, fontWeight: '700' }}>{isEditing ? 'Edit Split' : 'Split Expense'}</ThemedText>
         </View>
         <TouchableOpacity
           onPress={handleSave}
           disabled={saving}
           style={{ paddingHorizontal: 16, paddingVertical: 8, borderRadius: 99, backgroundColor: colors.accent }}
         >
-          <ThemedText style={{ fontSize: 13, fontWeight: '700', color: '#fff' }}>Save</ThemedText>
+          <ThemedText style={{ fontSize: 13, fontWeight: '700', color: '#fff' }}>{isEditing ? 'Save' : 'Create'}</ThemedText>
         </TouchableOpacity>
       </View>
 

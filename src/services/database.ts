@@ -2226,6 +2226,43 @@ export const receiveSplitPayment = async (
   return txId;
 };
 
+export const updateSplit = async (
+  id: number,
+  split: Partial<Omit<Split, 'id'>>,
+  members?: Omit<SplitMember, 'id' | 'splitId'>[]
+): Promise<void> => {
+  // Update split record
+  const keys = Object.keys(split);
+  if (keys.length > 0) {
+    const setClauses = keys.map(k => `${k} = ?`).join(', ');
+    const values = keys.map(k => (split as any)[k] ?? null);
+    await db.runAsync(`UPDATE splits SET ${setClauses} WHERE id = ?`, ...values, id);
+  }
+
+  // If members provided, replace them
+  if (members) {
+    // We only replace members that are NOT paid, or if it's a "Me" row.
+    // Actually, to keep it simple and consistent with the user's intent to "edit",
+    // we replace all members but try to preserve paid status if possible?
+    // No, if the user is editing the split structure, they should probably know it resets pending status.
+    // But let's try to be smart: if a member with the same name exists and is paid, keep it?
+    // That's too complex. Let's just replace them. The user can manually mark as received again.
+    
+    await db.runAsync('DELETE FROM split_members WHERE splitId = ?', id);
+    for (const m of members) {
+      await db.runAsync(
+        `INSERT INTO split_members (splitId, name, share, isMe, isPaid, paidDate, repaidToAccountId)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        id, m.name, m.share,
+        m.isMe ? 1 : 0,
+        m.isPaid ? 1 : 0,
+        m.paidDate ?? null,
+        m.repaidToAccountId ?? null,
+      );
+    }
+  }
+};
+
 export const deleteSplit = async (id: number): Promise<void> => {
   await db.runAsync('DELETE FROM splits WHERE id = ?', id);
 };

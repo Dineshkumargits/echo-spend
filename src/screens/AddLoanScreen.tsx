@@ -1,18 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, StyleSheet, TextInput, TouchableOpacity, ScrollView,
-  Platform, KeyboardAvoidingView,
+  Platform, KeyboardAvoidingView, Alert,
 } from 'react-native';
 import { ThemedSafeAreaView, ThemedText } from '../components/ThemedSafeAreaView';
 import {
   LucideX, LucideCheck, LucideCalendar, LucideLandmark,
-  LucideChevronDown, LucideCreditCard,
+  LucideChevronDown, LucideCreditCard, LucideTrash2,
 } from 'lucide-react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Haptics from 'expo-haptics';
 import { notify } from '../utils/notify';
-import { useNavigation } from '@react-navigation/native';
-import { addLoan, getAccounts, Account } from '../services/database';
+import { useNavigation, useRoute } from '@react-navigation/native';
+import { 
+  addLoan, updateLoan, deleteLoan,
+  getAccounts, Account, Loan 
+} from '../services/database';
 import { useTheme } from '../theme/ThemeProvider';
 import { useStore } from '../store/useStore';
 
@@ -20,23 +23,26 @@ export const AddLoanScreen = () => {
   const { colors, isDark } = useTheme();
   const { preferences } = useStore();
   const navigation = useNavigation();
+  const route = useRoute();
+  const { loanToEdit } = (route.params as { loanToEdit?: Loan }) ?? {};
+  const isEditing = !!loanToEdit;
 
-  const [type, setType] = useState<'borrowed' | 'lent'>('borrowed');
-  const [lender, setLender] = useState('');
-  const [totalAmount, setTotalAmount] = useState('');
-  const [remainingAmount, setRemainingAmount] = useState('');
-  const [emiAmount, setEmiAmount] = useState('');
-  const [tenure, setTenure] = useState('');
-  const [interestRate, setInterestRate] = useState('');
+  const [type, setType] = useState<'borrowed' | 'lent'>(loanToEdit?.type ?? 'borrowed');
+  const [lender, setLender] = useState(loanToEdit?.lender ?? '');
+  const [totalAmount, setTotalAmount] = useState(loanToEdit?.totalAmount ? String(loanToEdit.totalAmount) : '');
+  const [remainingAmount, setRemainingAmount] = useState(loanToEdit?.remainingAmount ? String(loanToEdit.remainingAmount) : '');
+  const [emiAmount, setEmiAmount] = useState(loanToEdit?.emiAmount ? String(loanToEdit.emiAmount) : '');
+  const [tenure, setTenure] = useState(loanToEdit?.tenure ? String(loanToEdit.tenure) : '');
+  const [interestRate, setInterestRate] = useState(loanToEdit?.interestRate ? String(loanToEdit.interestRate) : '');
   const [nextDueDate, setNextDueDate] = useState<Date>(
-    new Date(new Date().setMonth(new Date().getMonth() + 1))
+    loanToEdit?.nextDueDate ? new Date(loanToEdit.nextDueDate) : new Date(new Date().setMonth(new Date().getMonth() + 1))
   );
   const [showDatePicker, setShowDatePicker] = useState(false);
-  const [notes, setNotes] = useState('');
+  const [notes, setNotes] = useState(loanToEdit?.notes ?? '');
 
   // Linked account
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [linkedAccountId, setLinkedAccountId] = useState<number | undefined>();
+  const [linkedAccountId, setLinkedAccountId] = useState<number | undefined>(loanToEdit?.linkedAccountId);
   const [showAccountPicker, setShowAccountPicker] = useState(false);
 
   const [errors, setErrors] = useState<{ lender?: string; total?: string; emi?: string }>({});
@@ -93,7 +99,7 @@ export const AddLoanScreen = () => {
     const total = parseFloat(totalAmount);
     const remaining = remainingAmount ? parseFloat(remainingAmount) : total;
 
-    await addLoan({
+    const loanData = {
       lender: lender.trim(),
       totalAmount: total,
       remainingAmount: remaining,
@@ -105,11 +111,39 @@ export const AddLoanScreen = () => {
       linkedAccountId,
       tenure: tenure ? parseInt(tenure, 10) : undefined,
       notes: notes.trim() || undefined,
-    });
+    };
+
+    if (isEditing) {
+      await updateLoan(loanToEdit.id, loanData);
+      notify.success('Loan record updated!');
+    } else {
+      await addLoan(loanData);
+      notify.success(type === 'borrowed' ? 'Loan added!' : 'Debt record created!');
+    }
 
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    notify.success(type === 'borrowed' ? 'Loan added!' : 'Debt record created!');
     navigation.goBack();
+  };
+
+  const handleDelete = () => {
+    if (!isEditing) return;
+    Alert.alert(
+      'Delete Loan',
+      'Are you sure you want to delete this loan record? This will not affect existing transactions.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Delete', 
+          style: 'destructive',
+          onPress: async () => {
+            await deleteLoan(loanToEdit.id);
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            notify.success('Loan record deleted');
+            navigation.goBack();
+          }
+        }
+      ]
+    );
   };
 
   // Interest calculations for borrowed
@@ -135,6 +169,7 @@ export const AddLoanScreen = () => {
     toggleBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 8 },
     toggleActive: { backgroundColor: colors.surface, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2, elevation: 1 },
     saveButton: { height: 60, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 16, backgroundColor: accentColor },
+    deleteButton: { height: 56, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 12, borderWidth: 1, borderColor: colors.danger },
     iosPickerContainer: { backgroundColor: colors.surface, borderRadius: 14, overflow: 'hidden', marginTop: 12, borderWidth: 1, borderColor: colors.border },
     iosPickerDone: { borderTopWidth: 1, borderTopColor: colors.border, padding: 12, alignItems: 'center' },
     pickerSheet: { backgroundColor: colors.surface, borderRadius: 14, borderWidth: 1, borderColor: colors.border, marginTop: 8, overflow: 'hidden' },
@@ -151,7 +186,7 @@ export const AddLoanScreen = () => {
         <View style={s.content}>
           <View style={s.header}>
             <ThemedText className="text-2xl font-bold">
-              {type === 'borrowed' ? 'New Loan' : 'Lend Money'}
+              {isEditing ? (type === 'borrowed' ? 'Edit Loan' : 'Edit Debt Record') : (type === 'borrowed' ? 'New Loan' : 'Lend Money')}
             </ThemedText>
             <TouchableOpacity onPress={() => navigation.goBack()}>
               <LucideX color={colors.secondary} size={24} />
@@ -161,24 +196,26 @@ export const AddLoanScreen = () => {
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
 
             {/* Type Toggle */}
-            <View style={s.toggleRow}>
-              <TouchableOpacity
-                style={[s.toggleBtn, type === 'borrowed' && s.toggleActive]}
-                onPress={() => { setType('borrowed'); Haptics.selectionAsync(); }}
-              >
-                <ThemedText style={{ fontSize: 12, fontWeight: 'bold', color: type === 'borrowed' ? colors.primary : colors.secondary }}>
-                  Borrowing
-                </ThemedText>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[s.toggleBtn, type === 'lent' && s.toggleActive]}
-                onPress={() => { setType('lent'); Haptics.selectionAsync(); }}
-              >
-                <ThemedText style={{ fontSize: 12, fontWeight: 'bold', color: type === 'lent' ? colors.primary : colors.secondary }}>
-                  Lending
-                </ThemedText>
-              </TouchableOpacity>
-            </View>
+            {!isEditing && (
+              <View style={s.toggleRow}>
+                <TouchableOpacity
+                  style={[s.toggleBtn, type === 'borrowed' && s.toggleActive]}
+                  onPress={() => { setType('borrowed'); Haptics.selectionAsync(); }}
+                >
+                  <ThemedText style={{ fontSize: 12, fontWeight: 'bold', color: type === 'borrowed' ? colors.primary : colors.secondary }}>
+                    Borrowing
+                  </ThemedText>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[s.toggleBtn, type === 'lent' && s.toggleActive]}
+                  onPress={() => { setType('lent'); Haptics.selectionAsync(); }}
+                >
+                  <ThemedText style={{ fontSize: 12, fontWeight: 'bold', color: type === 'lent' ? colors.primary : colors.secondary }}>
+                    Lending
+                  </ThemedText>
+                </TouchableOpacity>
+              </View>
+            )}
 
             {/* EMI / Collecting Amount */}
             <View style={s.field}>
@@ -192,7 +229,7 @@ export const AddLoanScreen = () => {
                 keyboardType="numeric"
                 value={emiAmount}
                 onChangeText={v => { setEmiAmount(v); setErrors(e => ({ ...e, emi: undefined })); }}
-                autoFocus
+                autoFocus={!isEditing}
               />
               {type === 'borrowed' && errors.emi && (
                 <ThemedText style={{ color: colors.danger, fontSize: 12, marginTop: 4 }}>{errors.emi}</ThemedText>
@@ -394,9 +431,18 @@ export const AddLoanScreen = () => {
             <TouchableOpacity style={s.saveButton} onPress={handleSave}>
               <LucideCheck color="#FFFFFF" size={24} />
               <ThemedText style={{ color: '#FFFFFF', fontWeight: 'bold', fontSize: 18, marginLeft: 8 }}>
-                {type === 'borrowed' ? 'Add Loan' : 'Add Record'}
+                {isEditing ? 'Save Changes' : (type === 'borrowed' ? 'Add Loan' : 'Add Record')}
               </ThemedText>
             </TouchableOpacity>
+
+            {isEditing && (
+              <TouchableOpacity style={s.deleteButton} onPress={handleDelete}>
+                <LucideTrash2 color={colors.danger} size={20} />
+                <ThemedText style={{ color: colors.danger, fontWeight: 'bold', fontSize: 16, marginLeft: 8 }}>
+                  Delete Record
+                </ThemedText>
+              </TouchableOpacity>
+            )}
 
             <View style={{ height: 40 }} />
           </ScrollView>

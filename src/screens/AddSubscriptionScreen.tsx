@@ -9,12 +9,14 @@ import {
   LucideChevronDown, LucideUsers, LucideUserPlus, LucideTrash2,
   LucideCreditCard, LucidePlus,
 } from 'lucide-react-native';
-import { renderCategoryIcon } from '../components/CategoryManager';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Haptics from 'expo-haptics';
 import { notify } from '../utils/notify';
-import { useNavigation } from '@react-navigation/native';
-import { addSubscription, getAccounts, getCategories, Account, Category } from '../services/database';
+import { useNavigation, useRoute } from '@react-navigation/native';
+import { 
+  addSubscription, updateSubscription, deleteSubscription,
+  getAccounts, getCategories, Account, Category, Subscription 
+} from '../services/database';
 import { useTheme } from '../theme/ThemeProvider';
 import { useStore } from '../store/useStore';
 import { CategoryPicker } from '../components/CategoryPicker';
@@ -30,28 +32,35 @@ export const AddSubscriptionScreen = () => {
   const { colors, isDark } = useTheme();
   const { preferences } = useStore();
   const navigation = useNavigation();
+  const route = useRoute();
+  const { subscriptionToEdit } = (route.params as { subscriptionToEdit?: Subscription }) ?? {};
+  const isEditing = !!subscriptionToEdit;
 
-  const [name, setName] = useState('');
-  const [amount, setAmount] = useState('');
-  const [category, setCategory] = useState('');
-  const [frequency, setFrequency] = useState<'weekly' | 'monthly' | 'yearly'>('monthly');
+  const [name, setName] = useState(subscriptionToEdit?.name ?? '');
+  const [amount, setAmount] = useState(subscriptionToEdit?.amount ? String(subscriptionToEdit.amount) : '');
+  const [category, setCategory] = useState(subscriptionToEdit?.category ?? '');
+  const [frequency, setFrequency] = useState<'weekly' | 'monthly' | 'yearly'>(subscriptionToEdit?.frequency ?? 'monthly');
   const [nextDueDate, setNextDueDate] = useState<Date>(
-    new Date(new Date().setMonth(new Date().getMonth() + 1))
+    subscriptionToEdit?.nextDueDate ? new Date(subscriptionToEdit.nextDueDate) : new Date(new Date().setMonth(new Date().getMonth() + 1))
   );
   const [showDatePicker, setShowDatePicker] = useState(false);
-  const [notes, setNotes] = useState('');
+  const [notes, setNotes] = useState(subscriptionToEdit?.notes ?? '');
 
   // Linked account
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [debitAccountId, setDebitAccountId] = useState<number | undefined>();
+  const [debitAccountId, setDebitAccountId] = useState<number | undefined>(subscriptionToEdit?.debitAccountId);
   const [showAccountPicker, setShowAccountPicker] = useState(false);
 
   // Categories from DB
   const [categories, setCategories] = useState<Category[]>([]);
 
   // Split
-  const [splitEnabled, setSplitEnabled] = useState(false);
-  const [splitMemberNames, setSplitMemberNames] = useState<string[]>(['']);
+  const [splitEnabled, setSplitEnabled] = useState(subscriptionToEdit?.splitEnabled ?? false);
+  const [splitMemberNames, setSplitMemberNames] = useState<string[]>(
+    subscriptionToEdit?.splitMembers 
+      ? JSON.parse(subscriptionToEdit.splitMembers).map((m: any) => m.name)
+      : ['']
+  );
 
   const [errors, setErrors] = useState<{ name?: string; amount?: string; category?: string }>({});
 
@@ -62,19 +71,16 @@ export const AddSubscriptionScreen = () => {
   useEffect(() => {
     Promise.all([getAccounts(), getCategories()]).then(([accs, cats]) => {
       setAccounts(accs);
-      const expenseCats = cats;
-      setCategories(expenseCats);
-      if (expenseCats.length > 0 && !category) {
-        const other = expenseCats.find(c => c.name === 'Other' && c.type === 'expense');
-        setCategory(other ? other.name : expenseCats[0].name);
+      setCategories(cats);
+      if (cats.length > 0 && !category) {
+        const other = cats.find(c => c.name === 'Other' && c.type === 'expense');
+        setCategory(other ? other.name : cats[0].name);
       }
     });
   }, []);
 
 
   const selectedAccount = accounts.find(a => a.id === debitAccountId);
-  const selectedCategory = categories.find(c => c.name === category);
-
 
   const handleDateChange = (event: any, selectedDate?: Date) => {
     if (Platform.OS === 'android') setShowDatePicker(false);
@@ -116,7 +122,7 @@ export const AddSubscriptionScreen = () => {
       .filter(Boolean)
       .map(name => ({ name }));
 
-    await addSubscription({
+    const subData = {
       name: name.trim(),
       amount: parseFloat(amount),
       category,
@@ -127,11 +133,39 @@ export const AddSubscriptionScreen = () => {
       splitEnabled: splitEnabled && validMembers.length > 0,
       splitMembers: splitEnabled && validMembers.length > 0 ? JSON.stringify(validMembers) : undefined,
       notes: notes.trim() || undefined,
-    });
+    };
+
+    if (isEditing) {
+      await updateSubscription(subscriptionToEdit.id, subData);
+      notify.success('Subscription updated!');
+    } else {
+      await addSubscription(subData);
+      notify.success('Subscription added!');
+    }
 
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    notify.success('Subscription added!');
     navigation.goBack();
+  };
+
+  const handleDelete = () => {
+    if (!isEditing) return;
+    Alert.alert(
+      'Delete Subscription',
+      'Are you sure you want to delete this subscription? This will not affect existing transactions.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Delete', 
+          style: 'destructive',
+          onPress: async () => {
+            await deleteSubscription(subscriptionToEdit.id);
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            notify.success('Subscription deleted');
+            navigation.goBack();
+          }
+        }
+      ]
+    );
   };
 
   // Per-person share preview
@@ -154,6 +188,7 @@ export const AddSubscriptionScreen = () => {
     toggleBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 8 },
     toggleActive: { backgroundColor: colors.surface, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2, elevation: 1 },
     saveButton: { height: 60, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 16, backgroundColor: colors.accent },
+    deleteButton: { height: 56, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 12, borderWidth: 1, borderColor: colors.danger },
     iosPickerContainer: { backgroundColor: colors.surface, borderRadius: 14, overflow: 'hidden', marginTop: 12, borderWidth: 1, borderColor: colors.border },
     iosPickerDone: { borderTopWidth: 1, borderTopColor: colors.border, padding: 12, alignItems: 'center' },
     pickerSheet: { backgroundColor: colors.surface, borderRadius: 14, borderWidth: 1, borderColor: colors.border, marginTop: 8, overflow: 'hidden' },
@@ -170,7 +205,7 @@ export const AddSubscriptionScreen = () => {
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <View style={s.content}>
           <View style={s.header}>
-            <ThemedText className="text-2xl font-bold">New Subscription</ThemedText>
+            <ThemedText className="text-2xl font-bold">{isEditing ? 'Edit Subscription' : 'New Subscription'}</ThemedText>
             <TouchableOpacity onPress={() => navigation.goBack()}>
               <LucideX color={colors.secondary} size={24} />
             </TouchableOpacity>
@@ -189,7 +224,7 @@ export const AddSubscriptionScreen = () => {
                   keyboardType="numeric"
                   value={amount}
                   onChangeText={v => { setAmount(v); setErrors(e => ({ ...e, amount: undefined })); }}
-                  autoFocus
+                  autoFocus={!isEditing}
                 />
                 {errors.amount && <ThemedText style={{ color: colors.danger, fontSize: 12, marginTop: 4 }}>{errors.amount}</ThemedText>}
               </View>
@@ -385,9 +420,18 @@ export const AddSubscriptionScreen = () => {
             <TouchableOpacity style={s.saveButton} onPress={handleSave}>
               <LucideCheck color="#FFFFFF" size={24} />
               <ThemedText style={{ color: '#FFFFFF', fontWeight: 'bold', fontSize: 18, marginLeft: 8 }}>
-                Add Subscription
+                {isEditing ? 'Save Changes' : 'Add Subscription'}
               </ThemedText>
             </TouchableOpacity>
+
+            {isEditing && (
+              <TouchableOpacity style={s.deleteButton} onPress={handleDelete}>
+                <LucideTrash2 color={colors.danger} size={20} />
+                <ThemedText style={{ color: colors.danger, fontWeight: 'bold', fontSize: 16, marginLeft: 8 }}>
+                  Delete Subscription
+                </ThemedText>
+              </TouchableOpacity>
+            )}
 
             <View style={{ height: 40 }} />
           </ScrollView>

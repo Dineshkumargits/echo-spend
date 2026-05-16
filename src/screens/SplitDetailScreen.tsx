@@ -4,10 +4,12 @@ import {
   RefreshControl, Modal,
 } from 'react-native';
 import { MotiView } from 'moti';
+import * as LucideIcons from 'lucide-react-native';
 import {
   LucideArrowLeft, LucideTrash2, LucideCheck, LucideClock,
   LucideSplit, LucideWallet, LucideCreditCard,
   LucideChevronRight, LucideUsers, LucideRepeat, LucideTarget, LucideLandmark,
+  LucideEdit2,
 } from 'lucide-react-native';
 import { useIsFocused } from '@react-navigation/native';
 import { ThemedSafeAreaView, ThemedText } from '../components/ThemedSafeAreaView';
@@ -184,7 +186,9 @@ const SplitDetailScreen = ({ navigation, route }: any) => {
 
   if (loading || !split) {
     return (
-      <ThemedSafeAreaView className="items-center justify-center" />
+      <ThemedSafeAreaView className="items-center justify-center">
+        <View />
+      </ThemedSafeAreaView>
     );
   }
 
@@ -214,9 +218,20 @@ const SplitDetailScreen = ({ navigation, route }: any) => {
           <LucideSplit color={colors.accent} size={16} />
           <ThemedText style={{ fontSize: 16, fontWeight: '700' }}>Split Details</ThemedText>
         </View>
-        <TouchableOpacity onPress={handleDelete} style={{ width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: `${colors.danger}15` }}>
-          <LucideTrash2 color={colors.danger} size={16} />
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <TouchableOpacity 
+            onPress={() => navigation.navigate('SplitExpense', { 
+              splitToEdit: split,
+              membersToEdit: members
+            })} 
+            style={{ width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: `${colors.accent}15` }}
+          >
+            <LucideEdit2 color={colors.accent} size={16} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={handleDelete} style={{ width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: `${colors.danger}15` }}>
+            <LucideTrash2 color={colors.danger} size={16} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView
