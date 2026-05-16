@@ -1,0 +1,64 @@
+{
+  "expo": {
+    "name": "Echo Spend",
+    "slug": "echospend",
+    "scheme": "com.adkdinesh.echospend",
+    "version": "1.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#000000"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.adkdinesh.echospend"
+    },
+    "android": {
+      "softwareKeyboardLayoutMode": "adjustResize",
+      "adaptiveIcon": {
+        "backgroundColor": "#121212",
+        "foregroundImage": "./assets/adaptive-icon.png"
+      },
+      "notification": {
+        "icon": "./assets/notification-icon.png",
+        "color": "#30D158"
+      },
+      "versionCode": 2,
+      "predictiveBackGestureEnabled": false,
+      "package": "com.adkdinesh.echospend",
+      "permissions": [
+        "android.permission.READ_SMS",
+        "android.permission.RECEIVE_SMS",
+        "android.permission.SCHEDULE_EXACT_ALARM"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-font",
+      "expo-secure-store",
+      "expo-sqlite",
+      "expo-task-manager",
+      "expo-background-fetch",
+      "expo-notifications",
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.608510187153-365gv7ep0iqv7qi8j17712pskr25036e"
+        }
+      ]
+    ],
+    "extra": {
+      "googleAndroidClientId": "608510187153-uere9cnfgq0ji1iqcq56ajp2pnuaqr8p.apps.googleusercontent.com",
+      "googleIosClientId": "608510187153-365gv7ep0iqv7qi8j17712pskr25036e.apps.googleusercontent.com",
+      "googleWebClientId": "608510187153-bt7sar0c82jim20oidjl38buq22ikdv3.apps.googleusercontent.com",
+      "eas": {
+        "projectId": "87928374-1234-5678-9012-345678901234"
+      }
+    }
+  }
+}
