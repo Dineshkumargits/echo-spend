@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, TouchableOpacity, TextInput } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import { MotiView } from 'moti';
 import {
   LucideArrowUpRight,
@@ -59,6 +60,14 @@ export const ReviewTransactionCard = ({
 
   const [isEditingName, setIsEditingName] = useState(false);
   const [tempName, setTempName] = useState(tx.merchant);
+
+  const handleTypeChange = async (newType: 'credit' | 'debit' | 'transfer') => {
+    if (newType === tx.type) return;
+    await updateTransaction(tx.id, { type: newType });
+    onTransactionUpdated({ ...tx, type: newType });
+    setCatTab(newType === 'credit' ? 'income' : newType === 'transfer' ? 'transfer' : 'expense');
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
 
   const confidence = tx.confidence ?? 'medium';
   const effectiveAcc = accounts.find(a => a.id === (accountOverride ?? tx.accountId));
@@ -216,6 +225,40 @@ export const ReviewTransactionCard = ({
           </View>
         </View>
 
+        {/* Transaction Type Selector */}
+        <View className="flex-row mb-3 bg-black/5 dark:bg-white/5 p-1 rounded-full">
+          {[
+            { id: 'debit', label: 'Expense', icon: LucideArrowUpRight, color: colors.danger },
+            { id: 'credit', label: 'Income', icon: LucideArrowDownLeft, color: colors.success },
+            { id: 'transfer', label: 'Transfer', icon: LucideRotateCw, color: colors.warning },
+          ].map((type) => {
+            const active = tx.type === type.id;
+            const Icon = type.icon;
+            return (
+              <TouchableOpacity
+                key={type.id}
+                onPress={() => handleTypeChange(type.id as any)}
+                className="flex-1 py-1.5 rounded-full flex-row items-center justify-center"
+                style={{
+                  backgroundColor: active ? colors.surface : 'transparent',
+                  shadowColor: '#000',
+                  shadowOffset: { width: 0, height: 1 },
+                  shadowOpacity: active ? 0.1 : 0,
+                  shadowRadius: 1,
+                }}
+              >
+                <Icon color={active ? type.color : colors.muted} size={13} />
+                <ThemedText
+                  className="text-[10px] font-bold ml-1.5"
+                  style={{ color: active ? colors.primary : colors.secondary }}
+                >
+                  {type.label}
+                </ThemedText>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
         {/* Row 2: category + account chips */}
         <View className="flex-row mt-2">
           <TouchableOpacity
@@ -302,7 +345,11 @@ export const ReviewTransactionCard = ({
               {(['expense', 'income', 'transfer'] as const).map(tab => (
                 <TouchableOpacity
                   key={tab}
-                  onPress={() => setCatTab(tab)}
+                  onPress={() => {
+                    setCatTab(tab);
+                    const newType = tab === 'income' ? 'credit' : tab === 'transfer' ? 'transfer' : 'debit';
+                    handleTypeChange(newType);
+                  }}
                   className="flex-1 py-1.5 rounded-full items-center"
                   style={{
                     backgroundColor: catTab === tab ? colors.surface : 'transparent',
