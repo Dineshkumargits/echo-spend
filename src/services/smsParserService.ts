@@ -128,14 +128,52 @@ const AMOUNT_DR_CR_SUFFIX_RE = /([\d,]+(?:\.\d{1,2})?)\s*\b(dr|cr)\b/i;
 
 // Balance patterns — covers all major Indian bank SMS variants:
 // "Avl Bal", "Avl. Bal.", "Avbl Bal", "Available Balance", "A/c Bal", "Bal:", etc.
-const BALANCE_RE = /(?:avail(?:able)?\s*(?:bal(?:ance)?)?|avl\.?\s*bal\.?|avbl\.?\s*bal\.?|a\/c\s*bal\.?|bal(?:ance)?\s*(?:is|:)?|outstanding)\s*(?::?\s*)(?:inr|rs\.?|₹)?\s*([\d,]+(?:\.\d{1,2})?)/i;
+// Captures both the balance amount and an optional trailing "Cr" or "Dr" suffix
+const BALANCE_RE = /(?:avail(?:able)?\s*(?:bal(?:ance)?)?|avl\.?\s*bal\.?|avbl\.?\s*bal\.?|a\/c\s*bal\.?|bal(?:ance)?\s*(?:is|:)?|outstanding)\s*(?::?\s*)(?:inr|rs\.?|₹)?\s*([\d,]+(?:\.\d{1,2})?)(?:\s*\b(cr|dr)\b)?/i;
 
 // "declined", "failed", etc. — these are NOT completed transactions
 const DECLINED_RE = /\b(?:declined|failed|rejected|unsuccessful|not\s+processed|reversal|reversed|could\s+not\s+process)\b/i;
 
-const DEBIT_WORDS = ['debited', 'debit', 'spent', 'paid', 'payment', 'purchase', 'withdrawn', 'withdrawal', 'used', 'charged', 'dr'];
-const CREDIT_WORDS = ['credited', 'credit', 'received', 'deposited', 'deposit', 'refund', 'cashback', 'cr', 'salary', 'income', 'stipend'];
-const TRANSFER_WORDS = ['transfer', 'neft', 'imps', 'rtgs', 'own a/c'];
+// Robust word-boundary-based pattern matching and scoring system for transaction type detection:
+const DEBIT_SCORING_PATTERNS = [
+  { re: /\bdebited\b/i, score: 5 },
+  { re: /\bspent\b/i, score: 4 },
+  { re: /\bcharged\b/i, score: 4 },
+  { re: /\bwithdrawn\b/i, score: 4 },
+  { re: /\bwithdrawal\b/i, score: 4 },
+  { re: /\bsent\b/i, score: 4 },
+  { re: /\bpaid\b/i, score: 3 },
+  { re: /\bpayment\b/i, score: 3 },
+  { re: /\bpurchase\b/i, score: 3 },
+  { re: /\bused\b/i, score: 2 },
+  { re: /\bdebit\b(?!\s+card)/i, score: 3 },
+  { re: /\bdr\b/i, score: 2 },
+];
+
+const CREDIT_SCORING_PATTERNS = [
+  { re: /\bcredited\b/i, score: 5 },
+  { re: /\breceived\b/i, score: 4 },
+  { re: /\bdeposited\b/i, score: 4 },
+  { re: /\bdeposit\b/i, score: 4 },
+  { re: /\brefunded\b/i, score: 4 },
+  { re: /\brefund\b/i, score: 4 },
+  { re: /\bcashback\b/i, score: 4 },
+  { re: /\bsalary\b/i, score: 4 },
+  { re: /\bstipend\b/i, score: 4 },
+  { re: /\bincome\b/i, score: 4 },
+  { re: /\bcredit\b(?!\s+(?:card|limit|score|line|control))/i, score: 3 },
+  { re: /\bcr\b/i, score: 2 },
+];
+
+const TRANSFER_SCORING_PATTERNS = [
+  { re: /\btransferred\b/i, score: 3 },
+  { re: /\btransfer\b/i, score: 3 },
+  { re: /\bneft\b/i, score: 3 },
+  { re: /\bimps\b/i, score: 3 },
+  { re: /\brtgs\b/i, score: 3 },
+  { re: /\bown a\/c\b/i, score: 4 },
+  { re: /\bself transfer\b/i, score: 4 },
+];
 
 // Ordered from most-specific to least-specific.
 // "from MERCHANT" added for credit-style SMS ("received from Infosys").
@@ -195,12 +233,15 @@ function parseSmsFallback(
   // ── 6. Account match ─────────────────────────────────────────────────────
   const matchedAccount = matchSmsToAccount(smsBody, accounts);
 
-  // ── 7. Available Balance (extracted first so we can exclude it from amount search) ──
+  // ── 7. Available Balance (extracted first so we can exclude it from amount search and type detection) ──
   let balanceAfter: number | undefined;
+  let cleanSmsForType = lower;
   const balMatch = smsBody.match(BALANCE_RE);
   if (balMatch) {
     const rawBal = balMatch[1].replace(/,/g, '');
     balanceAfter = parseFloat(rawBal) || undefined;
+    // Strip the balance substring from the cleaned text to avoid matching its Cr/Dr suffix
+    cleanSmsForType = lower.replace(balMatch[0].toLowerCase(), '');
   }
 
   // ── 1. Amount ─────────────────────────────────────────────────────────────
@@ -237,17 +278,44 @@ function parseSmsFallback(
 
   // ── 2. Transaction type ───────────────────────────────────────────────────
   let txType: 'debit' | 'credit' | 'transfer' = 'debit';
-  if (CREDIT_WORDS.some(w => lower.includes(w))) {
-    txType = 'credit';
-  } else if (TRANSFER_WORDS.some(w => lower.includes(w))) {
+  let debitScore = 0;
+  let creditScore = 0;
+  let transferScore = 0;
+
+  for (const pattern of DEBIT_SCORING_PATTERNS) {
+    if (pattern.re.test(cleanSmsForType)) {
+      debitScore += pattern.score;
+    }
+  }
+
+  for (const pattern of CREDIT_SCORING_PATTERNS) {
+    if (pattern.re.test(cleanSmsForType)) {
+      creditScore += pattern.score;
+    }
+  }
+
+  for (const pattern of TRANSFER_SCORING_PATTERNS) {
+    if (pattern.re.test(cleanSmsForType)) {
+      transferScore += pattern.score;
+    }
+  }
+
+  // Handle "NNN Cr" / "NNN Dr" suffix format for type detection on the cleaned text
+  const drCrSuffix = cleanSmsForType.match(AMOUNT_DR_CR_SUFFIX_RE)?.[2]?.toLowerCase();
+  if (drCrSuffix === 'cr') {
+    creditScore += 5;
+  } else if (drCrSuffix === 'dr') {
+    debitScore += 5;
+  }
+
+  // Choose the transaction type based on the scoring
+  if (transferScore > debitScore && transferScore > creditScore) {
     txType = 'transfer';
-  } else if (DEBIT_WORDS.some(w => lower.includes(w))) {
+  } else if (creditScore > debitScore) {
+    txType = 'credit';
+  } else {
     txType = 'debit';
   }
-  // Handle "NNN Cr" / "NNN Dr" suffix format for type detection
-  const drCrSuffix = smsBody.match(AMOUNT_DR_CR_SUFFIX_RE)?.[2]?.toLowerCase();
-  if (drCrSuffix === 'cr') txType = 'credit';
-  else if (drCrSuffix === 'dr') txType = 'debit';
 
   // ── 3. Merchant ───────────────────────────────────────────────────────────
   let merchant = 'Unknown';
