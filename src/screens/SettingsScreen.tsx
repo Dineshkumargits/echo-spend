@@ -179,26 +179,6 @@ const SettingsScreen = ({ navigation }: any) => {
     );
   };
 
-  const handleSignOut = async () => {
-    Alert.alert('Unlink Account', 'Stop automated cloud backups?', [
-      { text: 'Keep Linked', style: 'cancel' },
-      {
-        text: 'Unlink',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await GoogleSignin.signOut();
-            setGoogleUser(null);
-            setSyncSchedule('none');
-            notify.info('Account unlinked');
-          } catch (error) {
-            console.error('Sign out failed', error);
-          }
-        }
-      }
-    ]);
-  };
-
   const handleSaveSyncTime = () => {
     const timeRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/;
     if (timeRegex.test(syncTimeInput)) {
@@ -263,13 +243,17 @@ const SettingsScreen = ({ navigation }: any) => {
   };
 
   const handleLogout = () => {
+    const alertMessage = googleUser
+      ? 'This will PERMANENTLY delete all local transactions, accounts, and settings.\n\nIMPORTANT: Please ensure you have synced your data to Google Drive before proceeding, as this local data cannot be recovered once deleted.\n\nAre you absolutely sure?'
+      : 'This will PERMANENTLY delete all local transactions, accounts, and settings.\n\nSince you are in local-only mode, your data is not backed up to the cloud and cannot be recovered once deleted.\n\nAre you absolutely sure?';
+
     Alert.alert(
-      'Logout & Wipe Data',
-      'This will PERMANENTLY delete all local transactions, accounts, and settings.\n\nIMPORTANT: Please ensure you have synced your data to Google Drive before proceeding, as this local data cannot be recovered once deleted.\n\nAre you absolutely sure?',
+      googleUser ? 'Logout & Wipe Data' : 'Reset App & Wipe Data',
+      alertMessage,
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Logout & Delete Everything',
+          text: googleUser ? 'Logout & Delete Everything' : 'Reset & Delete Everything',
           style: 'destructive',
           onPress: async () => {
             try {
@@ -284,7 +268,7 @@ const SettingsScreen = ({ navigation }: any) => {
               // 3. Clear all persisted store state and SecureStore
               await fullLogout();
               
-              notify.success('Logged out and data wiped');
+              notify.success(googleUser ? 'Logged out and data wiped' : 'App reset and data wiped');
               triggerHaptic(Haptics.ImpactFeedbackStyle.Heavy);
             } catch (error) {
               console.error('Logout failed', error);
@@ -345,7 +329,7 @@ const SettingsScreen = ({ navigation }: any) => {
                 icon={<LucideCloudSync color={colors.success} size={20} />}
                 label={googleUser.name}
                 sub={googleUser.email}
-                right={<TouchableOpacity onPress={handleSignOut}><LucideLogOut color={colors.danger} size={18} /></TouchableOpacity>}
+                right={<TouchableOpacity onPress={handleLogout}><LucideLogOut color={colors.danger} size={18} /></TouchableOpacity>}
               />
               <Row
                 icon={<LucideRefreshCcw color={colors.accent} size={18} />}
@@ -596,7 +580,9 @@ const SettingsScreen = ({ navigation }: any) => {
         <Section title="Data & Privacy" />
         <View className="rounded-apple-md overflow-hidden mb-24" style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
           <Row icon={<LucideDownload color={colors.primary} size={20} />} label="Export to CSV" onPress={() => SyncService.exportToCSV()} />
-          <Row icon={<LucideLogOut color={colors.danger} size={18} />} label="Logout & Reset" onPress={handleLogout} danger />
+          {!googleUser && (
+            <Row icon={<LucideLogOut color={colors.danger} size={18} />} label="Reset App & Wipe Data" onPress={handleLogout} danger />
+          )}
         </View>
 
         {/* ── Developer Testing ── (Hidden in Release) */}
