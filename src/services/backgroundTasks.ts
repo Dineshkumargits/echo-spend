@@ -138,9 +138,6 @@ const _doSmsScan = async (silent = false): Promise<BackgroundFetch.BackgroundFet
   const rangeByAccountId = Object.fromEntries(trackableRanges.map(r => [r.account.id, r]));
   const accountsForMatch = trackableRanges.map(r => r.account);
 
-  const BANK_AMOUNT_RE = /(?:(?:inr|rs\.?|₹)\s*[\d,]+(?:\.\d{1,2})?)|([\d,]+(?:\.\d{1,2})?\s*(?:inr|rs\.?|₹))|(?:\b(?:amt|amount|of)\s+([\d,]+(?:\.\d{1,2})?))/i;
-  const BANK_VERB_RE   = /\b(?:debited|credited|spent|withdrawn|received|transferred|paid|deducted|charged|sent|deposited|deposit|salary)\b/i;
-
   let smsInbox: { body: string; date: number }[] = [];
   try {
     const SMSModule = require('react-native-get-sms-android');
@@ -197,15 +194,16 @@ const _doSmsScan = async (silent = false): Promise<BackgroundFetch.BackgroundFet
   for (const sms of filtered) {
     const matched = matchSmsToAccount(sms.body, accountsForMatch);
 
+    // 1. If it didn't match any account in Echo Spend, ignore it
+    if (!matched) continue;
+
+    // 2. If the matched account has a registered last 4 digits, we require a strict last-4 match.
+    // This prevents transactions from other accounts at the same bank from leaking in.
+    if (matched.last4Digits && matched.matchType !== 'last4') continue;
+
     // Range window check strictly enforces the per-account cursors.
-    if (matched) {
-      const range = rangeByAccountId[matched.id];
-      if (!range || sms.date < range.fromMs) continue;
-    } else {
-      if (!BANK_AMOUNT_RE.test(sms.body) || !BANK_VERB_RE.test(sms.body)) continue;
-      // Unmatched messages use the earliest global cursor to ensure we don't miss anything.
-      if (sms.date < fetchFromMs) continue;
-    }
+    const range = rangeByAccountId[matched.id];
+    if (!range || sms.date < range.fromMs) continue;
 
     const result = await SmsParserService.parse(sms.body, [], merchantHints, context, sms.date);
 

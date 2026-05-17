@@ -287,23 +287,22 @@ const SmartScanScreen = ({ navigation }: any) => {
     const accountsForMatch = trackableRanges.map(r => r.account);
     const rangeByAccountId = Object.fromEntries(trackableRanges.map(r => [r.account.id, r]));
 
-    const filtered: Array<{ body: string; date: number; matchedAccount: SmsAccountMatch | undefined }> = [];
+    const filtered: Array<{ body: string; date: number; matchedAccount: SmsAccountMatch }> = [];
     for (const sms of keywordFiltered) {
       const matched = matchSmsToAccount(sms.body, accountsForMatch);
 
+      // 1. If it didn't match any account in Echo Spend, ignore it
+      if (!matched) continue;
+
+      // 2. If the matched account has a registered last 4 digits, we require a strict last-4 match.
+      // This prevents transactions from other accounts at the same bank from leaking in.
+      if (matched.last4Digits && matched.matchType !== 'last4') continue;
+
       // Range window check strictly enforces the per-account cursors.
-      if (matched) {
-        const range = rangeByAccountId[matched.id];
-        if (!range || sms.date < range.fromMs) continue;
-      } else {
-        // No account match — apply two hard gates before including:
-        //  1. Must have a currency-tagged amount (filters out ads with plain prices)
-        //  2. Must have a banking verb (filters out "Rs.99 for subscription renewal" promos)
-        if (!BANK_AMOUNT_RE.test(sms.body) || !BANK_VERB_RE.test(sms.body)) continue;
-        // Unmatched messages use the earliest global cursor to ensure we don't miss anything that arrived since the last global scan.
-        if (sms.date < fetchFromMs) continue;
-      }
-      filtered.push({ body: sms.body, date: sms.date, matchedAccount: matched ?? undefined });
+      const range = rangeByAccountId[matched.id];
+      if (!range || sms.date < range.fromMs) continue;
+
+      filtered.push({ body: sms.body, date: sms.date, matchedAccount: matched });
     }
 
     // Cap at 100 messages per foreground scan (now newest first)
