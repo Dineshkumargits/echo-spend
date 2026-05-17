@@ -618,11 +618,14 @@ const BankAccountDetailScreen = ({ navigation, route }: any) => {
 
   const onAdjustBalance = async () => {
     if (!account || !adjustAmount) return;
-    const realBal = parseFloat(adjustAmount.replace(/,/g, ''));
-    if (isNaN(realBal)) {
+    const parsedAmount = parseFloat(adjustAmount.replace(/,/g, ''));
+    if (isNaN(parsedAmount)) {
       notify.error('Invalid amount');
       return;
     }
+
+    const isCC = account.accountType === 'credit_card';
+    const realBal = isCC ? Math.abs(parsedAmount) : parsedAmount;
 
     setIsAdjusting(true);
     try {
@@ -632,7 +635,13 @@ const BankAccountDetailScreen = ({ navigation, route }: any) => {
         return;
       }
 
-      const type = diff > 0 ? 'credit' : 'debit';
+      // For credit cards, an increase in outstanding balance (diff > 0) is a debit (debt increases).
+      // A decrease (diff < 0) is a credit (debt decreases).
+      // For bank accounts/cash/wallets, it's the opposite: diff > 0 is credit, diff < 0 is debit.
+      const type = isCC
+        ? (diff > 0 ? 'debit' : 'credit')
+        : (diff > 0 ? 'credit' : 'debit');
+
       const absDiff = Math.abs(diff);
 
       await addTransaction({
@@ -644,7 +653,7 @@ const BankAccountDetailScreen = ({ navigation, route }: any) => {
         accountId,
         isConfirmed: true,
         source: 'manual',
-        notes: `Manual adjustment to match real balance (${fmt(realBal)})`,
+        notes: `Manual adjustment to match real balance (${isCC ? '-' : ''}${fmt(realBal)})`,
         confidence: 'high'
       });
 
@@ -746,7 +755,10 @@ const BankAccountDetailScreen = ({ navigation, route }: any) => {
             <View style={{ flexDirection: 'row', gap: 8 }}>
               <TouchableOpacity
                 onPress={() => {
-                  setAdjustAmount(account.balance.toString());
+                  const initialVal = account.accountType === 'credit_card'
+                    ? (account.balance === 0 ? '0' : `-${account.balance}`)
+                    : account.balance.toString();
+                  setAdjustAmount(initialVal);
                   setAdjustModalVisible(true);
                 }}
                 className="w-8 h-8 rounded-full items-center justify-center"

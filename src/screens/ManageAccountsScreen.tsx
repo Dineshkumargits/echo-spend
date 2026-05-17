@@ -136,7 +136,7 @@ export const ManageAccountsScreen = () => {
           {accounts.map((acc, index) => (
             <MotiView
               key={acc.id}
-              layout={Platform.OS !== 'android'} // Smooth layout transitions
+              layout={(Platform.OS !== 'android') as any} // Smooth layout transitions
               from={{ opacity: 0, translateX: -10 }}
               animate={{ opacity: 1, translateX: 0 }}
               transition={{ delay: index * 50 }}
@@ -179,7 +179,7 @@ export const ManageAccountsScreen = () => {
                     </ThemedText>
                   </View>
                   <View style={{ alignItems: 'flex-end', marginLeft: 8 }}>
-                    <ThemedText className="font-bold text-sm">₹{acc.balance.toLocaleString('en-IN')}</ThemedText>
+                    <ThemedText className="font-bold text-sm">{acc.accountType === 'credit_card' ? '-' : ''}₹{acc.balance.toLocaleString('en-IN')}</ThemedText>
                     <TouchableOpacity
                       onPress={() => navigation.navigate('BankAccountDetail', { accountId: acc.id })}
                       activeOpacity={0.6}
