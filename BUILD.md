@@ -220,5 +220,15 @@ $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "build-tools;36.0.0"
 
 
 cd android
+./gradlew clean
 ./gradlew assembleRelease
+adb uninstall com.adkdinesh.echospend
 adb install -r app/build/outputs/apk/release/app-release.apk
+
+keytool -genkeypair -v \                                      06:27:49
+  -keystore android/app/echo-spend-release.keystore \
+  -alias echo-spend \
+  -keyalg RSA -keysize 2048 -validity 10000 \
+  -dname "CN=Echo Spend, OU=Mobile, O=ADKDinesh, L=Chennai, ST=Tamil Nadu, C=IN" \
+  -storepass EchoSpend@2026 \
+  -keypass EchoSpend@2026
