@@ -36,6 +36,7 @@ import { useTheme } from '../theme/ThemeProvider';
 import { useStore } from '../store/useStore';
 import {
   deleteTransaction,
+  deleteSplit,
   getAccounts,
   getGoals,
   getLoans,
@@ -114,23 +115,53 @@ const TransactionDetailScreen = () => {
   };
 
   const handleDelete = () => {
-    Alert.alert(
-      'Delete Transaction',
-      `Delete "${transaction.merchant}" for ${formatAmount(transaction.amount, currency)}?\n\nThis will revert any account, goal and loan impacts.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            await deleteTransaction(transaction.id);
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            notify.success('Transaction deleted');
-            navigation.goBack();
+    if (existingSplit) {
+      Alert.alert(
+        'Delete Split too?',
+        `This transaction has an associated split ("${existingSplit.title}"). Do you want to delete the split and its member records as well, or keep it as a standalone split?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Keep Split (Delete Tx)',
+            onPress: async () => {
+              await deleteTransaction(transaction.id);
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+              notify.success('Transaction deleted (split kept)');
+              navigation.goBack();
+            },
           },
-        },
-      ]
-    );
+          {
+            text: 'Delete Both',
+            style: 'destructive',
+            onPress: async () => {
+              await deleteSplit(existingSplit.id);
+              await deleteTransaction(transaction.id);
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+              notify.success('Transaction and split deleted');
+              navigation.goBack();
+            },
+          },
+        ]
+      );
+    } else {
+      Alert.alert(
+        'Delete Transaction',
+        `Delete "${transaction.merchant}" for ${formatAmount(transaction.amount, currency)}?\n\nThis will revert any account, goal and loan impacts.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: async () => {
+              await deleteTransaction(transaction.id);
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+              notify.success('Transaction deleted');
+              navigation.goBack();
+            },
+          },
+        ]
+      );
+    }
   };
 
   const TypeIcon = () => {

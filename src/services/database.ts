@@ -525,15 +525,17 @@ export const seedDatabase = async () => {
     ['Subscriptions', '📡', '#AF52DE', 'expense'],
     ['Personal Care', '🧴', '#FFCC00', 'expense'],
     ['Other', '⭐', '#8E8E93', 'expense'],
+    ['Debt', '🤝', '#FF5E3A', 'expense'],
     ['Salary', '💰', '#34C759', 'income'],
     ['Freelance', '💻', '#5AC8FA', 'income'],
     ['Investments', '📈', '#30D158', 'income'],
     ['Other Income', '⭐', '#8E8E93', 'income'],
+    ['Debt', '🤝', '#FF5E3A', 'income'],
     ['Transfer', '🔄', '#FF9500', 'transfer'],
   ];
 
   for (const [name, icon, color, type] of seedCategories) {
-    const exists = await db.getFirstAsync('SELECT id FROM categories WHERE name = ? AND parentId IS NULL', name);
+    const exists = await db.getFirstAsync('SELECT id FROM categories WHERE name = ? AND type = ? AND parentId IS NULL', name, type);
     if (!exists) {
       await db.runAsync('INSERT INTO categories (name, icon, color, type, parentId) VALUES (?, ?, ?, ?, NULL)', name, icon, color, type);
     }
@@ -837,10 +839,32 @@ const revertTransactionImpact = async (tx: Transaction) => {
   }
 
   if ((tx as any).splitMemberId) {
-    await db.runAsync(
-      'UPDATE split_members SET isPaid = 0, paidDate = NULL, repaidToAccountId = NULL WHERE id = ?',
-      (tx as any).splitMemberId
+    const memberId = (tx as any).splitMemberId;
+    const sumResult = await db.getFirstAsync<{ sum: number }>(
+      'SELECT SUM(amount) AS sum FROM transactions WHERE splitMemberId = ? AND id != ?',
+      memberId, tx.id
     );
+    const totalPaid = sumResult?.sum ?? 0;
+    const member = await db.getFirstAsync<{ share: number }>('SELECT share FROM split_members WHERE id = ?', memberId);
+    if (member) {
+      const isPaid = totalPaid >= member.share ? 1 : 0;
+      let paidDate: string | null = null;
+      let repaidToAccountId: number | null = null;
+      if (totalPaid > 0) {
+        const latestTx = await db.getFirstAsync<any>(
+          'SELECT date, accountId FROM transactions WHERE splitMemberId = ? AND id != ? ORDER BY date DESC, id DESC LIMIT 1',
+          memberId, tx.id
+        );
+        if (latestTx) {
+          paidDate = latestTx.date.split('T')[0];
+          repaidToAccountId = latestTx.accountId;
+        }
+      }
+      await db.runAsync(
+        'UPDATE split_members SET isPaid = ?, paidDate = ?, repaidToAccountId = ? WHERE id = ?',
+        isPaid, paidDate, repaidToAccountId, memberId
+      );
+    }
   }
 
   if (tx.goalId) {
@@ -2181,15 +2205,12 @@ export const createSplit = async (
 };
 
 export const getSplits = async (): Promise<SplitWithStats[]> => {
-  const rows = await db.getAllAsync<SplitWithStats & {
-    memberCount: number; pendingCount: number;
-    collectedAmount: number; pendingAmount: number;
-  }>(
+  const rows = await db.getAllAsync<any>(
     `SELECT s.*,
-       COUNT(sm.id)                                                        AS memberCount,
-       SUM(CASE WHEN sm.isMe=0 AND sm.isPaid=0 THEN 1    ELSE 0 END)      AS pendingCount,
-       SUM(CASE WHEN sm.isMe=0 AND sm.isPaid=1 THEN sm.share ELSE 0 END)  AS collectedAmount,
-       SUM(CASE WHEN sm.isMe=0 AND sm.isPaid=0 THEN sm.share ELSE 0 END)  AS pendingAmount
+       COUNT(sm.id) AS memberCount,
+       SUM(CASE WHEN sm.isMe=0 AND sm.isPaid=0 THEN 1 ELSE 0 END) AS pendingCount,
+       SUM(CASE WHEN sm.isMe=0 THEN (SELECT COALESCE(SUM(t.amount), 0) FROM transactions t WHERE t.splitMemberId = sm.id) ELSE 0 END) AS collectedAmount,
+       SUM(CASE WHEN sm.isMe=0 THEN MAX(0, sm.share - (SELECT COALESCE(SUM(t.amount), 0) FROM transactions t WHERE t.splitMemberId = sm.id)) ELSE 0 END) AS pendingAmount
      FROM splits s
      LEFT JOIN split_members sm ON sm.splitId = s.id
      GROUP BY s.id
@@ -2204,16 +2225,22 @@ export const getSplits = async (): Promise<SplitWithStats[]> => {
   }));
 };
 
-export const getSplitById = async (id: number): Promise<{ split: Split; members: SplitMember[] } | null> => {
+export const getSplitById = async (id: number): Promise<{ split: Split; members: (SplitMember & { paidAmount: number })[] } | null> => {
   const split = await db.getFirstAsync<Split>('SELECT * FROM splits WHERE id = ?', id);
   if (!split) return null;
   const rawMembers = await db.getAllAsync<any>(
-    'SELECT * FROM split_members WHERE splitId = ? ORDER BY isMe DESC, id ASC', id,
+    `SELECT sm.*,
+            COALESCE((SELECT SUM(t.amount) FROM transactions t WHERE t.splitMemberId = sm.id), 0) AS paidAmount
+     FROM split_members sm
+     WHERE sm.splitId = ?
+     ORDER BY sm.isMe DESC, sm.id ASC`,
+    id,
   );
-  const members: SplitMember[] = rawMembers.map(m => ({
+  const members = rawMembers.map(m => ({
     ...m,
     isMe: m.isMe === 1,
     isPaid: m.isPaid === 1,
+    paidAmount: m.paidAmount ?? 0,
   }));
   return { split, members };
 };
@@ -2228,6 +2255,7 @@ export const receiveSplitPayment = async (
   accountId: number,
   splitTitle: string,
   memberName: string,
+  amount?: number,
 ): Promise<number> => {
   const member = await db.getFirstAsync<any>(
     'SELECT * FROM split_members WHERE id = ?', memberId,
@@ -2236,11 +2264,25 @@ export const receiveSplitPayment = async (
 
   const today = new Date().toISOString().split('T')[0];
 
+  // Calculate remaining balance to default the amount if not provided
+  let paymentAmount = amount;
+  if (paymentAmount === undefined) {
+    const sumResult = await db.getFirstAsync<{ sum: number }>(
+      'SELECT SUM(amount) AS sum FROM transactions WHERE splitMemberId = ?', memberId
+    );
+    const totalPaidBefore = sumResult?.sum ?? 0;
+    paymentAmount = Math.max(0, member.share - totalPaidBefore);
+  }
+
+  if (paymentAmount <= 0) {
+    throw new Error('Repayment amount must be greater than 0');
+  }
+
   // Create credit transaction that increases the account balance.
   // Marked as isTransfer=1 so it is excluded from income analytics
   // (split repayments are cost-sharing, not real income).
   const txId = await addTransaction({
-    amount: member.share,
+    amount: paymentAmount,
     category: 'Split',
     merchant: `${memberName} — ${splitTitle}`,
     type: 'credit',
@@ -2253,10 +2295,17 @@ export const receiveSplitPayment = async (
     splitMemberId: memberId,
   } as any);
 
-  // Mark member as paid
+  // Recalculate total paid
+  const sumResultAfter = await db.getFirstAsync<{ sum: number }>(
+    'SELECT SUM(amount) AS sum FROM transactions WHERE splitMemberId = ?', memberId
+  );
+  const totalPaidAfter = sumResultAfter?.sum ?? 0;
+
+  // Mark member as paid if they have fully paid
+  const isPaid = totalPaidAfter >= member.share ? 1 : 0;
   await db.runAsync(
-    `UPDATE split_members SET isPaid=1, paidDate=?, repaidToAccountId=? WHERE id=?`,
-    today, accountId, memberId,
+    `UPDATE split_members SET isPaid=?, paidDate=?, repaidToAccountId=? WHERE id=?`,
+    isPaid, today, accountId, memberId,
   );
 
   return txId;
@@ -2265,7 +2314,7 @@ export const receiveSplitPayment = async (
 export const updateSplit = async (
   id: number,
   split: Partial<Omit<Split, 'id'>>,
-  members?: Omit<SplitMember, 'id' | 'splitId'>[]
+  members?: (Omit<SplitMember, 'id' | 'splitId'> & { id?: number })[]
 ): Promise<void> => {
   // Update split record
   const keys = Object.keys(split);
@@ -2275,26 +2324,52 @@ export const updateSplit = async (
     await db.runAsync(`UPDATE splits SET ${setClauses} WHERE id = ?`, ...values, id);
   }
 
-  // If members provided, replace them
+  // If members provided, update them intelligently to preserve IDs
   if (members) {
-    // We only replace members that are NOT paid, or if it's a "Me" row.
-    // Actually, to keep it simple and consistent with the user's intent to "edit",
-    // we replace all members but try to preserve paid status if possible?
-    // No, if the user is editing the split structure, they should probably know it resets pending status.
-    // But let's try to be smart: if a member with the same name exists and is paid, keep it?
-    // That's too complex. Let's just replace them. The user can manually mark as received again.
+    const keptIds = members.map(m => m.id).filter((memberId): memberId is number => typeof memberId === 'number');
     
-    await db.runAsync('DELETE FROM split_members WHERE splitId = ?', id);
-    for (const m of members) {
+    // Delete members not in keptIds
+    if (keptIds.length > 0) {
+      const placeholders = keptIds.map(() => '?').join(', ');
       await db.runAsync(
-        `INSERT INTO split_members (splitId, name, share, isMe, isPaid, paidDate, repaidToAccountId)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        id, m.name, m.share,
-        m.isMe ? 1 : 0,
-        m.isPaid ? 1 : 0,
-        m.paidDate ?? null,
-        m.repaidToAccountId ?? null,
+        `DELETE FROM split_members WHERE splitId = ? AND id NOT IN (${placeholders})`,
+        id,
+        ...keptIds
       );
+    } else {
+      await db.runAsync('DELETE FROM split_members WHERE splitId = ?', id);
+    }
+
+    // Insert or update members
+    for (const m of members) {
+      if (typeof m.id === 'number') {
+        // Update existing member
+        await db.runAsync(
+          `UPDATE split_members 
+           SET name = ?, share = ?, isMe = ?, isPaid = ?, paidDate = ?, repaidToAccountId = ? 
+           WHERE id = ?`,
+          m.name,
+          m.share,
+          m.isMe ? 1 : 0,
+          m.isPaid ? 1 : 0,
+          m.paidDate ?? null,
+          m.repaidToAccountId ?? null,
+          m.id
+        );
+      } else {
+        // Insert new member
+        await db.runAsync(
+          `INSERT INTO split_members (splitId, name, share, isMe, isPaid, paidDate, repaidToAccountId)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          id,
+          m.name,
+          m.share,
+          m.isMe ? 1 : 0,
+          m.isPaid ? 1 : 0,
+          m.paidDate ?? null,
+          m.repaidToAccountId ?? null
+        );
+      }
     }
   }
 };
@@ -2305,4 +2380,22 @@ export const deleteSplit = async (id: number): Promise<void> => {
 
 export const updateSplitReceiveAccount = async (splitId: number, accountId: number): Promise<void> => {
   await db.runAsync('UPDATE splits SET receiveToAccountId=? WHERE id=?', accountId, splitId);
+};
+
+export const revertLatestRepayment = async (memberId: number): Promise<void> => {
+  const latestTx = await db.getFirstAsync<any>(
+    'SELECT id FROM transactions WHERE splitMemberId = ? ORDER BY date DESC, id DESC LIMIT 1',
+    memberId
+  );
+  if (latestTx) {
+    await deleteTransaction(latestTx.id);
+  } else {
+    throw new Error('No repayment transactions found');
+  }
+};
+
+export const getSplitByTransactionId = async (transactionId: number): Promise<{ split: Split; members: (SplitMember & { paidAmount: number })[] } | null> => {
+  const split = await db.getFirstAsync<Split>('SELECT * FROM splits WHERE transactionId = ?', transactionId);
+  if (!split) return null;
+  return getSplitById(split.id);
 };

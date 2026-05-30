@@ -131,6 +131,7 @@ const SplitExpenseScreen = ({ navigation, route }: any) => {
       const allMembers = [
         // "Me" row — already paid (I paid the full bill)
         { 
+          id: membersToEdit?.find(m => m.isMe)?.id,
           name: 'Me', 
           share: myShare, 
           isMe: true, 
@@ -139,6 +140,7 @@ const SplitExpenseScreen = ({ navigation, route }: any) => {
           repaidToAccountId: membersToEdit?.find(m => m.isMe)?.repaidToAccountId,
         },
         ...members.map(m => ({
+          id: m.key.startsWith('p') ? undefined : Number(m.key),
           name: m.name.trim(),
           share: parseFloat(m.share),
           isMe: false,

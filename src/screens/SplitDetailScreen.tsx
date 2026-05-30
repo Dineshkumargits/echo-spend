@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, ScrollView, TouchableOpacity, Alert,
-  RefreshControl, Modal,
+  RefreshControl, Modal, TextInput,
 } from 'react-native';
 import { MotiView } from 'moti';
 import * as LucideIcons from 'lucide-react-native';
@@ -9,7 +9,7 @@ import {
   LucideArrowLeft, LucideTrash2, LucideCheck, LucideClock,
   LucideSplit, LucideWallet, LucideCreditCard,
   LucideChevronRight, LucideUsers, LucideRepeat, LucideTarget, LucideLandmark,
-  LucideEdit2,
+  LucideEdit2, LucideUndo,
 } from 'lucide-react-native';
 import { useIsFocused } from '@react-navigation/native';
 import { ThemedSafeAreaView, ThemedText } from '../components/ThemedSafeAreaView';
@@ -19,6 +19,7 @@ import { notify } from '../utils/notify';
 import {
   getSplitById, deleteSplit, receiveSplitPayment, updateSplitReceiveAccount,
   getAccounts, getTransactionById, getSubscriptionById, getGoalById, getLoanById,
+  revertLatestRepayment,
   Split, SplitMember, Account, Subscription, Goal, Loan,
 } from '../services/database';
 
@@ -27,15 +28,30 @@ import {
 const ReceiveModal = ({
   member, accounts, defaultAccountId, currency, onConfirm, onClose,
 }: {
-  member: SplitMember;
+  member: SplitMember & { paidAmount: number };
   accounts: Account[];
   defaultAccountId?: number;
   currency: string;
-  onConfirm: (accountId: number) => void;
+  onConfirm: (accountId: number, amount: number) => void;
   onClose: () => void;
 }) => {
   const { colors } = useTheme();
+  const remaining = member.share - (member.paidAmount ?? 0);
+  const [amountStr, setAmountStr] = useState(remaining.toFixed(2));
   const [selected, setSelected] = useState<number>(defaultAccountId ?? accounts[0]?.id ?? 0);
+
+  const handleConfirm = () => {
+    const amt = parseFloat(amountStr);
+    if (isNaN(amt) || amt <= 0) {
+      notify.error('Enter a valid amount');
+      return;
+    }
+    if (amt > remaining + 0.01) {
+      notify.error(`Amount cannot exceed the remaining balance of ${currency}${remaining.toLocaleString('en-IN')}`);
+      return;
+    }
+    onConfirm(selected, amt);
+  };
 
   return (
     <Modal transparent animationType="fade" onRequestClose={onClose}>
@@ -50,9 +66,29 @@ const ReceiveModal = ({
           <ThemedText style={{ fontSize: 17, fontWeight: '700', marginBottom: 4 }}>
             Receive from {member.name}
           </ThemedText>
-          <ThemedText style={{ fontSize: 13, color: colors.secondary, marginBottom: 20 }}>
-            {currency}{member.share.toLocaleString('en-IN')} will be marked as collected and added to the selected account.
+          <ThemedText style={{ fontSize: 13, color: colors.secondary, marginBottom: 16 }}>
+            Total share: {currency}{member.share.toLocaleString('en-IN')} · Already paid: {currency}{(member.paidAmount ?? 0).toLocaleString('en-IN')}
           </ThemedText>
+
+          <ThemedText style={{ fontSize: 11, fontWeight: '700', color: colors.secondary, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>
+            Repayment Amount ({currency})
+          </ThemedText>
+          <TextInput
+            value={amountStr}
+            onChangeText={setAmountStr}
+            keyboardType="decimal-pad"
+            style={{
+              padding: 12,
+              borderRadius: 12,
+              borderWidth: 1.5,
+              borderColor: colors.border,
+              color: colors.primary,
+              backgroundColor: colors.translucent,
+              fontSize: 16,
+              fontWeight: '600',
+              marginBottom: 16,
+            }}
+          />
 
           <ThemedText style={{ fontSize: 11, fontWeight: '700', color: colors.secondary, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 10 }}>
             Add to account
@@ -87,11 +123,11 @@ const ReceiveModal = ({
           })}
 
           <TouchableOpacity
-            onPress={() => selected && onConfirm(selected)}
+            onPress={handleConfirm}
             style={{ marginTop: 8, padding: 16, borderRadius: 14, backgroundColor: colors.success, alignItems: 'center' }}
           >
             <ThemedText style={{ fontSize: 15, fontWeight: '700', color: '#fff' }}>
-              Confirm — Mark {currency}{member.share.toLocaleString('en-IN')} received
+              Confirm — Receive {currency}{parseFloat(amountStr || '0').toLocaleString('en-IN')}
             </ThemedText>
           </TouchableOpacity>
         </TouchableOpacity>
@@ -110,11 +146,11 @@ const SplitDetailScreen = ({ navigation, route }: any) => {
   const cur = preferences.currency;
 
   const [split, setSplit] = useState<Split | null>(null);
-  const [members, setMembers] = useState<SplitMember[]>([]);
+  const [members, setMembers] = useState<(SplitMember & { paidAmount: number })[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [receiveTarget, setReceiveTarget] = useState<SplitMember | null>(null);
+  const [receiveTarget, setReceiveTarget] = useState<(SplitMember & { paidAmount: number }) | null>(null);
 
   // Linked entity context (subscription / goal / loan from the linked transaction)
   const [linkedSub, setLinkedSub] = useState<Subscription | null>(null);
@@ -154,16 +190,40 @@ const SplitDetailScreen = ({ navigation, route }: any) => {
 
   useEffect(() => { if (isFocused) load(); }, [isFocused, load]);
 
-  const handleReceive = async (accountId: number) => {
+  const handleReceive = async (accountId: number, amount: number) => {
     if (!receiveTarget || !split) return;
+    const target = receiveTarget;
     setReceiveTarget(null);
     try {
-      await receiveSplitPayment(receiveTarget.id, accountId, split.title, receiveTarget.name);
-      notify.success(`${cur}${receiveTarget.share.toLocaleString('en-IN')} received from ${receiveTarget.name}`);
+      await receiveSplitPayment(target.id, accountId, split.title, target.name, amount);
+      notify.success(`${cur}${amount.toLocaleString('en-IN')} received from ${target.name}`);
       load();
     } catch {
       notify.error('Failed to record payment');
     }
+  };
+
+  const handleRevertPayment = (member: SplitMember) => {
+    Alert.alert(
+      'Revert Payment',
+      `Delete the latest repayment transaction from ${member.name}? This will increase their pending balance.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Revert',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await revertLatestRepayment(member.id);
+              notify.success(`Reverted latest payment from ${member.name}`);
+              load();
+            } catch (err: any) {
+              notify.error(err?.message ?? 'Failed to revert payment');
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleDelete = () => {
@@ -196,8 +256,8 @@ const SplitDetailScreen = ({ navigation, route }: any) => {
   const others = members.filter(m => !m.isMe);
   const pendingMembers = others.filter(m => !m.isPaid);
   const paidMembers = others.filter(m => m.isPaid);
-  const collectedAmount = paidMembers.reduce((s, m) => s + m.share, 0);
-  const pendingAmount = pendingMembers.reduce((s, m) => s + m.share, 0);
+  const collectedAmount = others.reduce((s, m) => s + (m.paidAmount ?? 0), 0);
+  const pendingAmount = others.reduce((s, m) => s + Math.max(0, m.share - (m.paidAmount ?? 0)), 0);
   const collectedPct = pendingAmount + collectedAmount > 0
     ? (collectedAmount / (pendingAmount + collectedAmount)) * 100
     : 100;
@@ -405,11 +465,25 @@ const SplitDetailScreen = ({ navigation, route }: any) => {
                   </View>
                   <View style={{ flex: 1 }}>
                     <ThemedText style={{ fontSize: 14, fontWeight: '600' }}>{m.name}</ThemedText>
-                    <ThemedText style={{ fontSize: 12, color: colors.secondary, marginTop: 2 }}>Owes you</ThemedText>
+                    {m.paidAmount > 0 ? (
+                      <ThemedText style={{ fontSize: 11, color: colors.secondary, marginTop: 2 }}>
+                        paid {cur}{m.paidAmount.toLocaleString('en-IN')} of {cur}{m.share.toLocaleString('en-IN')}
+                      </ThemedText>
+                    ) : (
+                      <ThemedText style={{ fontSize: 12, color: colors.secondary, marginTop: 2 }}>Owes you</ThemedText>
+                    )}
                   </View>
                   <ThemedText style={{ fontSize: 16, fontWeight: '700', color: colors.warning, marginRight: 8 }}>
-                    {cur}{m.share.toLocaleString('en-IN')}
+                    {cur}{(m.share - m.paidAmount).toLocaleString('en-IN')}
                   </ThemedText>
+                  {m.paidAmount > 0 && (
+                    <TouchableOpacity
+                      onPress={() => handleRevertPayment(m)}
+                      style={{ padding: 6, marginRight: 4 }}
+                    >
+                      <LucideUndo color={colors.danger} size={15} />
+                    </TouchableOpacity>
+                  )}
                   <TouchableOpacity
                     onPress={() => setReceiveTarget(m)}
                     style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 99, backgroundColor: `${colors.success}18`, borderWidth: 1, borderColor: `${colors.success}40` }}
@@ -459,6 +533,12 @@ const SplitDetailScreen = ({ navigation, route }: any) => {
                     <ThemedText style={{ fontSize: 15, fontWeight: '700', color: colors.success }}>
                       {cur}{m.share.toLocaleString('en-IN')}
                     </ThemedText>
+                    <TouchableOpacity
+                      onPress={() => handleRevertPayment(m)}
+                      style={{ padding: 6, marginLeft: 8 }}
+                    >
+                      <LucideUndo color={colors.danger} size={16} />
+                    </TouchableOpacity>
                   </View>
                 );
               })}

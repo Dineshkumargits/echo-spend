@@ -1,8 +1,9 @@
 import { ThemedSafeAreaView, ThemedText } from '../components/ThemedSafeAreaView';
-import React, { useState, useEffect, useMemo } from 'react';
-import { View, StyleSheet, TextInput, TouchableOpacity, ScrollView, Platform, KeyboardAvoidingView, Modal, ActivityIndicator } from 'react-native';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { View, StyleSheet, TextInput, TouchableOpacity, ScrollView, Platform, KeyboardAvoidingView, Modal, ActivityIndicator, Alert } from 'react-native';
+import { MotiView } from 'moti';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { LucideX, LucideSave, LucideCheck, LucidePlus, LucideCalendar, LucideSearch, LucideTag, LucideChevronRight } from 'lucide-react-native';
+import { LucideX, LucideSave, LucideCheck, LucidePlus, LucideCalendar, LucideSearch, LucideTag, LucideChevronRight, LucideUsers, LucideToggleLeft, LucideToggleRight, LucideWallet, LucideTrash2 } from 'lucide-react-native';
 
 import * as Haptics from 'expo-haptics';
 import { notify } from '../utils/notify';
@@ -20,6 +21,10 @@ import {
   Loan,
   getSubscriptions,
   Subscription,
+  getSplitByTransactionId,
+  createSplit,
+  updateSplit,
+  deleteSplit,
 } from '../services/database';
 import { useTheme } from '../theme/ThemeProvider';
 import { useStore } from '../store/useStore';
@@ -68,6 +73,21 @@ export const EditTransactionScreen = () => {
   const [categoryModalVisible, setCategoryModalVisible] = useState(false);
   const [categorySearch, setCategorySearch] = useState('');
 
+  // Split configurations
+  const [splitEnabled, setSplitEnabled] = useState(false);
+  const [splitEqually, setSplitEqually] = useState(true);
+  const [receiveToAccountId, setReceiveToAccountId] = useState<number | null>(null);
+  const [meDbId, setMeDbId] = useState<number | null>(null);
+  const [existingSplitId, setExistingSplitId] = useState<number | null>(null);
+
+  interface MemberRow {
+    key: string;
+    id?: number;
+    name: string;
+    share: string;
+  }
+  const [splitMembers, setSplitMembers] = useState<MemberRow[]>([{ key: 'p1', name: '', share: '' }]);
+
   const handleDateChange = (event: any, selectedDate?: Date) => {
     if (Platform.OS === 'android') {
       if (event.type === 'set' && selectedDate) {
@@ -99,23 +119,183 @@ export const EditTransactionScreen = () => {
     getCategories().then(setCategories);
   };
 
-
-
   useEffect(() => {
     Promise.all([
       getCategories(),
       getAccounts(),
       getGoals(true),
       getLoans(true),
-      getSubscriptions(true)
-    ]).then(([cats, accs, gs, ls, ss]) => {
+      getSubscriptions(true),
+      getSplitByTransactionId(transaction.id),
+    ]).then(([cats, accs, gs, ls, ss, splitData]) => {
       setCategories(cats);
       setAccounts(accs);
       setGoals(gs);
       setLoans(ls);
       setSubscriptions(ss);
+
+      if (splitData) {
+        setExistingSplitId(splitData.split.id);
+        setSplitEnabled(true);
+        setReceiveToAccountId(splitData.split.receiveToAccountId || (accs[0]?.id ?? null));
+        
+        const meMember = splitData.members.find(m => m.isMe);
+        if (meMember) {
+          setMeDbId(meMember.id);
+        }
+        
+        const others = splitData.members.filter(m => !m.isMe);
+        if (others.length > 0) {
+          setSplitMembers(others.map((m) => ({
+            key: m.id.toString(),
+            id: m.id,
+            name: m.name,
+            share: m.share.toString(),
+          })));
+        }
+        
+        // Determine splitEqually
+        const allSharesEqual = splitData.members.every(m => m.share === splitData.members[0].share);
+        setSplitEqually(allSharesEqual);
+      } else {
+        if (accs.length > 0) {
+          setReceiveToAccountId(accs[0].id);
+        }
+      }
     });
+  }, [transaction.id]);
+
+  useEffect(() => {
+    if (type !== 'debit') {
+      setSplitEnabled(false);
+    }
+  }, [type]);
+
+  // Synchronize category selection and Personal Debt (isBorrowed) toggle
+  useEffect(() => {
+    setIsBorrowed(category === 'Debt');
+  }, [category]);
+
+  const handleToggleBorrowed = (val: boolean) => {
+    setIsBorrowed(val);
+    if (val) {
+      setCategory('Debt');
+    } else {
+      const otherMatch = categories.find(c => c.name === 'Other' && (
+        type === 'transfer' ? c.type === 'transfer' :
+          (type === 'debit' ? c.type === 'expense' : c.type === 'income')
+      ));
+      if (otherMatch) {
+        setCategory(otherMatch.name);
+      } else {
+        const firstMatch = categories.find(c => {
+          if (type === 'transfer') return c.type === 'transfer';
+          return type === 'debit' ? c.type === 'expense' : c.type === 'income';
+        });
+        if (firstMatch) setCategory(firstMatch.name);
+      }
+    }
+    Haptics.selectionAsync();
+  };
+
+  // Helper calculations for split
+  const total = parseFloat(amount) || 0;
+  const othersTotal = splitMembers.reduce((s, m) => s + (parseFloat(m.share) || 0), 0);
+  const myShare = Math.max(0, Math.round((total - othersTotal) * 100) / 100);
+
+  const distributeEqually = useCallback((count: number, tot: number) => {
+    if (count < 1 || tot <= 0) return '';
+    const each = tot / (count + 1); // +1 for "me"
+    return each.toFixed(2);
   }, []);
+
+  useEffect(() => {
+    if (!splitEqually || !splitEnabled) return;
+    const share = distributeEqually(splitMembers.length, total);
+    setSplitMembers(prev => prev.map(m => ({ ...m, share })));
+  }, [splitEqually, splitMembers.length, total, splitEnabled, distributeEqually]);
+
+  const addSplitMember = () => {
+    const key = `p${Date.now()}`;
+    const share = splitEqually ? distributeEqually(splitMembers.length + 1, total) : '';
+    setSplitMembers(prev => [...prev, { key, name: '', share }]);
+    Haptics.selectionAsync();
+  };
+
+  const removeSplitMember = (key: string) => {
+    if (splitMembers.length === 1) return;
+    setSplitMembers(prev => {
+      const next = prev.filter(m => m.key !== key);
+      if (splitEqually) {
+        const share = distributeEqually(next.length, total);
+        return next.map(m => ({ ...m, share }));
+      }
+      return next;
+    });
+    Haptics.selectionAsync();
+  };
+
+  const updateSplitMember = (key: string, field: 'name' | 'share', value: string) => {
+    setSplitMembers(prev => prev.map(m => m.key === key ? { ...m, [field]: value } : m));
+  };
+
+  // Entity Linkers
+  const handleSubSelect = (id: number | null) => {
+    setSelectedGoal(null);
+    setSelectedLoan(null);
+    setSelectedSub(id);
+    if (!id) return;
+    const sub = subscriptions.find(s => s.id === id);
+    if (!sub) return;
+    if (!merchant) setMerchant(sub.name);
+    if (sub.amount && !amount) setAmount(String(sub.amount));
+    setCategory(sub.category);
+
+    // Auto-prefill split from subscription if enabled
+    if (sub.splitEnabled && sub.splitMembers) {
+      try {
+        const subMembers = JSON.parse(sub.splitMembers) as { name: string }[];
+        if (subMembers.length > 0) {
+          setSplitEnabled(true);
+          setSplitEqually(true);
+          const membersList = subMembers.map((m, idx) => ({
+            key: `p${idx + 1}`,
+            name: m.name,
+            share: '',
+          }));
+          setSplitMembers(membersList);
+        }
+      } catch (err) {
+        console.warn('Failed to parse subscription split members', err);
+      }
+    }
+    if (sub.debitAccountId) setSelectedAccount(sub.debitAccountId);
+  };
+
+  const handleGoalSelect = (id: number | null) => {
+    setSelectedSub(null);
+    setSelectedLoan(null);
+    setSelectedGoal(id);
+    if (!id) return;
+    const goal = goals.find(g => g.id === id);
+    if (!goal) return;
+    if (!merchant) setMerchant(goal.name);
+    setCategory(goal.category);
+    if (goal.linkedAccountId) setSelectedAccount(goal.linkedAccountId);
+  };
+
+  const handleLoanSelect = (id: number | null) => {
+    setSelectedSub(null);
+    setSelectedGoal(null);
+    setSelectedLoan(id);
+    if (!id) return;
+    const loan = loans.find(l => l.id === id);
+    if (!loan) return;
+    if (!merchant) setMerchant(loan.lender);
+    if (loan.emiAmount && !amount) setAmount(String(loan.emiAmount));
+    setCategory('Bills');
+    if (loan.linkedAccountId) setSelectedAccount(loan.linkedAccountId);
+  };
 
   const validate = (): boolean => {
     const newErrors: typeof errors = {};
@@ -125,7 +305,7 @@ export const EditTransactionScreen = () => {
     }
     if (parsedAmount > 10_000_000) {
       const currency = preferences?.currency ?? '₹';
-      newErrors.amount = `Amount cannot exceed ${currency}1,00,00,000`;
+      newErrors.amount = `Amount cannot exceed ${currency}1,0,00,000`;
     }
     if (!merchant.trim()) {
       newErrors.merchant = 'Merchant name is required';
@@ -141,8 +321,102 @@ export const EditTransactionScreen = () => {
     } else if (type === 'transfer' && selectedAccount === selectedToAccount) {
       newErrors.toAccount = 'Source and destination cannot be the same';
     }
+
+    if (splitEnabled && type === 'debit') {
+      if (splitMembers.some(m => !m.name.trim())) {
+        notify.error('Enter a name for each person in split');
+        return false;
+      }
+      if (splitMembers.some(m => (parseFloat(m.share) || 0) <= 0)) {
+        notify.error('Each person needs a split share > 0');
+        return false;
+      }
+      if (othersTotal >= parsedAmount) {
+        notify.error("Others' total share cannot exceed the transaction amount");
+        return false;
+      }
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
+  };
+
+  const performSave = async (shouldDeleteSplit = false) => {
+    setSaving(true);
+    try {
+      await updateTransaction(transaction.id, {
+        amount: parseFloat(amount),
+        merchant: merchant.trim(),
+        category,
+        type,
+        date: date.toISOString(),
+        notes: notes.trim() || undefined,
+        isConfirmed: true,
+        isTransfer: type === 'transfer',
+        accountId: selectedAccount || undefined,
+        toAccountId: type === 'transfer' ? (selectedToAccount || undefined) : undefined,
+        goalId: selectedGoal || undefined,
+        loanId: selectedLoan || undefined,
+        subscriptionId: selectedSub || undefined,
+        tags: tags.length > 0 ? tags : undefined,
+      });
+
+      if (shouldDeleteSplit && existingSplitId !== null) {
+        await deleteSplit(existingSplitId);
+      } else if (splitEnabled && type === 'debit') {
+        const allMembers = [
+          { 
+            id: meDbId || undefined,
+            name: 'Me', 
+            share: myShare, 
+            isMe: true, 
+            isPaid: true 
+          },
+          ...splitMembers.map(m => ({
+            id: m.id || undefined,
+            name: m.name.trim(),
+            share: parseFloat(m.share),
+            isMe: false,
+            isPaid: false,
+          })),
+        ];
+
+        if (existingSplitId !== null) {
+          await updateSplit(
+            existingSplitId,
+            {
+              title: merchant.trim(),
+              totalAmount: parseFloat(amount),
+              paidByAccountId: selectedAccount || undefined,
+              receiveToAccountId: receiveToAccountId || undefined,
+              date: date.toISOString().split('T')[0],
+            },
+            allMembers
+          );
+        } else {
+          await createSplit(
+            {
+              transactionId: transaction.id,
+              title: merchant.trim(),
+              totalAmount: parseFloat(amount),
+              paidByAccountId: selectedAccount || undefined,
+              receiveToAccountId: receiveToAccountId || undefined,
+              date: date.toISOString().split('T')[0],
+            },
+            allMembers
+          );
+        }
+      }
+
+      notify.success('Transaction updated');
+      checkBudgetAlerts();
+      navigation.goBack();
+    } catch (err) {
+      console.error('Error saving transaction', err);
+      notify.error('Failed to update transaction');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleSave = async () => {
@@ -152,26 +426,26 @@ export const EditTransactionScreen = () => {
     }
 
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    await updateTransaction(transaction.id, {
-      amount: parseFloat(amount),
-      merchant: merchant.trim(),
-      category,
-      type,
-      date: date.toISOString(),
-      notes: notes.trim() || undefined,
-      isConfirmed: true,
-      isTransfer: type === 'transfer',
-      accountId: selectedAccount || undefined,
-      toAccountId: type === 'transfer' ? (selectedToAccount || undefined) : undefined,
-      goalId: selectedGoal || undefined,
-      loanId: selectedLoan || undefined,
-      subscriptionId: selectedSub || undefined,
-      tags: tags.length > 0 ? tags : undefined,
-    });
 
-    notify.success('Transaction updated');
-    checkBudgetAlerts();
-    navigation.goBack();
+    const splitWasEnabled = existingSplitId !== null;
+    const splitIsDisabledNow = !splitEnabled || type !== 'debit';
+
+    if (splitWasEnabled && splitIsDisabledNow) {
+      Alert.alert(
+        'Disable Split?',
+        'Disabling split will remove all member records. Existing repayments in your accounts will remain.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { 
+            text: 'Confirm', 
+            style: 'destructive',
+            onPress: () => performSave(true) 
+          }
+        ]
+      );
+    } else {
+      await performSave(false);
+    }
   };
 
 
@@ -374,13 +648,148 @@ export const EditTransactionScreen = () => {
                 selectedGoal={selectedGoal}
                 selectedLoan={selectedLoan}
                 selectedSub={selectedSub}
-                onGoal={id => { setSelectedLoan(null); setSelectedSub(null); setSelectedGoal(id); }}
-                onLoan={id => { setSelectedGoal(null); setSelectedSub(null); setSelectedLoan(id); }}
-                onSub={id => { setSelectedGoal(null); setSelectedLoan(null); setSelectedSub(id); }}
+                onGoal={handleGoalSelect}
+                onLoan={handleLoanSelect}
+                onSub={handleSubSelect}
                 colors={colors}
                 currency={preferences.currency}
               />
             </View>
+
+            {/* Split Expense Inline Section */}
+            {type === 'debit' && (
+              <View style={[themedStyles.field, { backgroundColor: colors.surface, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: splitEnabled ? `${colors.accent}50` : colors.border, marginBottom: 24 }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: splitEnabled ? 16 : 0 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                    <LucideUsers color={splitEnabled ? colors.accent : colors.secondary} size={20} />
+                    <View>
+                      <ThemedText style={{ fontWeight: 'bold', fontSize: 15 }}>Split this Expense</ThemedText>
+                      <ThemedText type="secondary" className="text-xs">Split bill with friends</ThemedText>
+                    </View>
+                  </View>
+                  <TouchableOpacity onPress={() => { setSplitEnabled(v => !v); Haptics.selectionAsync(); }}>
+                    {splitEnabled ? (
+                      <LucideToggleRight color={colors.accent} size={32} />
+                    ) : (
+                      <LucideToggleLeft color={colors.muted} size={32} />
+                    )}
+                  </TouchableOpacity>
+                </View>
+
+                {splitEnabled && (
+                  <MotiView
+                    from={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    transition={{ type: 'timing', duration: 200 }}
+                    style={{ overflow: 'hidden' }}
+                  >
+                    {/* Repayment account selector */}
+                    <View style={{ marginBottom: 16, marginTop: 12 }}>
+                      <ThemedText style={{ fontSize: 11, fontWeight: '700', color: colors.secondary, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8 }}>
+                        Collect Repayments To
+                      </ThemedText>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                        {accounts.map(acc => (
+                          <TouchableOpacity
+                            key={`repay-to-${acc.id}`}
+                            onPress={() => setReceiveToAccountId(acc.id)}
+                            style={{
+                              flexDirection: 'row', alignItems: 'center', gap: 6,
+                              paddingHorizontal: 12, paddingVertical: 8, borderRadius: 99,
+                              borderWidth: 1.5,
+                              backgroundColor: receiveToAccountId === acc.id ? `${colors.accent}18` : 'transparent',
+                              borderColor: receiveToAccountId === acc.id ? colors.accent : colors.border,
+                            }}
+                          >
+                            <LucideWallet color={receiveToAccountId === acc.id ? colors.accent : colors.secondary} size={13} />
+                            <ThemedText style={{ fontSize: 13, fontWeight: '600', color: receiveToAccountId === acc.id ? colors.accent : colors.primary }}>
+                              {acc.name}
+                            </ThemedText>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </View>
+
+                    {/* Split equally toggle */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, padding: 12, borderRadius: 12, backgroundColor: colors.translucent, borderWidth: 1, borderColor: colors.border }}>
+                      <View>
+                        <ThemedText style={{ fontSize: 13, fontWeight: '600' }}>Split equally</ThemedText>
+                        <ThemedText style={{ fontSize: 11, color: colors.secondary, marginTop: 2 }}>Auto-divide including you</ThemedText>
+                      </View>
+                      <TouchableOpacity onPress={() => { setSplitEqually(v => !v); Haptics.selectionAsync(); }}>
+                        {splitEqually ? (
+                          <LucideToggleRight color={colors.accent} size={28} />
+                        ) : (
+                          <LucideToggleLeft color={colors.muted} size={28} />
+                        )}
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Members title & Add button */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                      <ThemedText style={{ fontSize: 11, fontWeight: '700', color: colors.secondary, textTransform: 'uppercase', letterSpacing: 0.8 }}>
+                        Split with
+                      </ThemedText>
+                      <TouchableOpacity
+                        onPress={addSplitMember}
+                        style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 99, backgroundColor: `${colors.accent}18` }}
+                      >
+                        <LucidePlus color={colors.accent} size={12} />
+                        <ThemedText style={{ fontSize: 12, fontWeight: '700', color: colors.accent }}>Add person</ThemedText>
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Me row (read-only) */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10, padding: 12, borderRadius: 12, backgroundColor: `${colors.accent}10`, borderWidth: 1, borderColor: `${colors.accent}30` }}>
+                      <View style={{ width: 32, height: 32, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: `${colors.accent}20` }}>
+                        <ThemedText style={{ fontSize: 12, fontWeight: '800', color: colors.accent }}>Me</ThemedText>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <ThemedText style={{ fontSize: 13, fontWeight: '600', color: colors.accent }}>You (paid full bill)</ThemedText>
+                      </View>
+                      <View style={{ alignItems: 'flex-end' }}>
+                        <ThemedText style={{ fontSize: 14, fontWeight: '700', color: colors.accent }}>
+                          {preferences.currency}{myShare > 0 ? myShare.toFixed(2) : '—'}
+                        </ThemedText>
+                      </View>
+                    </View>
+
+                    {/* Member rows */}
+                    {splitMembers.map((m, idx) => (
+                      <View key={m.key} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                        <View style={{ width: 32, height: 32, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.translucent, borderWidth: 1, borderColor: colors.border }}>
+                          <ThemedText style={{ fontSize: 12, fontWeight: '700', color: colors.secondary }}>{idx + 1}</ThemedText>
+                        </View>
+                        <TextInput
+                          value={m.name}
+                          onChangeText={v => updateSplitMember(m.key, 'name', v)}
+                          placeholder="Name"
+                          placeholderTextColor={colors.muted}
+                          style={{ flex: 1, padding: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.border, color: colors.primary, backgroundColor: colors.surface, fontSize: 14 }}
+                        />
+                        <View style={{ flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: colors.border, borderRadius: 10, backgroundColor: colors.surface, paddingHorizontal: 8 }}>
+                          <ThemedText style={{ fontSize: 13, color: colors.secondary }}>{preferences.currency}</ThemedText>
+                          <TextInput
+                            value={m.share}
+                            onChangeText={v => !splitEqually && updateSplitMember(m.key, 'share', v)}
+                            editable={!splitEqually}
+                            keyboardType="decimal-pad"
+                            placeholder="0"
+                            placeholderTextColor={colors.muted}
+                            style={{ width: 60, padding: 10, fontSize: 14, fontWeight: '600', color: splitEqually ? colors.secondary : colors.primary }}
+                          />
+                        </View>
+                        {splitMembers.length > 1 && (
+                          <TouchableOpacity onPress={() => removeSplitMember(m.key)} style={{ padding: 4 }}>
+                            <LucideTrash2 color={colors.danger} size={16} />
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    ))}
+                  </MotiView>
+                )}
+              </View>
+            )}
 
             {/* 7. Borrowed Toggle */}
             <View style={[themedStyles.field, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}>
@@ -389,7 +798,7 @@ export const EditTransactionScreen = () => {
                 <ThemedText type="secondary" className="text-xs">Borrowed or Lent money</ThemedText>
               </View>
               <TouchableOpacity
-                onPress={() => setIsBorrowed(!isBorrowed)}
+                onPress={() => handleToggleBorrowed(!isBorrowed)}
                 style={{
                   width: 50, height: 30, borderRadius: 15,
                   backgroundColor: isBorrowed ? colors.warning : colors.muted,

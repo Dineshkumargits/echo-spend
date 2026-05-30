@@ -86,7 +86,10 @@ export const NotificationService = {
           body: `${text} — tap to review`,
           data: { screen: 'SmartInbox' },
           sound: 'default',
-          ...(Platform.OS === 'android' && { channelId: 'transactions' }),
+          ...(Platform.OS === 'android' && { 
+            channelId: 'transactions',
+            priority: Notifications.AndroidNotificationPriority.HIGH,
+          }),
         },
         trigger: null,
       });
@@ -112,7 +115,10 @@ export const NotificationService = {
           body,
           data: { screen: 'SmartInbox' },
           sound: 'default',
-          ...(Platform.OS === 'android' && { channelId: 'transactions' }),
+          ...(Platform.OS === 'android' && { 
+            channelId: 'transactions',
+            priority: Notifications.AndroidNotificationPriority.HIGH,
+          }),
         },
         trigger: null,
       });
@@ -139,7 +145,10 @@ export const NotificationService = {
           body,
           data: { screen: 'Home' },
           sound: 'default',
-          ...(Platform.OS === 'android' && { channelId: 'alerts' }),
+          ...(Platform.OS === 'android' && { 
+            channelId: 'alerts',
+            priority: Notifications.AndroidNotificationPriority.MAX,
+          }),
         },
         trigger: null,
       });
@@ -154,7 +163,10 @@ export const NotificationService = {
           body: `You spent ${currency}${totalSpent.toLocaleString('en-IN')} this week. Most spent on ${topCategory}.`,
           data: { screen: 'Analytics' },
           sound: 'default',
-          ...(Platform.OS === 'android' && { channelId: 'digest' }),
+          ...(Platform.OS === 'android' && { 
+            channelId: 'digest',
+            priority: Notifications.AndroidNotificationPriority.DEFAULT,
+          }),
         },
         trigger: null,
       });
@@ -176,13 +188,16 @@ export const NotificationService = {
           body: "Don't forget to add today's expenses! Tap to open Echo Spend.",
           data: { screen: 'Home' },
           sound: 'default',
+          ...(Platform.OS === 'android' && { 
+            channelId: 'alerts',
+            priority: Notifications.AndroidNotificationPriority.MAX,
+          }),
         },
         trigger: {
           type: Notifications.SchedulableTriggerInputTypes.DAILY,
           hour: 21,
           minute: 0,
           repeats: true,
-          ...(Platform.OS === 'android' && { channelId: 'alerts' }),
         } as any,
       });
     } catch (e) {
@@ -263,7 +278,10 @@ export const NotificationService = {
           body: `You have ${count} transactions waiting to be confirmed. Tap to review.`,
           data: { screen: 'SmartInbox' },
           sound: 'default',
-          ...(Platform.OS === 'android' && { channelId: 'transactions' }),
+          ...(Platform.OS === 'android' && { 
+            channelId: 'transactions',
+            priority: Notifications.AndroidNotificationPriority.HIGH,
+          }),
         },
         trigger: null,
       });
@@ -277,7 +295,10 @@ export const NotificationService = {
           title: `⚠️ ${title}`,
           body,
           sound: 'default',
-          ...(Platform.OS === 'android' && { channelId: 'alerts' }),
+          ...(Platform.OS === 'android' && { 
+            channelId: 'alerts',
+            priority: Notifications.AndroidNotificationPriority.MAX,
+          }),
         },
         trigger: null,
       });
@@ -291,13 +312,22 @@ export const NotificationService = {
         return;
       }
 
+      const priority = channelId === 'alerts'
+        ? Notifications.AndroidNotificationPriority.MAX
+        : (channelId === 'transactions'
+          ? Notifications.AndroidNotificationPriority.HIGH
+          : Notifications.AndroidNotificationPriority.DEFAULT);
+
       await Notifications.scheduleNotificationAsync({
         content: {
           title,
           body,
           sound: 'default',
           data,
-          ...(Platform.OS === 'android' && { channelId }),
+          ...(Platform.OS === 'android' && { 
+            channelId,
+            priority,
+          }),
         },
         trigger: null,
       });

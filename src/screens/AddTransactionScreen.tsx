@@ -1,14 +1,16 @@
 import { ThemedSafeAreaView, ThemedText } from '../components/ThemedSafeAreaView';
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { View, StyleSheet, TextInput, TouchableOpacity, ScrollView, Platform, KeyboardAvoidingView, Alert, Modal, ActivityIndicator } from 'react-native';
+import { MotiView } from 'moti';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { LucideX, LucideCheck, LucideRepeat, LucideTarget, LucideLandmark, LucideChevronDown, LucideChevronUp, LucideUsers, LucidePlus, LucideCalendar, LucideSearch, LucideTag, LucideChevronRight } from 'lucide-react-native';
+import { LucideX, LucideCheck, LucideRepeat, LucideTarget, LucideLandmark, LucideChevronDown, LucideChevronUp, LucideUsers, LucidePlus, LucideCalendar, LucideSearch, LucideTag, LucideChevronRight, LucideSplit, LucideToggleLeft, LucideToggleRight, LucideWallet, LucideTrash2 } from 'lucide-react-native';
 import { renderCategoryIcon } from '../components/CategoryManager';
 import * as Haptics from 'expo-haptics';
 import { notify } from '../utils/notify';
 import { useNavigation } from '@react-navigation/native';
 import {
   addTransaction,
+  createSplit,
   getCategories,
   Category,
   getAccounts,
@@ -299,7 +301,22 @@ export const AddTransactionScreen = ({ navigation: navProp, route }: any) => {
   const [errors, setErrors] = useState<{ amount?: string; merchant?: string; account?: string; toAccount?: string }>({});
   const [saving, setSaving] = useState(false);
   const [categorySearch, setCategorySearch] = useState('');
-  const [modalVisible, setModalVisible] = useState(false); // This was for a different modal if any, but search is handled by component
+  const [modalVisible, setModalVisible] = useState(false);
+
+  // Split configurations
+  const [splitEnabled, setSplitEnabled] = useState(false);
+  const [splitEqually, setSplitEqually] = useState(true);
+  const [receiveToAccountId, setReceiveToAccountId] = useState<number | null>(null);
+
+  interface MemberRow {
+    key: string;
+    name: string;
+    share: string;
+  }
+  const [splitMembers, setSplitMembers] = useState<MemberRow[]>([{ key: 'p1', name: '', share: '' }]);
+
+  // Personal Debt state
+  const [isBorrowed, setIsBorrowed] = useState(false);
 
 
   const themedStyles = useMemo(() => createThemedStyles(colors, isDark), [colors, isDark]);
@@ -362,7 +379,12 @@ export const AddTransactionScreen = ({ navigation: navProp, route }: any) => {
         if (firstMatch) setCategory(firstMatch.name);
       }
 
-      if (accs.length > 0 && !prefill.accountId) setSelectedAccount(accs[0].id);
+      if (accs.length > 0 && !prefill.accountId) {
+        setSelectedAccount(accs[0].id);
+        setReceiveToAccountId(accs[0].id);
+      } else if (accs.length > 0) {
+        setReceiveToAccountId(prefill.accountId ?? accs[0].id);
+      }
     });
   }, []);
 
@@ -378,6 +400,25 @@ export const AddTransactionScreen = ({ navigation: navProp, route }: any) => {
     if (sub.amount && !amount) setAmount(String(sub.amount));
     setCategory(sub.category);
     setIsRecurring(true);
+
+    // Auto-prefill split from subscription if enabled
+    if (sub.splitEnabled && sub.splitMembers) {
+      try {
+        const subMembers = JSON.parse(sub.splitMembers) as { name: string }[];
+        if (subMembers.length > 0) {
+          setSplitEnabled(true);
+          setSplitEqually(true);
+          const membersList = subMembers.map((m, idx) => ({
+            key: `p${idx + 1}`,
+            name: m.name,
+            share: '',
+          }));
+          setSplitMembers(membersList);
+        }
+      } catch (err) {
+        console.warn('Failed to parse subscription split members', err);
+      }
+    }
     if (sub.debitAccountId) setSelectedAccount(sub.debitAccountId);
   };
 
@@ -426,6 +467,33 @@ export const AddTransactionScreen = ({ navigation: navProp, route }: any) => {
     }
   }, [type, categories]);
 
+  // Synchronize category selection and Personal Debt (isBorrowed) toggle
+  useEffect(() => {
+    setIsBorrowed(category === 'Debt');
+  }, [category]);
+
+  const handleToggleBorrowed = (val: boolean) => {
+    setIsBorrowed(val);
+    if (val) {
+      setCategory('Debt');
+    } else {
+      const otherMatch = categories.find(c => c.name === 'Other' && (
+        type === 'transfer' ? c.type === 'transfer' :
+          (type === 'debit' ? c.type === 'expense' : c.type === 'income')
+      ));
+      if (otherMatch) {
+        setCategory(otherMatch.name);
+      } else {
+        const firstMatch = categories.find(c => {
+          if (type === 'transfer') return c.type === 'transfer';
+          return type === 'debit' ? c.type === 'expense' : c.type === 'income';
+        });
+        if (firstMatch) setCategory(firstMatch.name);
+      }
+    }
+    Haptics.selectionAsync();
+  };
+
   const validate = (): boolean => {
     const newErrors: typeof errors = {};
     const parsed = parseFloat(amount);
@@ -448,8 +516,65 @@ export const AddTransactionScreen = ({ navigation: navProp, route }: any) => {
     } else if (type === 'transfer' && selectedAccount === selectedToAccount) {
       newErrors.toAccount = 'Source and destination cannot be the same';
     }
+
+    if (splitEnabled && type === 'debit') {
+      if (splitMembers.some(m => !m.name.trim())) {
+        notify.error('Enter a name for each person in split');
+        return false;
+      }
+      if (splitMembers.some(m => (parseFloat(m.share) || 0) <= 0)) {
+        notify.error('Each person needs a split share > 0');
+        return false;
+      }
+      if (othersTotal >= parsed) {
+        notify.error("Others' total share cannot exceed the transaction amount");
+        return false;
+      }
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
+  };
+
+  // Helper calculations for split
+  const total = parseFloat(amount) || 0;
+  const othersTotal = splitMembers.reduce((s, m) => s + (parseFloat(m.share) || 0), 0);
+  const myShare = Math.max(0, Math.round((total - othersTotal) * 100) / 100);
+
+  const distributeEqually = useCallback((count: number, tot: number) => {
+    if (count < 1 || tot <= 0) return '';
+    const each = tot / (count + 1); // +1 for "me"
+    return each.toFixed(2);
+  }, []);
+
+  useEffect(() => {
+    if (!splitEqually || !splitEnabled) return;
+    const share = distributeEqually(splitMembers.length, total);
+    setSplitMembers(prev => prev.map(m => ({ ...m, share })));
+  }, [splitEqually, splitMembers.length, total, splitEnabled, distributeEqually]);
+
+  const addSplitMember = () => {
+    const key = `p${Date.now()}`;
+    const share = splitEqually ? distributeEqually(splitMembers.length + 1, total) : '';
+    setSplitMembers(prev => [...prev, { key, name: '', share }]);
+    Haptics.selectionAsync();
+  };
+
+  const removeSplitMember = (key: string) => {
+    if (splitMembers.length === 1) return;
+    setSplitMembers(prev => {
+      const next = prev.filter(m => m.key !== key);
+      if (splitEqually) {
+        const share = distributeEqually(next.length, total);
+        return next.map(m => ({ ...m, share }));
+      }
+      return next;
+    });
+    Haptics.selectionAsync();
+  };
+
+  const updateSplitMember = (key: string, field: 'name' | 'share', value: string) => {
+    setSplitMembers(prev => prev.map(m => m.key === key ? { ...m, [field]: value } : m));
   };
 
   const handleSave = async () => {
@@ -478,36 +603,32 @@ export const AddTransactionScreen = ({ navigation: navProp, route }: any) => {
       tags: tags.length > 0 ? tags : undefined,
     });
 
+    if (splitEnabled && type === 'debit') {
+      const allMembers = [
+        { name: 'Me', share: myShare, isMe: true, isPaid: true },
+        ...splitMembers.map(m => ({
+          name: m.name.trim(),
+          share: parseFloat(m.share),
+          isMe: false,
+          isPaid: false,
+        })),
+      ];
+      await createSplit(
+        {
+          transactionId: txId,
+          title: merchant.trim(),
+          totalAmount: parseFloat(amount),
+          paidByAccountId: selectedAccount || undefined,
+          receiveToAccountId: receiveToAccountId || undefined,
+          date: date.toISOString().split('T')[0],
+        },
+        allMembers
+      );
+    }
+
     notify.success('Transaction saved');
     checkBudgetAlerts();
-
-    // If linked sub has split enabled, offer to create a split
-    const sub = selectedSub ? subscriptions.find(s => s.id === selectedSub) : null;
-    if (sub?.splitEnabled && sub.splitMembers) {
-      Alert.alert(
-        'Create Split?',
-        `${sub.name} is shared with others. Would you like to track who owes what?`,
-        [
-          { text: 'Skip', style: 'cancel', onPress: () => navigation.goBack() },
-          {
-            text: 'Create Split',
-            onPress: () => {
-              navigation.replace('SplitExpense', {
-                transaction: {
-                  id: txId,
-                  amount: parseFloat(amount),
-                  merchant: merchant.trim(),
-                  accountId: selectedAccount,
-                  date: date.toISOString(),
-                },
-              });
-            },
-          },
-        ]
-      );
-    } else {
-      navigation.goBack();
-    }
+    navigation.goBack();
   };
 
 
@@ -721,6 +842,141 @@ export const AddTransactionScreen = ({ navigation: navProp, route }: any) => {
               />
             </View>
 
+            {/* Split Expense Inline Section */}
+            {type === 'debit' && (
+              <View style={[themedStyles.field, { backgroundColor: colors.surface, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: splitEnabled ? `${colors.accent}50` : colors.border, marginBottom: 24 }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: splitEnabled ? 16 : 0 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                    <LucideUsers color={splitEnabled ? colors.accent : colors.secondary} size={20} />
+                    <View>
+                      <ThemedText style={{ fontWeight: 'bold', fontSize: 15 }}>Split this Expense</ThemedText>
+                      <ThemedText type="secondary" className="text-xs">Split bill with friends</ThemedText>
+                    </View>
+                  </View>
+                  <TouchableOpacity onPress={() => { setSplitEnabled(v => !v); Haptics.selectionAsync(); }}>
+                    {splitEnabled ? (
+                      <LucideToggleRight color={colors.accent} size={32} />
+                    ) : (
+                      <LucideToggleLeft color={colors.muted} size={32} />
+                    )}
+                  </TouchableOpacity>
+                </View>
+
+                {splitEnabled && (
+                  <MotiView
+                    from={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    transition={{ type: 'timing', duration: 200 }}
+                    style={{ overflow: 'hidden' }}
+                  >
+                    {/* Repayment account selector */}
+                    <View style={{ marginBottom: 16, marginTop: 12 }}>
+                      <ThemedText style={{ fontSize: 11, fontWeight: '700', color: colors.secondary, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8 }}>
+                        Collect Repayments To
+                      </ThemedText>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                        {accounts.map(acc => (
+                          <TouchableOpacity
+                            key={`repay-to-${acc.id}`}
+                            onPress={() => setReceiveToAccountId(acc.id)}
+                            style={{
+                              flexDirection: 'row', alignItems: 'center', gap: 6,
+                              paddingHorizontal: 12, paddingVertical: 8, borderRadius: 99,
+                              borderWidth: 1.5,
+                              backgroundColor: receiveToAccountId === acc.id ? `${colors.accent}18` : 'transparent',
+                              borderColor: receiveToAccountId === acc.id ? colors.accent : colors.border,
+                            }}
+                          >
+                            <LucideWallet color={receiveToAccountId === acc.id ? colors.accent : colors.secondary} size={13} />
+                            <ThemedText style={{ fontSize: 13, fontWeight: '600', color: receiveToAccountId === acc.id ? colors.accent : colors.primary }}>
+                              {acc.name}
+                            </ThemedText>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </View>
+
+                    {/* Split equally toggle */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, padding: 12, borderRadius: 12, backgroundColor: colors.translucent, borderWidth: 1, borderColor: colors.border }}>
+                      <View>
+                        <ThemedText style={{ fontSize: 13, fontWeight: '600' }}>Split equally</ThemedText>
+                        <ThemedText style={{ fontSize: 11, color: colors.secondary, marginTop: 2 }}>Auto-divide including you</ThemedText>
+                      </View>
+                      <TouchableOpacity onPress={() => { setSplitEqually(v => !v); Haptics.selectionAsync(); }}>
+                        {splitEqually ? (
+                          <LucideToggleRight color={colors.accent} size={28} />
+                        ) : (
+                          <LucideToggleLeft color={colors.muted} size={28} />
+                        )}
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Members title & Add button */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                      <ThemedText style={{ fontSize: 11, fontWeight: '700', color: colors.secondary, textTransform: 'uppercase', letterSpacing: 0.8 }}>
+                        Split with
+                      </ThemedText>
+                      <TouchableOpacity
+                        onPress={addSplitMember}
+                        style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 99, backgroundColor: `${colors.accent}18` }}
+                      >
+                        <LucidePlus color={colors.accent} size={12} />
+                        <ThemedText style={{ fontSize: 12, fontWeight: '700', color: colors.accent }}>Add person</ThemedText>
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Me row (read-only) */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10, padding: 12, borderRadius: 12, backgroundColor: `${colors.accent}10`, borderWidth: 1, borderColor: `${colors.accent}30` }}>
+                      <View style={{ width: 32, height: 32, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: `${colors.accent}20` }}>
+                        <ThemedText style={{ fontSize: 12, fontWeight: '800', color: colors.accent }}>Me</ThemedText>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <ThemedText style={{ fontSize: 13, fontWeight: '600', color: colors.accent }}>You (paid full bill)</ThemedText>
+                      </View>
+                      <View style={{ alignItems: 'flex-end' }}>
+                        <ThemedText style={{ fontSize: 14, fontWeight: '700', color: colors.accent }}>
+                          {preferences.currency}{myShare > 0 ? myShare.toFixed(2) : '—'}
+                        </ThemedText>
+                      </View>
+                    </View>
+
+                    {/* Member rows */}
+                    {splitMembers.map((m, idx) => (
+                      <View key={m.key} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                        <View style={{ width: 32, height: 32, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.translucent, borderWidth: 1, borderColor: colors.border }}>
+                          <ThemedText style={{ fontSize: 12, fontWeight: '700', color: colors.secondary }}>{idx + 1}</ThemedText>
+                        </View>
+                        <TextInput
+                          value={m.name}
+                          onChangeText={v => updateSplitMember(m.key, 'name', v)}
+                          placeholder="Name"
+                          placeholderTextColor={colors.muted}
+                          style={{ flex: 1, padding: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.border, color: colors.primary, backgroundColor: colors.surface, fontSize: 14 }}
+                        />
+                        <View style={{ flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: colors.border, borderRadius: 10, backgroundColor: colors.surface, paddingHorizontal: 8 }}>
+                          <ThemedText style={{ fontSize: 13, color: colors.secondary }}>{preferences.currency}</ThemedText>
+                          <TextInput
+                            value={m.share}
+                            onChangeText={v => !splitEqually && updateSplitMember(m.key, 'share', v)}
+                            editable={!splitEqually}
+                            keyboardType="decimal-pad"
+                            placeholder="0"
+                            placeholderTextColor={colors.muted}
+                            style={{ width: 60, padding: 10, fontSize: 14, fontWeight: '600', color: splitEqually ? colors.secondary : colors.primary }}
+                          />
+                        </View>
+                        {splitMembers.length > 1 && (
+                          <TouchableOpacity onPress={() => removeSplitMember(m.key)} style={{ padding: 4 }}>
+                            <LucideTrash2 color={colors.danger} size={16} />
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    ))}
+                  </MotiView>
+                )}
+              </View>
+            )}
+
             {/* 7. Recurring */}
             <View style={[themedStyles.field, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 26 }]}>
               <View>
@@ -742,6 +998,24 @@ export const AddTransactionScreen = ({ navigation: navProp, route }: any) => {
                     transform: [{ translateX: isRecurring ? 20 : 0 }]
                   }}
                 />
+              </TouchableOpacity>
+            </View>
+
+            {/* Personal Debt Toggle */}
+            <View style={[themedStyles.field, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 26 }]}>
+              <View>
+                <ThemedText type="secondary" style={themedStyles.label}>Personal Debt?</ThemedText>
+                <ThemedText type="secondary" className="text-xs">Borrowed or Lent money</ThemedText>
+              </View>
+              <TouchableOpacity
+                onPress={() => handleToggleBorrowed(!isBorrowed)}
+                style={{
+                  width: 50, height: 30, borderRadius: 15,
+                  backgroundColor: isBorrowed ? colors.warning : colors.muted,
+                  justifyContent: 'center', paddingHorizontal: 2
+                }}
+              >
+                <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: '#FFFFFF', transform: [{ translateX: isBorrowed ? 20 : 0 }] }} />
               </TouchableOpacity>
             </View>
 
