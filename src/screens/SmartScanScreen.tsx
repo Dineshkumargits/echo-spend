@@ -104,6 +104,7 @@ const SmartScanScreen = ({ navigation }: any) => {
   // AI model status during scan
   const [aiModelDown, setAiModelDown] = useState(false);
   const [offlineTxIds, setOfflineTxIds] = useState<Set<number>>(new Set());
+  const [isModelInitializing, setIsModelInitializing] = useState(false);
 
   useEffect(() => {
     const init = async () => {
@@ -206,8 +207,12 @@ const SmartScanScreen = ({ navigation }: any) => {
     };
 
     // Try to init the on-device AI model before scanning (if downloaded but not loaded)
-    if (!AIModelManager.isModelLoaded()) {
+    const isDownloaded = await AIModelManager.isModelDownloaded();
+    const isCompatible = AIModelManager.isDeviceCompatible();
+    if (!AIModelManager.isModelLoaded() && isDownloaded && isCompatible) {
+      setIsModelInitializing(true);
       await AIModelManager.initModel().catch(() => {});
+      setIsModelInitializing(false);
     }
 
     const hints = merchantHints.map(m => ({
@@ -567,7 +572,7 @@ const SmartScanScreen = ({ navigation }: any) => {
         <View>
           <ThemedText className="text-xl font-bold">Smart Scan</ThemedText>
           <ThemedText type="secondary" className="text-xs">
-            {phase === 'scanning' && (scanTotal > 0 ? `Analyzing ${scanCurrent} of ${scanTotal}…` : 'Preparing…')}
+            {phase === 'scanning' && (scanTotal > 0 ? `Analyzing ${scanCurrent} of ${scanTotal}…` : isModelInitializing ? 'Initializing AI Engine…' : 'Preparing…')}
             {phase === 'review' && (queue.length > 0 ? `${queue.length} pending · ${newTxIds.size} new` : 'All caught up')}
           </ThemedText>
         </View>
@@ -609,10 +614,12 @@ const SmartScanScreen = ({ navigation }: any) => {
             </View>
 
             <ThemedText className="font-bold text-2xl mb-2">
-              {scanTotal > 0 ? `${scanCurrent} / ${scanTotal}` : 'Preparing…'}
+              {scanTotal > 0 ? `${scanCurrent} / ${scanTotal}` : isModelInitializing ? 'Initializing AI Engine…' : 'Preparing…'}
             </ThemedText>
-            <ThemedText type="secondary" className="text-sm">
-              Matching SMS to your {accounts.filter(a => a.accountType === 'bank' || a.accountType === 'credit_card').length} tracked account{accounts.filter(a => a.accountType === 'bank' || a.accountType === 'credit_card').length !== 1 ? 's' : ''}
+            <ThemedText type="secondary" className="text-sm text-center">
+              {isModelInitializing
+                ? 'Loading local Llama-3.2 model context…'
+                : `Matching SMS to your ${accounts.filter(a => a.accountType === 'bank' || a.accountType === 'credit_card').length} tracked account${accounts.filter(a => a.accountType === 'bank' || a.accountType === 'credit_card').length !== 1 ? 's' : ''}`}
             </ThemedText>
             {scanFromDate && (
               <ThemedText type="secondary" className="text-xs mb-1 mt-1">

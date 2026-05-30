@@ -35,6 +35,9 @@ import {
   LucideTrash2,
   LucideCpu,
   LucideAlertTriangle,
+  LucidePlay,
+  LucidePause,
+  LucideX,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
@@ -89,6 +92,7 @@ const SettingsScreen = ({ navigation }: any) => {
 
   const aiModelStatus = useStore(s => s.aiModelStatus);
   const aiModelProgress = useStore(s => s.aiModelProgress);
+  const aiModelError = useStore(s => s.aiModelError);
   
   const { colors, isDark } = useTheme();
   
@@ -593,7 +597,21 @@ const SettingsScreen = ({ navigation }: any) => {
         {/* ── AI Engine ── */}
         <Section title="AI Engine" />
         <View className="rounded-apple-md overflow-hidden" style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
-          {aiModelStatus === 'not_downloaded' || aiModelStatus === 'error' ? (
+          {!AIModelManager.isDeviceCompatible() ? (
+            /* Low RAM Compatibility Warning */
+            <>
+              <Row
+                icon={<LucideAlertTriangle color={colors.danger} size={20} />}
+                label="AI Engine Incompatible"
+                sub="Your device has less than 2GB of total RAM. On-device AI is disabled to prevent crashes."
+              />
+              <View style={{ padding: 12, borderTopWidth: 1, borderTopColor: colors.border }}>
+                <ThemedText type="secondary" className="text-xs">
+                  Echo Spend will fall back to high-performance local regex parsing. No action is required.
+                </ThemedText>
+              </View>
+            </>
+          ) : aiModelStatus === 'not_downloaded' ? (
             /* Model not downloaded — show download prompt */
             <>
               <Row
@@ -621,7 +639,7 @@ const SettingsScreen = ({ navigation }: any) => {
               >
                 <LucideDownload color="#fff" size={16} />
                 <ThemedText style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>
-                  Download AI Model (~400 MB)
+                  Download AI Model (~770 MB)
                 </ThemedText>
               </TouchableOpacity>
             </>
@@ -638,6 +656,127 @@ const SettingsScreen = ({ navigation }: any) => {
                   <View style={{ height: '100%', borderRadius: 2, backgroundColor: colors.accent, width: `${aiModelProgress}%` }} />
                 </View>
               </View>
+              <View style={{ flexDirection: 'row', gap: 12, marginHorizontal: 12, marginBottom: 12 }}>
+                <TouchableOpacity
+                  onPress={() => {
+                    triggerHaptic();
+                    AIModelManager.pauseDownload();
+                  }}
+                  style={{
+                    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+                    gap: 6, paddingVertical: 10, borderRadius: 8,
+                    backgroundColor: colors.accent,
+                  }}
+                >
+                  <LucidePause color="#fff" size={14} />
+                  <ThemedText style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>Pause</ThemedText>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => {
+                    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+                    AIModelManager.cancelDownload();
+                  }}
+                  style={{
+                    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+                    gap: 6, paddingVertical: 10, borderRadius: 8,
+                    borderWidth: 1, borderColor: colors.border,
+                  }}
+                >
+                  <LucideX color={colors.secondary} size={14} />
+                  <ThemedText style={{ color: colors.secondary, fontWeight: '700', fontSize: 12 }}>Cancel</ThemedText>
+                </TouchableOpacity>
+              </View>
+            </>
+          ) : aiModelStatus === 'paused' ? (
+            /* Paused */
+            <>
+              <Row
+                icon={<LucideDownload color={colors.secondary} size={20} />}
+                label="AI Model Download Paused"
+                sub={`Progress: ${aiModelProgress}%`}
+              />
+              <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
+                <View style={{ height: 4, borderRadius: 2, backgroundColor: colors.translucent, overflow: 'hidden' }}>
+                  <View style={{ height: '100%', borderRadius: 2, backgroundColor: colors.secondary, width: `${aiModelProgress}%` }} />
+                </View>
+              </View>
+              <View style={{ flexDirection: 'row', gap: 12, marginHorizontal: 12, marginBottom: 12 }}>
+                <TouchableOpacity
+                  onPress={async () => {
+                    triggerHaptic();
+                    try {
+                      await AIModelManager.downloadModel();
+                    } catch (err) {
+                      console.error('Resume download failed:', err);
+                    }
+                  }}
+                  style={{
+                    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+                    gap: 6, paddingVertical: 10, borderRadius: 8,
+                    backgroundColor: colors.accent,
+                  }}
+                >
+                  <LucidePlay color="#fff" size={14} />
+                  <ThemedText style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>Resume</ThemedText>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => {
+                    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+                    AIModelManager.cancelDownload();
+                  }}
+                  style={{
+                    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+                    gap: 6, paddingVertical: 10, borderRadius: 8,
+                    borderWidth: 1, borderColor: colors.border,
+                  }}
+                >
+                  <LucideX color={colors.secondary} size={14} />
+                  <ThemedText style={{ color: colors.secondary, fontWeight: '700', fontSize: 12 }}>Cancel</ThemedText>
+                </TouchableOpacity>
+              </View>
+            </>
+          ) : aiModelStatus === 'error' ? (
+            /* Error */
+            <>
+              <Row
+                icon={<LucideAlertTriangle color={colors.danger} size={20} />}
+                label="AI Model Download Failed"
+                sub={aiModelProgress > 0 ? `Failed at ${aiModelProgress}%. Check connection.` : (aiModelError || 'Check connection')}
+              />
+              <View style={{ flexDirection: 'row', gap: 12, marginHorizontal: 12, marginBottom: 12 }}>
+                <TouchableOpacity
+                  onPress={async () => {
+                    triggerHaptic();
+                    try {
+                      await AIModelManager.downloadModel();
+                    } catch (err) {
+                      console.error('Retry download failed:', err);
+                    }
+                  }}
+                  style={{
+                    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+                    gap: 6, paddingVertical: 10, borderRadius: 8,
+                    backgroundColor: colors.accent,
+                  }}
+                >
+                  <LucideRefreshCcw color="#fff" size={14} />
+                  <ThemedText style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>Retry</ThemedText>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => {
+                    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+                    AIModelManager.cancelDownload();
+                  }}
+                  style={{
+                    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+                    gap: 6, paddingVertical: 10, borderRadius: 8,
+                    borderWidth: 1, borderColor: colors.border,
+                  }}
+                >
+                  <LucideX color={colors.secondary} size={14} />
+                  <ThemedText style={{ color: colors.secondary, fontWeight: '700', fontSize: 12 }}>Cancel</ThemedText>
+                </TouchableOpacity>
+              </View>
             </>
           ) : (
             /* Model is downloaded/ready */
@@ -645,7 +784,7 @@ const SettingsScreen = ({ navigation }: any) => {
               <Row
                 icon={<LucideCpu color={colors.success} size={20} />}
                 label="On-Device AI"
-                sub={`Qwen3 0.6B • ${aiModelSize || '~400 MB'} • ${aiModelStatus === 'ready' ? 'Active' : 'Downloaded'}`}
+                sub={`Llama 3.2 1B • ${aiModelSize || '~770 MB'} • ${aiModelStatus === 'ready' ? 'Active' : 'Downloaded'}`}
                 right={
                   <View style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: `${colors.success}20` }}>
                     <ThemedText style={{ fontSize: 10, fontWeight: '700', color: colors.success }}>
@@ -657,21 +796,21 @@ const SettingsScreen = ({ navigation }: any) => {
               <Row
                 icon={<LucideTrash2 color={colors.danger} size={18} />}
                 label="Delete AI Model"
-                sub={`Free up ${aiModelSize || '~400 MB'} of storage`}
+                sub={`Free up ${aiModelSize || '~770 MB'} of storage`}
                 onPress={() => {
                   Alert.alert(
                     'Delete AI Model?',
-                    'Without the AI model, SMS analysis will use basic pattern matching which is less accurate for unusual transactions.\n\nYou\'ll need to re-download ~400 MB later to restore AI features.',
+                    'Without the AI model, SMS analysis will use basic pattern matching which is less accurate for unusual transactions.\n\nYou\'ll need to re-download ~770 MB later to restore AI features.',
                     [
                       { text: 'Keep Model', style: 'cancel' },
                       {
                         text: 'Delete Model',
                         style: 'destructive',
                         onPress: async () => {
-                          await AIModelManager.deleteModel();
-                          setAiModelSize('');
-                          notify.info('AI model deleted', 'Using basic SMS parsing mode');
-                          triggerHaptic(Haptics.ImpactFeedbackStyle.Heavy);
+                           await AIModelManager.deleteModel();
+                           setAiModelSize('');
+                           notify.info('AI model deleted', 'Using basic SMS parsing mode');
+                           triggerHaptic(Haptics.ImpactFeedbackStyle.Heavy);
                         },
                       },
                     ]

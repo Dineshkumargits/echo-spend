@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  View, TouchableOpacity, Animated, Easing, StyleSheet,
+  View, TouchableOpacity, Animated, Easing, StyleSheet, Platform,
 } from 'react-native';
 import { ThemedText } from '../components/ThemedSafeAreaView';
 import { MotiView } from 'moti';
 import * as Haptics from 'expo-haptics';
 import {
   LucideBrain, LucideDownload, LucideCheck, LucideRefreshCcw,
-  LucideWifi, LucideAlertTriangle,
+  LucideWifi, LucideAlertTriangle, LucideX,
 } from 'lucide-react-native';
 import { useTheme } from '../theme/ThemeProvider';
 import { AIModelManager } from '../services/aiModelManager';
@@ -15,13 +15,14 @@ import { useStore } from '../store/useStore';
 
 interface AIModelSetupStepProps {
   onComplete: () => void;
+  showClose?: boolean;
 }
 
 /**
  * AI Model download step — used in both onboarding and as a standalone gate.
  * Shows download progress and handles the full lifecycle.
  */
-const AIModelSetupStep = ({ onComplete }: AIModelSetupStepProps) => {
+const AIModelSetupStep = ({ onComplete, showClose = false }: AIModelSetupStepProps) => {
   const { colors } = useTheme();
   const { aiModelStatus, aiModelProgress } = useStore();
   const [error, setError] = useState<string | null>(null);
@@ -75,11 +76,21 @@ const AIModelSetupStep = ({ onComplete }: AIModelSetupStepProps) => {
     onComplete();
   };
 
+  const isCompatible = AIModelManager.isDeviceCompatible();
   const isDownloading = aiModelStatus === 'downloading';
   const isComplete = aiModelStatus === 'downloaded' || aiModelStatus === 'ready';
 
   return (
     <View style={{ flex: 1 }}>
+      {showClose && (
+        <TouchableOpacity
+          onPress={handleSkip}
+          style={[styles.closeButton, { top: Platform.OS === 'ios' ? 50 : 16, right: 16 }]}
+          activeOpacity={0.7}
+        >
+          <LucideX color={colors.primary} size={24} />
+        </TouchableOpacity>
+      )}
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 }}>
         <MotiView
           from={{ opacity: 0, translateY: 30 }}
@@ -112,11 +123,13 @@ const AIModelSetupStep = ({ onComplete }: AIModelSetupStepProps) => {
           <ThemedText style={[styles.subtitle, { color: colors.secondary }]}>
             {isComplete
               ? 'Your on-device AI is set up. Smart SMS parsing is now active.'
-              : 'A small AI model will be downloaded to your device for intelligent SMS analysis. Everything runs locally — your data never leaves your phone.'}
+              : !isCompatible
+                ? 'On-device AI is disabled because your device has less than 2GB of total RAM. Echo Spend will use high-performance local regex parsing to scan transactions safely.'
+                : 'A small AI model will be downloaded to your device for intelligent SMS analysis. Everything runs locally — your data never leaves your phone.'}
           </ThemedText>
 
           {/* Size Badge */}
-          {!isDownloading && !isComplete && (
+          {!isDownloading && !isComplete && isCompatible && (
             <MotiView
               from={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -124,14 +137,14 @@ const AIModelSetupStep = ({ onComplete }: AIModelSetupStepProps) => {
               style={[styles.sizeBadge, { backgroundColor: colors.surface, borderColor: colors.border }]}
             >
               <LucideDownload color={colors.accent} size={14} />
-              <ThemedText style={[styles.sizeText, { color: colors.primary }]}>~400 MB</ThemedText>
+              <ThemedText style={[styles.sizeText, { color: colors.primary }]}>~770 MB</ThemedText>
               <View style={[styles.dot, { backgroundColor: colors.muted }]} />
               <ThemedText style={[styles.sizeText, { color: colors.secondary }]}>One-time download</ThemedText>
             </MotiView>
           )}
 
           {/* WiFi Recommendation */}
-          {!isDownloading && !isComplete && (
+          {!isDownloading && !isComplete && isCompatible && (
             <MotiView
               from={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -205,35 +218,52 @@ const AIModelSetupStep = ({ onComplete }: AIModelSetupStepProps) => {
         style={{ paddingHorizontal: 24, paddingBottom: 24, gap: 12 }}
       >
         {!isDownloading && !isComplete && (
-          <>
-            <TouchableOpacity
-              onPress={handleDownload}
-              style={[styles.primaryButton, { backgroundColor: colors.accent }]}
-              activeOpacity={0.8}
-            >
-              {error ? (
-                <LucideRefreshCcw color="#fff" size={20} />
-              ) : (
-                <LucideDownload color="#fff" size={20} />
-              )}
-              <ThemedText style={styles.primaryButtonText}>
-                {error ? 'Retry Download' : 'Download & Continue'}
-              </ThemedText>
-            </TouchableOpacity>
+          isCompatible ? (
+            <>
+              <TouchableOpacity
+                onPress={handleDownload}
+                style={[styles.primaryButton, { backgroundColor: colors.accent }]}
+                activeOpacity={0.8}
+              >
+                {error ? (
+                  <LucideRefreshCcw color="#fff" size={20} />
+                ) : (
+                  <LucideDownload color="#fff" size={20} />
+                )}
+                <ThemedText style={styles.primaryButtonText}>
+                  {error ? 'Retry Download' : 'Download & Continue'}
+                </ThemedText>
+              </TouchableOpacity>
 
-            <TouchableOpacity
-              onPress={handleSkip}
-              style={styles.skipButton}
-              activeOpacity={0.7}
-            >
-              <ThemedText style={[styles.skipText, { color: colors.secondary }]}>
-                Skip for now
+              <TouchableOpacity
+                onPress={handleSkip}
+                style={styles.skipButton}
+                activeOpacity={0.7}
+              >
+                <ThemedText style={[styles.skipText, { color: colors.secondary }]}>
+                  Skip for now
+                </ThemedText>
+              </TouchableOpacity>
+              <ThemedText style={[styles.skipNote, { color: colors.muted }]}>
+                You can download later in Settings. SMS parsing will use basic mode.
               </ThemedText>
-            </TouchableOpacity>
-            <ThemedText style={[styles.skipNote, { color: colors.muted }]}>
-              You can download later in Settings. SMS parsing will use basic mode.
-            </ThemedText>
-          </>
+            </>
+          ) : (
+            <>
+              <TouchableOpacity
+                onPress={handleSkip}
+                style={[styles.primaryButton, { backgroundColor: colors.accent }]}
+                activeOpacity={0.8}
+              >
+                <ThemedText style={styles.primaryButtonText}>
+                  Continue in Basic Mode
+                </ThemedText>
+              </TouchableOpacity>
+              <ThemedText style={[styles.skipNote, { color: colors.muted, marginTop: 4 }]}>
+                Device RAM is too low to run local AI safely. Basic mode will match bank messages deterministically.
+              </ThemedText>
+            </>
+          )
         )}
       </MotiView>
     </View>
@@ -354,6 +384,11 @@ const styles = StyleSheet.create({
     fontSize: 10,
     textAlign: 'center',
     lineHeight: 14,
+  },
+  closeButton: {
+    position: 'absolute',
+    padding: 12,
+    zIndex: 10,
   },
 });
 

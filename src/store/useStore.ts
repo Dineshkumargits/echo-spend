@@ -26,7 +26,7 @@ interface UserPreferences {
   lastBudgetCycleReset: string | null; // ISO date of billing-cycle start when history was last cleared
 }
 
-type AiModelStatus = 'not_downloaded' | 'downloading' | 'downloaded' | 'loading' | 'ready' | 'error';
+type AiModelStatus = 'not_downloaded' | 'downloading' | 'downloaded' | 'loading' | 'ready' | 'error' | 'paused';
 
 interface AppState {
   preferences: UserPreferences;
@@ -49,6 +49,8 @@ interface AppState {
   aiModelStatus: AiModelStatus;
   aiModelProgress: number; // 0-100 download progress
   aiModelError: string | null;
+  aiModelResumeData: string | null;
+  aiModelNudgeDismissed: boolean;
 
   setTheme: (theme: 'dark' | 'light' | 'system') => void;
   toggleAutoApprove: () => void;
@@ -85,6 +87,8 @@ interface AppState {
   setAiModelStatus: (status: AiModelStatus) => void;
   setAiModelProgress: (progress: number) => void;
   setAiModelError: (error: string | null) => void;
+  setAiModelResumeData: (data: string | null) => void;
+  setAiModelNudgeDismissed: (dismissed: boolean) => void;
 }
 
 const secureStorage = {
@@ -130,6 +134,8 @@ export const useStore = create<AppState>()(
       aiModelStatus: 'not_downloaded' as AiModelStatus,
       aiModelProgress: 0,
       aiModelError: null,
+      aiModelResumeData: null,
+      aiModelNudgeDismissed: false,
       googleUser: null,
 
       setTheme: (theme) =>
@@ -274,6 +280,8 @@ export const useStore = create<AppState>()(
       setAiModelStatus: (aiModelStatus) => set({ aiModelStatus }),
       setAiModelProgress: (aiModelProgress) => set({ aiModelProgress }),
       setAiModelError: (aiModelError) => set({ aiModelError }),
+      setAiModelResumeData: (aiModelResumeData) => set({ aiModelResumeData }),
+      setAiModelNudgeDismissed: (aiModelNudgeDismissed) => set({ aiModelNudgeDismissed }),
 
       resetOnboarding: () =>
         set({

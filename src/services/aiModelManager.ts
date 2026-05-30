@@ -1,6 +1,7 @@
 import Constants from 'expo-constants';
 import * as FileSystem from 'expo-file-system/legacy';
 import { initLlama, LlamaContext } from 'llama.rn';
+import * as Device from 'expo-device';
 import { useStore } from '../store/useStore';
 
 const extra = Constants.expoConfig?.extra ?? {};
@@ -77,9 +78,43 @@ export const AIModelManager = {
    * Calls `onProgress(0–100)` during download.
    * Resolves `true` on success, throws on failure.
    */
+  /** Check if the device is compatible (has at least 2GB of total RAM) */
+  isDeviceCompatible(): boolean {
+    const totalMemory = Device.totalMemory;
+    if (totalMemory && totalMemory < 2 * 1024 * 1024 * 1024) {
+      console.warn('[AIModelManager] Device incompatible: total RAM is < 2GB:', totalMemory);
+      return false;
+    }
+    return true;
+  },
+
+  /** Scan the models/ directory and delete any GGUF files that do not match MODEL_FILENAME */
+  async cleanupOrphanModels(): Promise<void> {
+    try {
+      const dirInfo = await FileSystem.getInfoAsync(MODEL_DIR);
+      if (!dirInfo.exists || !dirInfo.isDirectory) return;
+
+      const files = await FileSystem.readDirectoryAsync(MODEL_DIR);
+      console.log('[AIModelManager] Cleaning up old models. Found files:', files);
+
+      for (const file of files) {
+        if (file.endsWith('.gguf') && file !== MODEL_FILENAME) {
+          const filePath = `${MODEL_DIR}${file}`;
+          console.log('[AIModelManager] Deleting orphan model file:', file);
+          await FileSystem.deleteAsync(filePath, { idempotent: true });
+        }
+      }
+    } catch (error) {
+      console.error('[AIModelManager] Error cleaning up orphan models:', error);
+    }
+  },
+
   async downloadModel(
     onProgress?: (percent: number) => void,
   ): Promise<boolean> {
+    if (!AIModelManager.isDeviceCompatible()) {
+      throw new Error('Device is not compatible: at least 2GB of total RAM is required.');
+    }
     const store = useStore.getState();
 
     // Ensure directory exists
@@ -88,14 +123,17 @@ export const AIModelManager = {
       await FileSystem.makeDirectoryAsync(MODEL_DIR, { intermediates: true });
     }
 
-    // Delete partial download if any
-    const existing = await FileSystem.getInfoAsync(MODEL_PATH);
-    if (existing.exists) {
-      await FileSystem.deleteAsync(MODEL_PATH, { idempotent: true });
+    // Delete partial download if any, unless we are resuming
+    const resumeData = store.aiModelResumeData;
+    if (!resumeData) {
+      const existing = await FileSystem.getInfoAsync(MODEL_PATH);
+      if (existing.exists) {
+        await FileSystem.deleteAsync(MODEL_PATH, { idempotent: true });
+      }
+      store.setAiModelProgress(0);
     }
 
     store.setAiModelStatus('downloading');
-    store.setAiModelProgress(0);
     store.setAiModelError(null);
 
     try {
@@ -112,6 +150,7 @@ export const AIModelManager = {
           store.setAiModelProgress(pct);
           onProgress?.(pct);
         },
+        resumeData || undefined
       );
 
       const result = await _downloadResumable.downloadAsync();
@@ -123,12 +162,40 @@ export const AIModelManager = {
 
       store.setAiModelStatus('downloaded');
       store.setAiModelProgress(100);
+      store.setAiModelResumeData(null);
       return true;
     } catch (error: any) {
+      // Capture resume data on download failure/interruption if resumable exists
+      if (_downloadResumable) {
+        try {
+          const pauseState = await _downloadResumable.pauseAsync();
+          if (pauseState.resumeData) {
+            store.setAiModelResumeData(pauseState.resumeData);
+          }
+        } catch { /* ignore */ }
+      }
       _downloadResumable = null;
       store.setAiModelStatus('error');
       store.setAiModelError(error?.message || 'Download failed');
       throw error;
+    }
+  },
+
+  /** Pause an in-progress download and save resume data */
+  async pauseDownload(): Promise<void> {
+    if (_downloadResumable) {
+      try {
+        const pauseState = await _downloadResumable.pauseAsync();
+        const store = useStore.getState();
+        if (pauseState.resumeData) {
+          store.setAiModelResumeData(pauseState.resumeData);
+          store.setAiModelStatus('paused');
+          console.log('[AIModelManager] Download paused. Resume data stored.');
+        }
+      } catch (error) {
+        console.error('[AIModelManager] Failed to pause download:', error);
+      }
+      _downloadResumable = null;
     }
   },
 
@@ -145,6 +212,7 @@ export const AIModelManager = {
     const store = useStore.getState();
     store.setAiModelStatus('not_downloaded');
     store.setAiModelProgress(0);
+    store.setAiModelResumeData(null);
   },
 
   /** Delete the model file from disk and release from memory */
@@ -155,12 +223,17 @@ export const AIModelManager = {
     store.setAiModelStatus('not_downloaded');
     store.setAiModelProgress(0);
     store.setAiModelError(null);
+    store.setAiModelResumeData(null);
   },
 
   // ── Model Lifecycle ──────────────────────────────────────────────────────
 
   /** Load the model into memory. No-op if already loaded. */
   async initModel(): Promise<boolean> {
+    if (!AIModelManager.isDeviceCompatible()) {
+      console.warn('[AIModelManager] Cannot init model: device total RAM is < 2GB.');
+      return false;
+    }
     if (_context) {
       console.log('[AIModelManager] LLM context already loaded.');
       return true;

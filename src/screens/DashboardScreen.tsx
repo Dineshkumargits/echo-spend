@@ -1,14 +1,20 @@
 import { ThemedSafeAreaView, ThemedText } from '../components/ThemedSafeAreaView';
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, ScrollView, TouchableOpacity, StyleSheet, RefreshControl } from 'react-native';
+import { View, ScrollView, TouchableOpacity, StyleSheet, RefreshControl, Modal } from 'react-native';
 import { MotiView } from 'moti';
-import { LucidePlus, LucideTrendingUp, LucideWallet, LucideSearch, LucidePieChart, LucideTarget, LucideLandmark, LucideRepeat } from 'lucide-react-native';
+import {
+  LucidePlus, LucideTrendingUp, LucideWallet, LucideSearch,
+  LucidePieChart, LucideTarget, LucideLandmark, LucideRepeat,
+  LucideBrain, LucidePlay, LucidePause, LucideX, LucideRefreshCcw,
+} from 'lucide-react-native';
 import { renderCategoryIcon } from '../components/CategoryManager';
 import { FlashList } from '@shopify/flash-list';
 import * as Haptics from 'expo-haptics';
 import { useStore } from '../store/useStore';
 import { useIsFocused } from '@react-navigation/native';
 import { useTheme } from '../theme/ThemeProvider';
+import { AIModelManager } from '../services/aiModelManager';
+import AIModelSetupStep from './AIModelSetupStep';
 
 import {
   getTransactions,
@@ -28,7 +34,14 @@ import {
 } from '../services/database';
 
 const DashboardScreen = ({ navigation }: any) => {
-  const { preferences } = useStore();
+  const {
+    preferences,
+    aiModelStatus,
+    aiModelNudgeDismissed,
+    setAiModelNudgeDismissed,
+    aiModelProgress,
+    aiModelError,
+  } = useStore();
   const { colors, isDark } = useTheme();
   const [transactions, setTransactions] = React.useState<Transaction[]>([]);
   const [accounts, setAccounts] = React.useState<Account[]>([]);
@@ -36,6 +49,7 @@ const DashboardScreen = ({ navigation }: any) => {
   const [upcoming, setUpcoming] = React.useState<any[]>([]);
   const [monthlySpend, setMonthlySpend] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  const [showSetupModal, setShowSetupModal] = useState(false);
   const isFocused = useIsFocused();
 
   // CC outstanding is a liability — subtract it from net worth
@@ -281,6 +295,169 @@ const DashboardScreen = ({ navigation }: any) => {
           </ScrollView>
         </View>
 
+        {/* AI Setup Nudge Card */}
+        {((!aiModelNudgeDismissed && aiModelStatus === 'not_downloaded') ||
+          aiModelStatus === 'downloading' ||
+          aiModelStatus === 'paused' ||
+          aiModelStatus === 'error') && AIModelManager.isDeviceCompatible() && (
+          <MotiView
+            from={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="p-5 rounded-apple-md mb-8 border flex-row gap-4"
+            style={{ backgroundColor: `${colors.accent}12`, borderColor: `${colors.accent}30` }}
+          >
+            <View className="w-10 h-10 rounded-xl items-center justify-center flex-shrink-0" style={{ backgroundColor: `${colors.accent}25` }}>
+              <LucideBrain color={colors.accent} size={20} />
+            </View>
+            <View className="flex-1">
+              {aiModelStatus === 'not_downloaded' && (
+                <>
+                  <ThemedText className="font-bold text-sm">Unlock Smart SMS Scanning</ThemedText>
+                  <ThemedText type="secondary" className="text-xs mt-1 leading-5">
+                    Download the local AI engine to enable automatic transaction classification. Everything runs 100% privately on your device.
+                  </ThemedText>
+                  <View className="flex-row gap-4 mt-4">
+                    <TouchableOpacity
+                      onPress={() => {
+                        triggerHaptic();
+                        setShowSetupModal(true);
+                      }}
+                      className="px-4 py-2 rounded-lg bg-accent"
+                    >
+                      <ThemedText className="text-white font-bold text-xs">Setup AI</ThemedText>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => {
+                        triggerHaptic();
+                        setAiModelNudgeDismissed(true);
+                      }}
+                      className="px-4 py-2 rounded-lg border"
+                      style={{ borderColor: colors.border }}
+                    >
+                      <ThemedText type="secondary" className="font-bold text-xs">Dismiss</ThemedText>
+                    </TouchableOpacity>
+                  </View>
+                </>
+              )}
+
+              {aiModelStatus === 'downloading' && (
+                <>
+                  <ThemedText className="font-bold text-sm">Downloading local AI Engine...</ThemedText>
+                  <View className="mt-3">
+                    <View style={{ height: 6, borderRadius: 3, backgroundColor: colors.border, overflow: 'hidden' }}>
+                      <View style={{ height: '100%', borderRadius: 3, backgroundColor: colors.accent, width: `${aiModelProgress}%` }} />
+                    </View>
+                    <View className="flex-row justify-between mt-1.5">
+                      <ThemedText type="secondary" className="text-[10px]">Downloading...</ThemedText>
+                      <ThemedText className="font-bold text-[10px]" style={{ color: colors.accent }}>{aiModelProgress}%</ThemedText>
+                    </View>
+                  </View>
+                  <View className="flex-row gap-4 mt-4">
+                    <TouchableOpacity
+                      onPress={() => {
+                        triggerHaptic();
+                        AIModelManager.pauseDownload();
+                      }}
+                      className="px-4 py-2 rounded-lg bg-accent flex-row items-center gap-1.5"
+                    >
+                      <LucidePause color="#fff" size={12} />
+                      <ThemedText className="text-white font-bold text-xs">Pause</ThemedText>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => {
+                        triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+                        AIModelManager.cancelDownload();
+                      }}
+                      className="px-4 py-2 rounded-lg border flex-row items-center gap-1.5"
+                      style={{ borderColor: colors.border }}
+                    >
+                      <LucideX color={colors.secondary} size={12} />
+                      <ThemedText type="secondary" className="font-bold text-xs">Cancel</ThemedText>
+                    </TouchableOpacity>
+                  </View>
+                </>
+              )}
+
+              {aiModelStatus === 'paused' && (
+                <>
+                  <ThemedText className="font-bold text-sm">AI Download Paused</ThemedText>
+                  <ThemedText type="secondary" className="text-xs mt-1">
+                    Progress: {aiModelProgress}%
+                  </ThemedText>
+                  <View className="mt-3">
+                    <View style={{ height: 6, borderRadius: 3, backgroundColor: colors.border, overflow: 'hidden' }}>
+                      <View style={{ height: '100%', borderRadius: 3, backgroundColor: colors.secondary, width: `${aiModelProgress}%` }} />
+                    </View>
+                  </View>
+                  <View className="flex-row gap-4 mt-4">
+                    <TouchableOpacity
+                      onPress={async () => {
+                        triggerHaptic();
+                        try {
+                          await AIModelManager.downloadModel();
+                        } catch (err) {
+                          console.error('Resume download failed:', err);
+                        }
+                      }}
+                      className="px-4 py-2 rounded-lg bg-accent flex-row items-center gap-1.5"
+                    >
+                      <LucidePlay color="#fff" size={12} />
+                      <ThemedText className="text-white font-bold text-xs">Resume</ThemedText>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => {
+                        triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+                        AIModelManager.cancelDownload();
+                      }}
+                      className="px-4 py-2 rounded-lg border flex-row items-center gap-1.5"
+                      style={{ borderColor: colors.border }}
+                    >
+                      <LucideX color={colors.secondary} size={12} />
+                      <ThemedText type="secondary" className="font-bold text-xs">Cancel</ThemedText>
+                    </TouchableOpacity>
+                  </View>
+                </>
+              )}
+
+              {aiModelStatus === 'error' && (
+                <>
+                  <ThemedText className="font-bold text-sm" style={{ color: colors.danger }}>AI Download Failed</ThemedText>
+                  <ThemedText type="secondary" className="text-xs mt-1">
+                    {aiModelProgress > 0 ? `Failed at ${aiModelProgress}%. ` : ''}{aiModelError || 'Please check your connection and try again.'}
+                  </ThemedText>
+                  <View className="flex-row gap-4 mt-4">
+                    <TouchableOpacity
+                      onPress={async () => {
+                        triggerHaptic();
+                        try {
+                          await AIModelManager.downloadModel();
+                        } catch (err) {
+                          console.error('Retry download failed:', err);
+                        }
+                      }}
+                      className="px-4 py-2 rounded-lg bg-accent flex-row items-center gap-1.5"
+                    >
+                      <LucideRefreshCcw color="#fff" size={12} />
+                      <ThemedText className="text-white font-bold text-xs">Retry</ThemedText>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => {
+                        triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+                        AIModelManager.cancelDownload();
+                      }}
+                      className="px-4 py-2 rounded-lg border flex-row items-center gap-1.5"
+                      style={{ borderColor: colors.border }}
+                    >
+                      <LucideX color={colors.secondary} size={12} />
+                      <ThemedText type="secondary" className="font-bold text-xs">Cancel</ThemedText>
+                    </TouchableOpacity>
+                  </View>
+                </>
+              )}
+            </View>
+          </MotiView>
+        )}
+
         {/* Monthly Spend Card */}
         <MotiView
           from={{ opacity: 0, scale: 0.95 }}
@@ -425,6 +602,21 @@ const DashboardScreen = ({ navigation }: any) => {
       >
         <LucidePlus color={isDark ? "#000000" : "#FFFFFF"} size={32} />
       </TouchableOpacity>
+
+      {/* AI Setup Modal */}
+      <Modal
+        visible={showSetupModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowSetupModal(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: colors.background }}>
+          <AIModelSetupStep
+            showClose
+            onComplete={() => setShowSetupModal(false)}
+          />
+        </View>
+      </Modal>
 
     </ThemedSafeAreaView>
   );

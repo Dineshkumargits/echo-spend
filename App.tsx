@@ -78,6 +78,9 @@ function AppContent() {
   useEffect(() => {
     if (!dbInitialized) return;
     (async () => {
+      // Cleanup older/orphan model GGUF files to free up disk space
+      await AIModelManager.cleanupOrphanModels().catch(() => {});
+
       const downloaded = await AIModelManager.isModelDownloaded();
       const store = useStore.getState();
       if (downloaded) {
