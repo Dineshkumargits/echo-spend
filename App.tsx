@@ -20,6 +20,7 @@ import { createNavigationContainerRef } from '@react-navigation/native';
 import { NotificationService } from "./src/services/notifications";
 import { performBackgroundSmsScan } from './src/services/backgroundTasks';
 import { SyncService } from './src/services/sync';
+import { AIModelManager } from './src/services/aiModelManager';
 
 export const navigationRef = createNavigationContainerRef<any>();
 
@@ -72,6 +73,22 @@ function AppContent() {
         setDbError(true);
       });
   }, [dbReloadKey]);
+
+  // Check AI model status on startup and try to init if downloaded
+  useEffect(() => {
+    if (!dbInitialized) return;
+    (async () => {
+      const downloaded = await AIModelManager.isModelDownloaded();
+      const store = useStore.getState();
+      if (downloaded) {
+        store.setAiModelStatus('downloaded');
+        // Pre-load the model so it's ready for SMS scans
+        AIModelManager.initModel().catch(() => {});
+      } else {
+        store.setAiModelStatus('not_downloaded');
+      }
+    })();
+  }, [dbInitialized]);
 
   // One-time startup: background tasks + permissions, in the correct order.
   // Daily reminder is scheduled HERE (after permissions) so it never fires

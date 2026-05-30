@@ -1,4 +1,3 @@
-import Constants from 'expo-constants';
 import {
   Transaction,
   Subscription,
@@ -19,14 +18,7 @@ import {
 } from './database';
 import { extractJSONObject } from '../utils/extractJSON';
 import { notify } from '../utils/notify';
-
-const extra = Constants.expoConfig?.extra ?? {};
-
-const OLLAMA_ENDPOINT: string =
-  extra.ollamaEndpoint || 'https://ollama.adkdev.in/api/generate';
-const MODEL_NAME: string = extra.ollamaModel || 'gemma4:latest';
-const CF_CLIENT_ID: string = extra.cfAccessClientId || '';
-const CF_CLIENT_SECRET: string = extra.cfAccessClientSecret || '';
+import { AIModelManager } from './aiModelManager';
 
 /**
  * Normalize an SMS body for deduplication.
@@ -79,49 +71,11 @@ function normalizeMerchant(raw: string): string {
   return clean;
 }
 
-export class OllamaUnreachableError extends Error {
-  constructor() { super('AI server unreachable'); }
-}
-
-async function fetchWithRetry(
-  url: string,
-  options: RequestInit,
-  retries = 2,
-  delayMs = 800
-): Promise<Response> {
-  for (let attempt = 0; attempt < retries; attempt++) {
-    let res: Response;
-    try {
-      res = await fetch(url, options);
-    } catch {
-      // Network-level failure (offline, DNS, timeout)
-      if (attempt === retries - 1) throw new OllamaUnreachableError();
-      await new Promise(r => setTimeout(r, delayMs));
-      continue;
-    }
-
-    if (res.ok) return res;
-
-    const errText = await res.text().catch(() => '');
-    if (res.status === 403) {
-      throw new Error(`403 Forbidden: CF Access blocked. ${errText}`);
-    }
-    if (res.status === 502 || res.status === 503 || res.status === 504) {
-      if (attempt === retries - 1) throw new OllamaUnreachableError();
-      await new Promise(r => setTimeout(r, delayMs * Math.pow(2, attempt)));
-      continue;
-    }
-    if (res.status < 500) throw new Error(`HTTP Error ${res.status}: ${errText}`);
-    throw new Error(`Server Error ${res.status}: ${errText}`);
-  }
-  throw new OllamaUnreachableError();
-}
-
-// ─── Local regex-based SMS parser (runs when Ollama is unreachable) ───────────
+// ─── Local regex-based SMS parser (primary fast path) ─────────────────────────
 
 // Pass-2 keyword fallback: allows up to 40 non-digit chars between keyword and amount
 // so it handles "debited from A/c XXXX 500.00", "Dr INR 500", etc.
-const AMOUNT_KEYWORD_RE = /(?:debited|credited|deducted|spent|paid|charged|withdrawn|sent|received|payment|purchase|transfer(?:red)?|txn|amount|amt|dr\b|cr\b)[^₹\d]{0,40}?(?:(?:inr|rs\.?|₹)\s*)?([\d,]+(?:\.\d{1,2})?)/i;
+const AMOUNT_KEYWORD_RE = /(?:debited|credited|deducted|spent|paid|charged|withdrawn|sent|received|payment|purchase|transfer(?:red)?|txn|amount|amt|dr\b|cr\b)[^₹\d]{0,40}?(?:(?:inr|rs\.?|₹)\s*)?([\\d,]+(?:\.\d{1,2})?)/i;
 
 // Pass-3: older SBI/bank "NNN Dr" / "NNN Cr" suffix format with no currency marker
 const AMOUNT_DR_CR_SUFFIX_RE = /([\d,]+(?:\.\d{1,2})?)\s*\b(dr|cr)\b/i;
@@ -191,7 +145,7 @@ const MERCHANT_PATTERNS = [
 const DATE_PATTERNS: Array<{ re: RegExp; format: 'iso' | 'dmonY' | 'ddmmyy' }> = [
   { re: /(\d{4}-\d{2}-\d{2})/, format: 'iso' },
   { re: /(\d{1,2}[-\/\s][A-Za-z]{3}[-\/\s]\d{2,4})/, format: 'dmonY' },
-  { re: /(\d{1,2}[-\/.]\d{1,2}[-\/.]\d{2,4})/, format: 'ddmmyy' },
+  { re: /(\d{1,2}[-\/\.]\d{1,2}[-\/\.]\d{2,4})/, format: 'ddmmyy' },
 ];
 
 // Time pattern: "14:30", "14:30:00", "2:30 PM"
@@ -217,7 +171,7 @@ const CATEGORY_KEYWORDS: Array<{ keys: string[]; category: string }> = [
 // Patterns are deliberately unambiguous — "paid/debited/credited" never appears here.
 const NON_TRANSACTION_RE = /\b(?:bill\s+(?:generated|due|amount|of\s+rs)|amount\s+(?:due|outstanding)|(?:amount|amt)\s+outstanding|outstanding\s+(?:amount|due|balance)|min(?:imum)?\s+(?:amount|amt|due|payment)|minimum\s+payment|total\s+(?:amount\s+)?due|payment\s+(?:due|reminder)|statement\s+(?:for|balance|generated)|pre-approved|limit\s+(?:increased|enhanced|update)|congratulations|eligible\s+for|apply\s+now|cashback\s+(?:of|earned|reward)|offer\s+(?:for|on|expires)|you\s+have\s+won|due\s+(?:by|on|date)|pay\s+by|payment\s+by|please\s+pay|avoid\s+(?:late\s+fee|interest|charges))\b/i;
 
-function parseSmsFallback(
+function parseWithRegex(
   smsBody: string,
   accounts: Account[],
   categories: Category[],
@@ -247,7 +201,7 @@ function parseSmsFallback(
   // ── 1. Amount ─────────────────────────────────────────────────────────────
   // Pass 1: collect ALL currency-tagged amounts in document order, then exclude
   // whichever value matches the reported balance (tolerance: ±0.01 for float noise).
-  const ALL_CURRENCY_RE = /(?:(?:inr|rs\.?|₹)\s*([\d,]+(?:\.\d{1,2})?)|([\d,]+(?:\.\d{1,2})?)\s*(?:inr|rs\.?|₹))/gi;
+  const ALL_CURRENCY_RE = /(?:(?:inr|rs\.?|₹)\s*([\d,]+(?:\.\d{1,2})?)|(\d[\d,]*(?:\.\d{1,2})?)\s*(?:inr|rs\.?|₹))/gi;
   const currencyAmounts: number[] = [];
   let cm: RegExpExecArray | null;
   while ((cm = ALL_CURRENCY_RE.exec(smsBody)) !== null) {
@@ -436,13 +390,13 @@ function parseSmsFallback(
     alreadySaved: false,
     suggestedAccountId: matchedAccount?.id ?? accounts[0]?.id,
     isAnomaly: false,
-    parsedOffline: true,
+    parsedOffline: false,
   };
 }
 
 export interface ParsedSmsResult {
   /**
-   * false  → AI determined this SMS is NOT a real executed transaction
+   * false  → determined this SMS is NOT a real executed transaction
    *          (reminder, promotional, balance alert, due notice, etc.) — skip it.
    * true   → real money movement; add to review queue.
    */
@@ -452,11 +406,11 @@ export interface ParsedSmsResult {
   alreadySaved: boolean;
   /** Available balance after transaction, if mentioned in SMS */
   balanceAfter?: number;
-  /** Account ID matched from AI's suggestedAccountName */
+  /** Account ID matched from suggestedAccountName */
   suggestedAccountId?: number;
-  /** AI flagged this as unusually high spend */
+  /** Flagged as unusually high spend */
   isAnomaly?: boolean;
-  /** True when Ollama was unreachable and the local regex parser was used instead */
+  /** True when the local regex parser was used instead of on-device AI */
   parsedOffline?: boolean;
 }
 
@@ -507,10 +461,170 @@ function buildBudgetContext(budgets: Budget[]): string {
   return monthly ? `\nMonthly budgets set by user: ${monthly}` : '';
 }
 
-// Rate-limit the "AI server is down" notification to once per 60s across all SMS in a scan
-let _ollamaDownNotified = false;
+/**
+ * On-device LLM parser — used only for ambiguous SMS that regex can't handle confidently.
+ * Returns a parsed result or null if the LLM determines it's not a transaction.
+ */
+async function parseWithLLM(
+  smsBody: string,
+  smsDate: string,
+  accounts: Account[],
+  categories: Category[],
+  budgets: Budget[],
+  subscriptions: Subscription[],
+  loans: Loan[],
+  goals: Goal[],
+  merchantHints: Array<{ raw: string; clean: string; category: string }>,
+): Promise<ParsedSmsResult | null> {
+  // Prioritize core categories and limit total categories to 25 to prevent "Context is full" error in LLM
+  const coreSet = new Set([
+    'food & dining', 'transport', 'shopping', 'groceries',
+    'bills & utilities', 'health', 'entertainment', 'salary',
+    'transfer', 'other'
+  ]);
+  const coreCats = categories.filter(c => coreSet.has(c.name.toLowerCase()));
+  const otherCats = categories.filter(c => !coreSet.has(c.name.toLowerCase()));
+  const limitedCategories = [...coreCats, ...otherCats].slice(0, 25);
+
+  const categoryHint = limitedCategories.length > 0
+    ? limitedCategories.map(c => `"${c.name}"`).join(' | ')
+    : '"Food" | "Transport" | "Shopping" | "Bills" | "Entertainment" | "Health" | "Other"';
+
+  const merchantContext = merchantHints.length > 0
+    ? `\nKnown merchant mappings: ${merchantHints.slice(0, 10).map(m => `"${m.raw}" → "${m.clean}" (${m.category})`).join(', ')}`
+    : '';
+
+  // Streamlined prompt optimized for 1B edge models with explicit global rules and examples
+  const prompt = `<|system|>
+You are a banking SMS transaction parser. Analyze the SMS and return a JSON object.
+
+Rules:
+1. isTransaction is true ONLY for completed bank or wallet transactions (spent, charged, debited, credited, received, paid, deducted, withdrawn, transfer). It is false for payment reminders, due alerts, OTPs, credit limit enhancements, statement notifications.
+2. amount must be a positive float representing the transaction amount (e.g., 1500.00, 45.20, 129631.00). Do NOT strip the decimal point. Extract the numeric value regardless of the currency symbol ($, €, £, ₹, etc.). If it is not a transaction, set to 0.
+3. merchant: extract the clean merchant, store, website, or person paid. If none is mentioned, use the bank or service name (e.g., StanChart, Chase, HSBC, Barclays, SBI, Paytm). Do NOT hallucinate names not present in the SMS.
+4. type: "credit" (money received), "debit" (money spent / card charge / withdrawal), or "transfer" (own accounts / peer-to-peer transfer).
+5. category: choose the best matching category from the available categories list.
+
+Examples:
+- SMS: "Chase: Charged $45.20 at TARGET. Card ending in 4321. Bal: $1,200.50"
+  JSON: {"isTransaction": true, "amount": 45.20, "merchant": "TARGET", "type": "debit", "category": "Shopping"}
+
+- SMS: "Deposit of EUR 2,500.00 received from ACME CORP. Available balance: EUR 4,500.00 - HSBC"
+  JSON: {"isTransaction": true, "amount": 2500.00, "merchant": "ACME CORP", "type": "credit", "category": "Salary"}
+
+- SMS: "Barclays: ATM withdrawal of £100.00 from A/c ending 8899 on 12-May-2026."
+  JSON: {"isTransaction": true, "amount": 100.00, "merchant": "Barclays", "type": "debit", "category": "Transport"}
+
+- SMS: "Wells Fargo: Payment of $150.00 due on 12/05/2026. Avoid late fees by paying now."
+  JSON: {"isTransaction": false, "amount": 0, "merchant": "Wells Fargo", "type": "debit", "category": "Other"}
+
+- SMS: "Dear Customer, there is an NEFT credit of INR 129,631.00 in your account 421xxxx1769 on 30/05/2026. Available Balance: INR 129,685.68 - StanChart"
+  JSON: {"isTransaction": true, "amount": 129631.00, "merchant": "StanChart", "type": "credit", "category": "Transfer"}
+
+<|user|>
+SMS: "${smsBody}"
+SMS Date: ${smsDate}
+Available Categories: ${categoryHint}
+${merchantContext}
+
+Return JSON matching the schema.
+<|assistant|>` ;
+
+  const schemaProperties: Record<string, any> = {
+    isTransaction: { type: 'boolean' },
+    amount: { type: 'number' },
+    merchant: { type: 'string' },
+    type: { type: 'string', enum: ['credit', 'debit', 'transfer'] },
+    category: { type: 'string' }
+  };
+
+  const schema = {
+    type: 'object',
+    properties: schemaProperties,
+    required: ['isTransaction']
+  };
+
+  try {
+    const rawOutput = await AIModelManager.runInference(prompt, {
+      maxTokens: 256,
+      temperature: 0.1,
+      timeoutMs: 25000,
+      stopSequences: ['}'],
+      jsonSchema: JSON.stringify(schema),
+    });
+
+    if (!rawOutput || rawOutput.trim() === '') {
+      return null;
+    }
+
+    const parsed = extractJSONObject<{
+      isTransaction?: boolean;
+      amount?: number;
+      merchant?: string;
+      type?: string;
+      category?: string;
+    }>(rawOutput);
+
+    if (!parsed) {
+      console.warn('[SmsParserService] Failed to extract JSON from LLM output.');
+      return null;
+    }
+
+    if (parsed.isTransaction === false) {
+      return null;
+    }
+
+    const cleanMerchant = normalizeMerchant(parsed.merchant || 'Unknown');
+    const txType = (parsed.type === 'credit' || parsed.type === 'transfer') ? parsed.type : 'debit';
+    const amount = parsed.amount || 0;
+
+    if (cleanMerchant !== 'Unknown') {
+      await upsertMerchantMapping(parsed.merchant || cleanMerchant, cleanMerchant, parsed.category || 'Other');
+    }
+
+    console.log('[SmsParserService] LLM parsed successfully: merchant =', cleanMerchant, ', amount =', amount);
+
+    return {
+      isTransaction: true,
+      transaction: {
+        amount: Math.abs(amount),
+        merchant: cleanMerchant,
+        category: parsed.category || 'Other',
+        type: txType,
+        date: smsDate,
+        isConfirmed: false,
+        rawSms: smsBody,
+        isRecurring: false,
+        confidence: 'low',
+        source: 'sms',
+        subscriptionId: subscriptions.find(s => s.name === cleanMerchant)?.id,
+        goalId: goals.find(g => g.name === cleanMerchant)?.id,
+        loanId: loans.find(l => l.lender === cleanMerchant)?.id,
+      },
+      confidence: 'low',
+      alreadySaved: false,
+      isAnomaly: false,
+      parsedOffline: false,
+    };
+  } catch (err) {
+    console.error('[SmsParserService] Exception in parseWithLLM:', err);
+    return null;
+  }
+}
+
+// Rate-limit the "AI not available" notification to once per 60s across all SMS in a scan
+let _aiDownNotified = false;
 
 export const SmsParserService = {
+  /**
+   * Hybrid SMS parser: regex-first, on-device LLM for ambiguous cases.
+   *
+   * Flow:
+   * 1. Run regex parser (fast, ~0ms)
+   * 2. If confidence is high → return regex result
+   * 3. If confidence is medium/low or merchant is "Review Needed" → try on-device LLM
+   * 4. If LLM fails or isn't available → return regex result as-is
+   */
   async parse(
     smsBody: string,
     currentCategories: string[] = [],
@@ -542,206 +656,80 @@ export const SmsParserService = {
       };
     }
 
-    // Use full Category objects if available, else fall back to the string list
-    const categoryHint = categories.length > 0
-      ? categories.map(c => `"${c.name}"`).join(' | ')
-      : currentCategories.length > 0
-        ? currentCategories.map(c => `"${c}"`).join(' | ')
-        : '"Food" | "Transport" | "Shopping" | "Bills" | "Entertainment" | "Health" | "Other"';
-
-    const merchantContext = merchantHints.length > 0
-      ? `\nKnown merchant mappings (use these for consistent naming): ${merchantHints.slice(0, 15).map(m => `"${m.raw}" → "${m.clean}" (${m.category})`).join(', ')}`
-      : '';
-
-    const accountCtx = buildAccountContext(accounts);
-    const categoryCtx = buildCategoryContext(categories);
-    const budgetCtx = buildBudgetContext(budgets);
-
-    const subContext = subscriptions.length > 0
-      ? `\nActive Subscriptions: ${subscriptions.map(s => `"${s.name}" (₹${s.amount}/${s.frequency}, category: ${s.category})`).join(', ')}`
-      : '';
-
-    const loanContext = loans.length > 0
-      ? `\nActive Loans/EMIs: ${loans.map(l => `"${l.lender}" (EMI: ₹${l.emiAmount}, type: ${l.type})`).join(', ')}`
-      : '';
-
-    const goalContext = goals.length > 0
-      ? `\nSaving Goals: ${goals.map(g => `"${g.name}" (target: ₹${g.targetAmount})`).join(', ')}`
-      : '';
-
-    const accountNameList = accounts.length > 0
-      ? accounts.map(a => `"${a.name}"`).join(' | ')
-      : '"unknown"';
-
-    const prompt = `You are a precise Indian personal finance assistant. Your primary job is to determine whether an SMS represents a REAL executed bank transaction, then extract its details.
-
-SMS: "${smsBody}"
-SMS received on: ${smsDate}
-${merchantContext}${accountCtx}${categoryCtx}${budgetCtx}${subContext}${loanContext}${goalContext}
-
-Return ONLY valid JSON in this exact format:
-{
-  "isTransaction": <true | false>,
-  "amount": <positive number, or 0 if not a transaction>,
-  "merchant": "<cleaned merchant name — no transaction IDs, no location codes>",
-  "type": "credit" | "debit" | "transfer",
-  "category": ${categoryHint},
-  "date": "<ISO-8601 date extracted from SMS text, or use received date: ${smsDate}>",
-  "confidence": "high" | "low",
-  "isRecurring": <boolean>,
-  "anomaly": <boolean — true if amount seems unusually large given merchant or category budgets>,
-  "suggestedAccountName": ${accountNameList},
-  "suggestedEntity": {
-    "type": "subscription" | "goal" | "loan" | "none",
-    "name": "<exact name from context lists above, or empty string>"
-  },
-  "balanceAfter": <number — extract available/outstanding/remaining balance if mentioned in SMS, else null>
-}
-
-Rules:
-- isTransaction MUST be true ONLY for a completed, executed money movement (debit/credit/transfer actually happened).
-- Note: Many valid Indian bank SMS include a security footer like "Trxn. not done by you? Report at..." or "If not done by you, call...". These are NOT failure notices; if the SMS also says "spent", "debited", or "charged", it IS a valid transaction.
-- Set isTransaction to false for: credit card due reminders, minimum due alerts, payment reminders, bill statements, balance alerts, promotional offers, cashback earned notices, OTPs, limit change alerts, loan disbursal pending notifications.
-- confidence "high" = amount + merchant + type all clearly stated; "low" = SMS is ambiguous or some fields must be inferred.
-- amount must be a positive number (absolute value). Set 0 if isTransaction is false.
-- type: "credit" if money entered the account, "debit" if money left, "transfer" if between user's own accounts. UPI sent = debit, UPI received = credit.
-- Merchant: clean, human-readable, no Ref/order IDs, no location codes.
-- suggestedAccountName: pick from the list above based on bank name, card number, or UPI handle in the SMS.
-- anomaly: true if amount is >3x the monthly budget for that category, or merchant seems suspicious.
-`;
-
-    try {
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      };
-      if (CF_CLIENT_ID) headers['CF-Access-Client-Id'] = CF_CLIENT_ID;
-      if (CF_CLIENT_SECRET) headers['CF-Access-Client-Secret'] = CF_CLIENT_SECRET;
-
-      const response = await fetchWithRetry(OLLAMA_ENDPOINT, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          model: MODEL_NAME,
-          prompt,
-          stream: false,
-          format: 'json',
-          options: { temperature: 0.1 },
-        }),
-      });
-
-      const responseText = await response.text();
-      const ollamaResult = JSON.parse(responseText);
-      const rawModelOutput: string = ollamaResult.response || '';
-
-      // AI was reachable but returned an empty body — it deliberately rejected this SMS.
-      // Do NOT fall back to regex; respect the AI's judgement.
-      if (!rawModelOutput || rawModelOutput.trim() === 'null' || rawModelOutput.trim() === '') {
-        return { isTransaction: false, transaction: { rawSms: smsBody, isConfirmed: false }, confidence: 'low', alreadySaved: false };
-      }
-
-      const parsed = extractJSONObject<{
-        isTransaction?: boolean;
-        amount?: number;
-        merchant?: string;
-        type?: string;
-        category?: string;
-        date?: string;
-        confidence?: string;
-        isRecurring?: boolean;
-        anomaly?: boolean;
-        suggestedAccountName?: string;
-        suggestedEntity?: { type: string; name: string };
-        balanceAfter?: number;
-      }>(rawModelOutput);
-
-      // AI explicitly said not a transaction, or returned an empty/no-amount object.
-      // Do NOT fall back to regex — the AI was reachable and made a deliberate call.
-      if (!parsed || parsed.isTransaction === false || !parsed.amount || parsed.amount <= 0) {
-        return { isTransaction: false, transaction: { rawSms: smsBody, isConfirmed: false }, confidence: 'low', alreadySaved: false };
-      }
-
-      const amount = parsed.amount;
-      const cleanMerchant = normalizeMerchant(parsed.merchant || 'Unknown');
-      // Confidence is now "high" | "low" from the prompt; treat anything else as "low".
-      const confidence: 'high' | 'medium' | 'low' = parsed.confidence === 'high' ? 'high' : 'low';
-      const txType = (parsed.type === 'credit' || parsed.type === 'transfer') ? parsed.type : 'debit';
-      let txDate = parsed.date || smsDate;
-      if (parsed.date) {
-        // If AI returns just a date (YYYY-MM-DD) or midnight time, overlay the exact SMS received time
-        if (parsed.date.length === 10 || parsed.date.includes('T00:00:00')) {
-          const timePart = smsDate.includes('T') ? smsDate.substring(smsDate.indexOf('T')) : '';
-          txDate = parsed.date.substring(0, 10) + timePart;
+    // ── Step 1: Regex parser (fast path) ────────────────────────────────────
+    const regexResult = parseWithRegex(smsBody, accounts, categories, merchantHints, smsTimestamp);
+    // Regex determined this is not a transaction at all → skip
+    if (!regexResult) {
+      // If the on-device model is loaded, give it a chance to classify ambiguous SMS
+      // that regex outright rejected (e.g. unusual formats)
+      const modelLoaded = AIModelManager.isModelLoaded();
+      if (modelLoaded) {
+        try {
+          const llmResult = await parseWithLLM(
+            smsBody, smsDate, accounts, categories, budgets,
+            subscriptions, loans, goals, merchantHints,
+          );
+          if (llmResult) return llmResult;
+        } catch (err) {
+          console.error('[SmsParserService] LLM failed for regex-rejected SMS:', err);
         }
       }
-      const balanceAfter = (parsed.balanceAfter && parsed.balanceAfter > 0) ? parsed.balanceAfter : undefined;
-
-      // NOTE: isTransactionDuplicate was removed here. It used a ±1 day / same-amount
-      // window which caused every recurring expense to be permanently hash-locked after
-      // the first scan. SMS-body hash deduplication (isSmsAlreadyProcessed above) is the
-      // correct dedup layer — it's body-exact and never blocks genuinely new SMS.
-
-      if (cleanMerchant !== 'Unknown') {
-        await upsertMerchantMapping(parsed.merchant || cleanMerchant, cleanMerchant, parsed.category || 'Other');
-      }
-
-      // Match AI's suggested account name to the actual accounts list
-      let suggestedAccountId: number | undefined;
-      if (parsed.suggestedAccountName && accounts.length > 0) {
-        const suggested = parsed.suggestedAccountName.toLowerCase().trim();
-        const matched = accounts.find(a => a.name.toLowerCase().trim() === suggested)
-          ?? accounts.find(a => suggested.includes(a.name.toLowerCase().trim().split(' ')[0]))
-          ?? accounts[0];
-        suggestedAccountId = matched?.id;
-      } else if (accounts.length > 0) {
-        suggestedAccountId = accounts[0].id;
-      }
-
       return {
-        isTransaction: true,
-        transaction: {
-          amount: Math.abs(amount),
-          merchant: cleanMerchant,
-          category: parsed.category || 'Other',
-          type: txType,
-          date: txDate,
-          isConfirmed: false,
-          rawSms: smsBody,
-          isRecurring: parsed.isRecurring || false,
-          confidence,
-          source: 'sms',
-          subscriptionId: parsed.suggestedEntity?.type === 'subscription'
-            ? subscriptions.find(s => s.name === parsed.suggestedEntity?.name)?.id
-            : undefined,
-          goalId: parsed.suggestedEntity?.type === 'goal'
-            ? goals.find(g => g.name === parsed.suggestedEntity?.name)?.id
-            : undefined,
-          loanId: parsed.suggestedEntity?.type === 'loan'
-            ? loans.find(l => l.lender === parsed.suggestedEntity?.name)?.id
-            : undefined,
-          balanceAfter,
-        },
-        confidence,
+        isTransaction: false,
+        transaction: { rawSms: smsBody, isConfirmed: false },
+        confidence: 'low',
         alreadySaved: false,
-        suggestedAccountId,
-        isAnomaly: parsed.anomaly ?? false,
       };
-    } catch (error) {
-      if (error instanceof OllamaUnreachableError) {
-        if (!_ollamaDownNotified) {
-          _ollamaDownNotified = true;
-          notify.info('AI server is down', 'Using local parsing — review transactions before confirming');
-          setTimeout(() => { _ollamaDownNotified = false; }, 60_000);
-        }
-      }
-      // Errors mean AI was UNREACHABLE (network failure, malformed JSON, etc.) — not a deliberate
-      // rejection. Fall back to the local regex parser so the user still sees the SMS.
-      const local = parseSmsFallback(smsBody, accounts, categories, merchantHints, smsTimestamp);
-      if (local) return local;
-
-      // Regex also failed — skip silently (don't pollute the review queue with garbage).
-      return { isTransaction: false, transaction: { rawSms: smsBody, isConfirmed: false }, confidence: 'low', alreadySaved: false };
     }
+
+    // ── Step 2: High-confidence regex → return immediately ──────────────────
+    if (regexResult.confidence === 'high' && regexResult.transaction.merchant !== 'Review Needed') {
+      return regexResult;
+    }
+
+    // ── Step 3: Ambiguous — try on-device LLM ──────────────────────────────
+    const modelLoaded = AIModelManager.isModelLoaded();
+    if (modelLoaded) {
+      try {
+        const llmResult = await parseWithLLM(
+          smsBody, smsDate, accounts, categories, budgets,
+          subscriptions, loans, goals, merchantHints,
+        );
+        if (llmResult) {
+          // Merge LLM result with regexResult for date, balance, and account matching
+          return {
+            isTransaction: true,
+            transaction: {
+              ...regexResult.transaction, // Keep regex date, balanceAfter, accountId, etc.
+              amount: regexResult.transaction.amount || llmResult.transaction.amount || 0,
+              merchant: llmResult.transaction.merchant || regexResult.transaction.merchant || 'Review Needed',
+              category: llmResult.transaction.category || regexResult.transaction.category || 'Other',
+              type: llmResult.transaction.type || regexResult.transaction.type || 'debit',
+              confidence: 'medium',
+            },
+            confidence: 'medium',
+            alreadySaved: false,
+            suggestedAccountId: regexResult.suggestedAccountId,
+            balanceAfter: regexResult.balanceAfter,
+            isAnomaly: llmResult.isAnomaly || regexResult.isAnomaly || false,
+            parsedOffline: false,
+          };
+        }
+      } catch (err) {
+        console.error('[SmsParserService] LLM failed for ambiguous SMS:', err);
+        // LLM failed — fall through to regex result
+      }
+    } else if (!_aiDownNotified) {
+      // Model not loaded — show a one-time notification per scan
+      _aiDownNotified = true;
+      notify.info('AI model not loaded', 'Using basic parsing — review transactions before confirming');
+      setTimeout(() => { _aiDownNotified = false; }, 60_000);
+    }
+
+    // ── Step 4: Fall back to regex result ────────────────────────────────────
+    console.log('[SmsParserService] Falling back to Regex Parse Result.');
+    regexResult.parsedOffline = true;
+    return regexResult;
   },
 
   /** Load all context needed for a full scan */

@@ -37,7 +37,7 @@ const SearchScreen = () => {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(false);
   const isFocused = useIsFocused();
-  const navigation = useNavigation();
+  const navigation = useNavigation<any>();
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchTransactions = useCallback(async (query: string, filter: FilterId) => {

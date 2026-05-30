@@ -1,7 +1,7 @@
 /**
  * Robust JSON extraction from LLM responses.
  *
- * Ollama models frequently wrap their JSON output in markdown fences,
+ * LLM models frequently wrap their JSON output in markdown fences,
  * add preamble text like "Here is the data:", or append trailing commentary.
  * This utility strips all of that to extract clean JSON.
  */

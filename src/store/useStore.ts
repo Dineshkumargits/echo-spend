@@ -26,6 +26,8 @@ interface UserPreferences {
   lastBudgetCycleReset: string | null; // ISO date of billing-cycle start when history was last cleared
 }
 
+type AiModelStatus = 'not_downloaded' | 'downloading' | 'downloaded' | 'loading' | 'ready' | 'error';
+
 interface AppState {
   preferences: UserPreferences;
   lastSynced: string | null;
@@ -42,6 +44,11 @@ interface AppState {
     accessToken: string;
     expiresAt: number; // timestamp
   } | null;
+
+  // On-device AI model state
+  aiModelStatus: AiModelStatus;
+  aiModelProgress: number; // 0-100 download progress
+  aiModelError: string | null;
 
   setTheme: (theme: 'dark' | 'light' | 'system') => void;
   toggleAutoApprove: () => void;
@@ -73,6 +80,11 @@ interface AppState {
   completeOnboarding: () => void;
   resetOnboarding: () => void;
   fullLogout: () => Promise<void>;
+
+  // AI model actions
+  setAiModelStatus: (status: AiModelStatus) => void;
+  setAiModelProgress: (progress: number) => void;
+  setAiModelError: (error: string | null) => void;
 }
 
 const secureStorage = {
@@ -115,6 +127,9 @@ export const useStore = create<AppState>()(
       isSyncing: false,
       syncProgressText: '',
       dbReloadKey: 0,
+      aiModelStatus: 'not_downloaded' as AiModelStatus,
+      aiModelProgress: 0,
+      aiModelError: null,
       googleUser: null,
 
       setTheme: (theme) =>
@@ -254,6 +269,11 @@ export const useStore = create<AppState>()(
         set({ lastActiveAt: new Date().toISOString() }),
 
       completeOnboarding: () => set({ isOnboarded: true }),
+
+      // AI model actions
+      setAiModelStatus: (aiModelStatus) => set({ aiModelStatus }),
+      setAiModelProgress: (aiModelProgress) => set({ aiModelProgress }),
+      setAiModelError: (aiModelError) => set({ aiModelError }),
 
       resetOnboarding: () =>
         set({

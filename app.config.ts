@@ -81,10 +81,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ],
 
   extra: {
-    ollamaEndpoint: process.env.OLLAMA_ENDPOINT || 'https://ollama.adkdev.in/api/generate',
-    ollamaModel: process.env.OLLAMA_MODEL || 'gemma4:latest',
-    cfAccessClientId: process.env.CF_ACCESS_CLIENT_ID || '',
-    cfAccessClientSecret: process.env.CF_ACCESS_CLIENT_SECRET || '',
+    aiModelUrl: process.env.AI_MODEL_URL || 'https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf',
     googleAndroidClientId: process.env.GOOGLE_ANDROID_CLIENT_ID ||
       '608510187153-uere9cnfgq0ji1iqcq56ajp2pnuaqr8p.apps.googleusercontent.com',
     googleIosClientId: process.env.GOOGLE_IOS_CLIENT_ID ||

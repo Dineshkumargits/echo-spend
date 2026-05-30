@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { View, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { MotiView } from 'moti';
 import { LucideCalendar, LucideRefreshCcw } from 'lucide-react-native';
+import * as LucideIcons from 'lucide-react-native';
 import { renderCategoryIcon } from '../components/CategoryManager';
 import { useStore } from '../store/useStore';
 import { useIsFocused } from '@react-navigation/native';

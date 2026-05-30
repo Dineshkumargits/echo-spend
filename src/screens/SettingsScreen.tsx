@@ -32,6 +32,9 @@ import {
   LucideEyeOff,
   LucideZap,
   LucideLayout,
+  LucideTrash2,
+  LucideCpu,
+  LucideAlertTriangle,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
@@ -44,6 +47,7 @@ import { useBiometric } from '../hooks/useBiometric';
 import { useTheme } from '../theme/ThemeProvider';
 import { registerBackgroundTasks } from '../services/backgroundTasks';
 import { NotificationService } from '../services/notifications';
+import { AIModelManager } from '../services/aiModelManager';
 
 const extra = Constants.expoConfig?.extra ?? {};
 
@@ -82,8 +86,13 @@ const SettingsScreen = ({ navigation }: any) => {
     setAutoLockMinutes,
     toggleAutoSmsScan,
   } = useStore();
+
+  const aiModelStatus = useStore(s => s.aiModelStatus);
+  const aiModelProgress = useStore(s => s.aiModelProgress);
   
   const { colors, isDark } = useTheme();
+  
+  const [aiModelSize, setAiModelSize] = useState<string>('');
   
   const [thresholdInput, setThresholdInput] = useState((preferences?.autoApproveThreshold ?? 100).toString());
   const [budgetInput, setBudgetInput] = useState((preferences?.monthlyBudget ?? 50000).toString());
@@ -99,7 +108,11 @@ const SettingsScreen = ({ navigation }: any) => {
     if (preferences.syncSchedule !== 'none' && googleUser) {
       registerBackgroundTasks();
     }
-  }, []);
+    // Check AI model size on disk
+    AIModelManager.getModelSizeOnDisk().then(size => {
+      if (size > 0) setAiModelSize(`${(size / (1024 * 1024)).toFixed(0)} MB`);
+    });
+  }, [aiModelStatus]);
 
   const triggerHaptic = (style = Haptics.ImpactFeedbackStyle.Light) => {
     if (preferences.hapticsEnabled) {
@@ -574,6 +587,98 @@ const SettingsScreen = ({ navigation }: any) => {
                  <TouchableOpacity onPress={handleSaveThreshold} className="bg-accent px-4 justify-center rounded-apple-sm"><ThemedText className="text-white font-bold text-xs">SET</ThemedText></TouchableOpacity>
                </View>
             </View>
+          )}
+        </View>
+
+        {/* ── AI Engine ── */}
+        <Section title="AI Engine" />
+        <View className="rounded-apple-md overflow-hidden" style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
+          {aiModelStatus === 'not_downloaded' || aiModelStatus === 'error' ? (
+            /* Model not downloaded — show download prompt */
+            <>
+              <Row
+                icon={<LucideAlertTriangle color={colors.warning} size={20} />}
+                label="AI Model Not Installed"
+                sub="Smart SMS parsing is using basic mode"
+              />
+              <TouchableOpacity
+                onPress={async () => {
+                  triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+                  try {
+                    await AIModelManager.downloadModel();
+                    const size = await AIModelManager.getModelSizeOnDisk();
+                    if (size > 0) setAiModelSize(`${(size / (1024 * 1024)).toFixed(0)} MB`);
+                    notify.success('AI model downloaded!');
+                  } catch (err: any) {
+                    notify.error('Download failed', err?.message);
+                  }
+                }}
+                style={{
+                  flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+                  gap: 8, paddingVertical: 12, margin: 12, borderRadius: 12,
+                  backgroundColor: colors.accent,
+                }}
+              >
+                <LucideDownload color="#fff" size={16} />
+                <ThemedText style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>
+                  Download AI Model (~400 MB)
+                </ThemedText>
+              </TouchableOpacity>
+            </>
+          ) : aiModelStatus === 'downloading' ? (
+            /* Downloading */
+            <>
+              <Row
+                icon={<LucideDownload color={colors.accent} size={20} />}
+                label="Downloading AI Model..."
+                sub={`${aiModelProgress}% complete`}
+              />
+              <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
+                <View style={{ height: 4, borderRadius: 2, backgroundColor: colors.translucent, overflow: 'hidden' }}>
+                  <View style={{ height: '100%', borderRadius: 2, backgroundColor: colors.accent, width: `${aiModelProgress}%` }} />
+                </View>
+              </View>
+            </>
+          ) : (
+            /* Model is downloaded/ready */
+            <>
+              <Row
+                icon={<LucideCpu color={colors.success} size={20} />}
+                label="On-Device AI"
+                sub={`Qwen3 0.6B • ${aiModelSize || '~400 MB'} • ${aiModelStatus === 'ready' ? 'Active' : 'Downloaded'}`}
+                right={
+                  <View style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: `${colors.success}20` }}>
+                    <ThemedText style={{ fontSize: 10, fontWeight: '700', color: colors.success }}>
+                      {aiModelStatus === 'ready' ? 'ACTIVE' : 'READY'}
+                    </ThemedText>
+                  </View>
+                }
+              />
+              <Row
+                icon={<LucideTrash2 color={colors.danger} size={18} />}
+                label="Delete AI Model"
+                sub={`Free up ${aiModelSize || '~400 MB'} of storage`}
+                onPress={() => {
+                  Alert.alert(
+                    'Delete AI Model?',
+                    'Without the AI model, SMS analysis will use basic pattern matching which is less accurate for unusual transactions.\n\nYou\'ll need to re-download ~400 MB later to restore AI features.',
+                    [
+                      { text: 'Keep Model', style: 'cancel' },
+                      {
+                        text: 'Delete Model',
+                        style: 'destructive',
+                        onPress: async () => {
+                          await AIModelManager.deleteModel();
+                          setAiModelSize('');
+                          notify.info('AI model deleted', 'Using basic SMS parsing mode');
+                          triggerHaptic(Haptics.ImpactFeedbackStyle.Heavy);
+                        },
+                      },
+                    ]
+                  );
+                }}
+              />
+            </>
           )}
         </View>
 

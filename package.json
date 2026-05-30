@@ -37,11 +37,13 @@
     "expo-sqlite": "~16.0.10",
     "expo-status-bar": "~3.0.9",
     "expo-task-manager": "~14.0.9",
+    "llama.rn": "^0.12.4",
     "lucide-react-native": "^1.7.0",
     "moti": "^0.30.0",
     "nativewind": "^4.2.3",
     "react": "19.1.0",
     "react-native": "0.81.5",
+    "react-native-fs": "^2.20.0",
     "react-native-gesture-handler": "~2.28.0",
     "react-native-get-sms-android": "^2.1.0",
     "react-native-pager-view": "6.9.1",
@@ -64,6 +66,10 @@
   },
   "private": true,
   "overrides": {
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
+  },
+  "resolutions": {
     "react": "19.1.0",
     "react-dom": "19.1.0"
   }

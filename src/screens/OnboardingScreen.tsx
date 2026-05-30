@@ -13,6 +13,7 @@ import {
 } from 'lucide-react-native';
 import { useStore } from '../store/useStore';
 import { useTheme } from '../theme/ThemeProvider';
+import AIModelSetupStep from './AIModelSetupStep';
 
 // ─── Step 1: Welcome ──────────────────────────────────────────────────────────
 
@@ -467,7 +468,7 @@ const OnboardingScreen = () => {
   const [budget, setBudgetLocal] = useState(String(preferences.monthlyBudget ?? 50000));
   const [theme, setThemeLocal] = useState<'dark' | 'light' | 'system'>(preferences.theme ?? 'dark');
 
-  const TOTAL_STEPS = 4;
+  const TOTAL_STEPS = 5;
 
   const savePreferences = () => {
     setCurrency(currency);
@@ -497,6 +498,9 @@ const OnboardingScreen = () => {
         />
       )}
       {step === 3 && (
+        <AIModelSetupStep onComplete={() => setStep(4)} />
+      )}
+      {step === 4 && (
         <ProTipsStep onFinish={completeOnboarding} />
       )}
     </ThemedSafeAreaView>

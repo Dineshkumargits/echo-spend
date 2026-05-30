@@ -21,6 +21,7 @@ import {
 } from './database';
 import { SmsParserService, hashSms, matchSmsToAccount } from './smsParserService';
 import { NotificationService } from './notifications';
+import { AIModelManager } from './aiModelManager';
 
 const BACKGROUND_SYNC_TASK = 'BACKGROUND_CLOUD_SYNC';
 const BACKGROUND_SMS_SCAN_TASK = 'BACKGROUND_SMS_AUTO_SCAN';
@@ -109,10 +110,17 @@ export const performBackgroundSmsScan = async (silent = false) => {
   if (_scanRunning) return BackgroundFetch.BackgroundFetchResult.NoData;
   _scanRunning = true;
 
+  console.log('[BackgroundSmsScan] Starting background fetch auto scan...');
+
   try {
-    return await _doSmsScan(silent);
+    const result = await _doSmsScan(silent);
+    console.log('[BackgroundSmsScan] Background scan complete with result:', result);
+    return result;
   } finally {
     _scanRunning = false;
+    // Release the model from memory after a background scan to free RAM
+    console.log('[BackgroundSmsScan] Releasing AI model context.');
+    AIModelManager.releaseModel().catch(() => {});
   }
 };
 
@@ -184,6 +192,13 @@ const _doSmsScan = async (silent = false): Promise<BackgroundFetch.BackgroundFet
   if (!hasNewSms) return BackgroundFetch.BackgroundFetchResult.NoData;
 
   const { context, merchantHints } = await SmsParserService.getContext();
+
+  // Try to init the on-device AI model for better parsing accuracy.
+  // If it fails (e.g. not enough background RAM), regex fallback is used.
+  if (!AIModelManager.isModelLoaded()) {
+    await AIModelManager.initModel().catch(() => {});
+  }
+
   let newTxCount = 0;
   let totalAmount = 0;
   let topMerchant = '';

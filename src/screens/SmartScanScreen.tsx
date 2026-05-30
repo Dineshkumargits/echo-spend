@@ -61,6 +61,7 @@ import { ThemedSafeAreaView, ThemedText } from '../components/ThemedSafeAreaView
 import { ReviewTransactionCard } from '../components/ReviewTransactionCard';
 import * as Haptics from 'expo-haptics';
 import { useFocusEffect } from '@react-navigation/native';
+import { AIModelManager } from '../services/aiModelManager';
 
 type Phase = 'scanning' | 'review';
 
@@ -100,8 +101,8 @@ const SmartScanScreen = ({ navigation }: any) => {
   const [categories, setCategories] = useState<Category[]>([]);
   // Per-transaction account overrides (txId → accountId)
   const [accountOverrides, setAccountOverrides] = useState<Record<number, number>>({});
-  // AI offline state
-  const [ollamaWasDown, setOllamaWasDown] = useState(false);
+  // AI model status during scan
+  const [aiModelDown, setAiModelDown] = useState(false);
   const [offlineTxIds, setOfflineTxIds] = useState<Set<number>>(new Set());
 
   useEffect(() => {
@@ -154,7 +155,7 @@ const SmartScanScreen = ({ navigation }: any) => {
     setScanTotal(0);
     setNewFoundCount(0);
     progressAnim.setValue(0);
-    setOllamaWasDown(false);
+    setAiModelDown(false);
     setOfflineTxIds(new Set());
 
     const accs = preloadedAccounts ?? accounts;
@@ -203,6 +204,11 @@ const SmartScanScreen = ({ navigation }: any) => {
       categories: cats,
       budgets,
     };
+
+    // Try to init the on-device AI model before scanning (if downloaded but not loaded)
+    if (!AIModelManager.isModelLoaded()) {
+      await AIModelManager.initModel().catch(() => {});
+    }
 
     const hints = merchantHints.map(m => ({
       raw: m.merchantRaw,
@@ -333,8 +339,8 @@ const SmartScanScreen = ({ navigation }: any) => {
       try {
         const parsed = await parseSms(sms.body, hints, scanContext, sms.date);
 
-        // Flag if AI was unreachable and regex fallback was used
-        if (parsed.parsedOffline) setOllamaWasDown(true);
+        // Flag if AI model wasn't available and regex fallback was used
+        if (parsed.parsedOffline) setAiModelDown(true);
 
         // AI determined this SMS is not a real transaction — mark it so we never
         // re-scan it, then skip without adding to the review queue.
@@ -652,14 +658,14 @@ const SmartScanScreen = ({ navigation }: any) => {
               </ThemedText>
             )}
 
-            {ollamaWasDown && (
+            {aiModelDown && (
               <View
                 className="mt-4 px-4 py-2 rounded-full flex-row items-center"
                 style={{ backgroundColor: `${colors.warning}18` }}
               >
                 <LucideAlertTriangle color={colors.warning} size={13} />
                 <ThemedText className="text-xs ml-2 font-semibold" style={{ color: colors.warning }}>
-                  AI offline — using local parser
+                  AI model not loaded — using basic parsing
                 </ThemedText>
               </View>
             )}

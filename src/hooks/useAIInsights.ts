@@ -1,5 +1,4 @@
 import { useCallback } from 'react';
-import Constants from 'expo-constants';
 import {
   getCategoryBreakdown,
   getSpendTrend,
@@ -7,49 +6,10 @@ import {
   saveInsight,
   pruneOldInsights,
   Insight,
+  getBudgetUtilization,
+  getTransactionCount,
 } from '../services/database';
-import { extractJSONArray } from '../utils/extractJSON';
-import { notify } from '../utils/notify';
-import { OllamaUnreachableError } from '../services/smsParserService';
-
-const extra = Constants.expoConfig?.extra ?? {};
-const OLLAMA_ENDPOINT: string = extra.ollamaEndpoint || 'https://ollama.adkdev.in/api/generate';
-const MODEL_NAME: string = extra.ollamaModel || 'gemma4:latest';
-const CF_CLIENT_ID: string = extra.cfAccessClientId || '';
-const CF_CLIENT_SECRET: string = extra.cfAccessClientSecret || '';
-
-async function callOllama(prompt: string): Promise<string> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    Accept: 'application/json',
-  };
-  if (CF_CLIENT_ID) headers['CF-Access-Client-Id'] = CF_CLIENT_ID;
-  if (CF_CLIENT_SECRET) headers['CF-Access-Client-Secret'] = CF_CLIENT_SECRET;
-
-  let res: Response;
-  try {
-    res = await fetch(OLLAMA_ENDPOINT, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        model: MODEL_NAME,
-        prompt,
-        stream: false,
-        options: { temperature: 0.7 },
-      }),
-    });
-  } catch {
-    throw new OllamaUnreachableError();
-  }
-
-  if (res.status === 502 || res.status === 503 || res.status === 504) {
-    throw new OllamaUnreachableError();
-  }
-
-  if (!res.ok) throw new Error(`Ollama error: ${res.status}`);
-  const data = await res.json();
-  return data.response as string;
-}
+import { useStore } from '../store/useStore';
 
 export const useAIInsights = () => {
   /** Load already-cached active insights from DB */
@@ -58,126 +18,181 @@ export const useAIInsights = () => {
   }, []);
 
   /**
-   * Generate fresh insights from AI and persist to DB.
+   * Generate fresh insights using enhanced local heuristics.
+   * No AI model needed — all computation is deterministic and instant.
    * Call this at most once per day (caller's responsibility to rate-limit).
    */
   const generateInsights = useCallback(async (): Promise<Insight[]> => {
     await pruneOldInsights();
 
-    const [trend, breakdown] = await Promise.all([
+    const { preferences } = useStore.getState();
+
+    const [trend14, trend7, breakdown, budgetUtil] = await Promise.all([
       getSpendTrend(14),
+      getSpendTrend(7),
       getCategoryBreakdown(),
+      getBudgetUtilization(preferences.salaryDay),
     ]);
 
-    if (breakdown.length === 0) return [];
+    if (breakdown.length === 0 && trend14.length === 0) return [];
 
-    const trendSummary = trend
-      .map(p => `${p.date}: ₹${p.total.toFixed(0)}`)
-      .join(', ');
-    const breakdownSummary = breakdown
-      .map(b => `${b.category}: ₹${b.total.toFixed(0)} (${b.percentage}%)`)
-      .join(', ');
+    const now = new Date().toISOString();
+    const insights: Omit<Insight, 'id'>[] = [];
 
-    const prompt = `You are a personal finance assistant. Analyze this spending data and generate 3 short, specific, actionable insights.
+    // ── 1. Weekly Digest: Top spend category ────────────────────────────────
+    if (breakdown.length > 0) {
+      const top = breakdown[0];
+      insights.push({
+        type: 'weekly_digest',
+        title: `Top spend: ${top.category}`,
+        body: `${top.category} accounts for ${top.percentage}% of your spending this month (₹${top.total.toFixed(0)}).`,
+        generatedAt: now,
+      });
+    }
 
-14-day spend trend: ${trendSummary}
-This month category breakdown: ${breakdownSummary}
+    // ── 2. Daily Average ────────────────────────────────────────────────────
+    const totalSpend14 = trend14.reduce((s, p) => s + p.total, 0);
+    const activeDays14 = trend14.filter(p => p.total > 0).length;
+    if (totalSpend14 > 0 && activeDays14 > 0) {
+      const avgDaily = totalSpend14 / activeDays14;
+      insights.push({
+        type: 'suggestion',
+        title: 'Daily average',
+        body: `Your average daily spend is ₹${avgDaily.toFixed(0)} over the past 14 days.`,
+        generatedAt: now,
+      });
+    }
 
-Return a JSON array with exactly 3 objects:
-[
-  { "type": "weekly_digest" | "anomaly" | "suggestion", "title": "<short title>", "body": "<1-2 sentence insight>" },
-  ...
-]
+    // ── 3. Week-over-Week Comparison ────────────────────────────────────────
+    const thisWeekTotal = trend7.reduce((s, p) => s + p.total, 0);
+    // Calculate last week from the 14-day data (days 8-14)
+    const lastWeekDays = trend14.slice(0, 7);
+    const lastWeekTotal = lastWeekDays.reduce((s, p) => s + p.total, 0);
 
-Rules:
-- Be specific (mention category names and amounts)
-- Anomaly: if any day's spend is >2x the average daily spend
-- Suggestion: practical money-saving tip based on the data
-- Weekly digest: overall summary of spending pattern
-- Keep body under 100 characters`;
-
-    try {
-      const raw = await callOllama(prompt);
-
-      // Robustly extract JSON array from LLM response
-      const items = extractJSONArray<Array<{ type: string; title: string; body: string }>>(raw);
-      if (!items || !Array.isArray(items)) throw new Error('No JSON array found in AI response');
-
-      const validTypes = ['weekly_digest', 'anomaly', 'suggestion', 'recurring_detected'];
-      const now = new Date().toISOString();
-      const saved: Insight[] = [];
-
-      for (const item of items.slice(0, 5)) {
-        if (!item.title || !item.body) continue;
-        const insight: Omit<Insight, 'id'> = {
-          type: validTypes.includes(item.type)
-            ? (item.type as Insight['type'])
-            : 'suggestion',
-          title: item.title.slice(0, 80),
-          body: item.body.slice(0, 200),
+    if (lastWeekTotal > 0 && thisWeekTotal > 0) {
+      const changePercent = Math.round(((thisWeekTotal - lastWeekTotal) / lastWeekTotal) * 100);
+      if (Math.abs(changePercent) >= 15) {
+        const direction = changePercent > 0 ? 'more' : 'less';
+        insights.push({
+          type: changePercent > 30 ? 'anomaly' : 'suggestion',
+          title: `${Math.abs(changePercent)}% ${direction} this week`,
+          body: `You spent ₹${thisWeekTotal.toFixed(0)} this week vs ₹${lastWeekTotal.toFixed(0)} last week.`,
           generatedAt: now,
-        };
-        await saveInsight(insight);
-        saved.push({ ...insight, id: 0 });
+        });
       }
+    }
 
-      // Also run local anomaly detection without AI
-      const avgDaily = trend.reduce((s, p) => s + p.total, 0) / (trend.length || 1);
-      const highDay = trend.find(p => p.total > avgDaily * 2.5);
+    // ── 4. Anomaly Detection: High-spend days ───────────────────────────────
+    if (trend14.length > 0) {
+      const avgDaily = totalSpend14 / (trend14.length || 1);
+      const highDay = trend14.find(p => p.total > avgDaily * 2.5);
       if (highDay) {
-        const anomaly: Omit<Insight, 'id'> = {
+        insights.push({
           type: 'anomaly',
           title: `High spend on ${highDay.date}`,
           body: `You spent ₹${highDay.total.toFixed(0)} on ${highDay.date}, ${Math.round(highDay.total / avgDaily)}x your daily average.`,
           generatedAt: now,
-        };
-        await saveInsight(anomaly);
-        saved.push({ ...anomaly, id: 0 });
+        });
       }
-
-      return await getActiveInsights();
-    } catch (err) {
-      if (err instanceof OllamaUnreachableError) {
-        notify.info('AI server is down', 'Showing smart local insights — back soon!');
-      }
-      return await generateLocalInsights(breakdown, trend);
     }
+
+    // ── 5. Category Spike Detection ─────────────────────────────────────────
+    if (breakdown.length >= 2) {
+      // If the top category is > 50% of total spending, flag it
+      const top = breakdown[0];
+      if (top.percentage > 50) {
+        insights.push({
+          type: 'anomaly',
+          title: `${top.category} dominates spending`,
+          body: `${top.category} is ${top.percentage}% of your total spend. Consider diversifying.`,
+          generatedAt: now,
+        });
+      }
+    }
+
+    // ── 6. Budget Proximity Warnings ────────────────────────────────────────
+    for (const u of budgetUtil) {
+      if (u.percentage >= 75 && u.percentage < 100) {
+        // Calculate remaining days in the cycle
+        const today = new Date();
+        const salaryDay = preferences.salaryDay ?? 1;
+        let nextCycleStart: Date;
+        if (today.getDate() >= salaryDay) {
+          nextCycleStart = new Date(today.getFullYear(), today.getMonth() + 1, salaryDay);
+        } else {
+          nextCycleStart = new Date(today.getFullYear(), today.getMonth(), salaryDay);
+        }
+        const daysLeft = Math.max(1, Math.ceil((nextCycleStart.getTime() - today.getTime()) / 86400000));
+
+        insights.push({
+          type: 'suggestion',
+          title: `${u.budget.categoryName}: ${u.percentage}% used`,
+          body: `₹${(u.budget.amount - u.spent).toFixed(0)} remaining with ${daysLeft} days left in this cycle.`,
+          generatedAt: now,
+        });
+        break; // Only show the most critical budget warning
+      }
+    }
+
+    // ── 7. No-Spend Streak ──────────────────────────────────────────────────
+    // Count consecutive days with zero spend from the end of the trend
+    let noSpendStreak = 0;
+    for (let i = trend14.length - 1; i >= 0; i--) {
+      if (trend14[i].total === 0) noSpendStreak++;
+      else break;
+    }
+    if (noSpendStreak >= 2) {
+      insights.push({
+        type: 'suggestion',
+        title: `${noSpendStreak}-day no-spend streak! 🎉`,
+        body: `Great discipline! You haven't spent anything in ${noSpendStreak} days.`,
+        generatedAt: now,
+      });
+    } else {
+      // Check for continuous spending streak
+      let spendStreak = 0;
+      for (let i = trend14.length - 1; i >= 0; i--) {
+        if (trend14[i].total > 0) spendStreak++;
+        else break;
+      }
+      if (spendStreak >= 10) {
+        insights.push({
+          type: 'suggestion',
+          title: `${spendStreak} days of continuous spending`,
+          body: `Consider planning a no-spend day to reset your habits.`,
+          generatedAt: now,
+        });
+      }
+    }
+
+    // ── 8. Savings Opportunity ──────────────────────────────────────────────
+    if (breakdown.length >= 2) {
+      // Find the second-highest discretionary category
+      const discretionary = breakdown.filter(b =>
+        !['Salary', 'Transfer', 'Loan Payment', 'Insurance', 'Investments'].includes(b.category)
+      );
+      if (discretionary.length >= 2) {
+        const target = discretionary[1]; // second-highest
+        const savingsAmount = Math.round(target.total * 0.2);
+        if (savingsAmount > 100) {
+          insights.push({
+            type: 'suggestion',
+            title: `Save ₹${savingsAmount}/month`,
+            body: `Reducing ${target.category} by 20% could save ₹${savingsAmount} monthly.`,
+            generatedAt: now,
+          });
+        }
+      }
+    }
+
+    // Save all insights (limit to 5 most interesting)
+    const toSave = insights.slice(0, 5);
+    for (const insight of toSave) {
+      await saveInsight(insight);
+    }
+
+    return await getActiveInsights();
   }, []);
 
   return { getInsights, generateInsights };
 };
-
-async function generateLocalInsights(
-  breakdown: Awaited<ReturnType<typeof getCategoryBreakdown>>,
-  trend: Awaited<ReturnType<typeof getSpendTrend>>
-): Promise<Insight[]> {
-  const now = new Date().toISOString();
-  const insights: Omit<Insight, 'id'>[] = [];
-
-  if (breakdown.length > 0) {
-    const top = breakdown[0];
-    insights.push({
-      type: 'weekly_digest',
-      title: `Top spend: ${top.category}`,
-      body: `${top.category} accounts for ${top.percentage}% of your spending this month (₹${top.total.toFixed(0)}).`,
-      generatedAt: now,
-    });
-  }
-
-  const totalSpend = trend.reduce((s, p) => s + p.total, 0);
-  if (totalSpend > 0) {
-    const avgDaily = totalSpend / trend.filter(p => p.total > 0).length;
-    insights.push({
-      type: 'suggestion',
-      title: 'Daily average',
-      body: `Your average daily spend is ₹${avgDaily.toFixed(0)} over the past 14 days.`,
-      generatedAt: now,
-    });
-  }
-
-  for (const insight of insights) {
-    await saveInsight(insight);
-  }
-
-  return await getActiveInsights();
-}

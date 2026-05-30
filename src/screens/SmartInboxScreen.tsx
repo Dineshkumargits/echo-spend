@@ -33,6 +33,8 @@ import { useIsFocused } from '@react-navigation/native';
 import { useTheme } from '../theme/ThemeProvider';
 import { useStore } from '../store/useStore';
 
+const QueueList = FlashList as any;
+
 const SmartInboxScreen = ({ navigation }: any) => {
   const { colors, theme } = useTheme();
   const { preferences } = useStore();
@@ -214,11 +216,11 @@ const SmartInboxScreen = ({ navigation }: any) => {
           </TouchableOpacity>
         </View>
       ) : (
-        <FlashList
+        <QueueList
           data={queue}
           estimatedItemSize={120}
-          keyExtractor={item => item.id.toString()}
-          renderItem={({ item }) => (
+          keyExtractor={(item: any) => item.id.toString()}
+          renderItem={({ item }: any) => (
             <View className="px-6 mb-1">
               <ReviewTransactionCard
                 tx={item}
