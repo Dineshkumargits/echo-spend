@@ -83,6 +83,9 @@ interface AppState {
   resetOnboarding: () => void;
   fullLogout: () => Promise<void>;
 
+  hasHydrated: boolean;
+  setHasHydrated: (hasHydrated: boolean) => void;
+
   // AI model actions
   setAiModelStatus: (status: AiModelStatus) => void;
   setAiModelProgress: (progress: number) => void;
@@ -137,6 +140,7 @@ export const useStore = create<AppState>()(
       aiModelResumeData: null,
       aiModelNudgeDismissed: false,
       googleUser: null,
+      hasHydrated: false,
 
       setTheme: (theme) =>
         set((s) => ({ preferences: { ...s.preferences, theme } })),
@@ -275,6 +279,7 @@ export const useStore = create<AppState>()(
         set({ lastActiveAt: new Date().toISOString() }),
 
       completeOnboarding: () => set({ isOnboarded: true }),
+      setHasHydrated: (hasHydrated) => set({ hasHydrated }),
 
       // AI model actions
       setAiModelStatus: (aiModelStatus) => set({ aiModelStatus }),
@@ -315,6 +320,13 @@ export const useStore = create<AppState>()(
           ...(merged.preferences || {}),
         };
         return merged as AppState;
+      },
+      onRehydrateStorage: () => {
+        return (state, error) => {
+          if (!error && state) {
+            state.setHasHydrated(true);
+          }
+        };
       },
     }
   )

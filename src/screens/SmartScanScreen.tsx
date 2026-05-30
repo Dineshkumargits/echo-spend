@@ -82,6 +82,7 @@ const SmartScanScreen = ({ navigation }: any) => {
   const { colors } = useTheme();
   const { parseSms } = useAISmsParser();
   const { preferences } = useStore();
+  const currency = preferences?.currency ?? '₹';
 
   const [phase, setPhase] = useState<Phase>('scanning');
   const [scanStartedAt] = useState(() => new Date());
@@ -474,13 +475,13 @@ const SmartScanScreen = ({ navigation }: any) => {
 
     setQueue(prev => prev.filter(t => t.id !== tx.id));
     setNewTxIds(prev => { const s = new Set(prev); s.delete(tx.id); return s; });
-    notify.success('Saved', `₹${tx.amount?.toLocaleString('en-IN')} at ${tx.merchant}`);
+    notify.success('Saved', `${currency}${tx.amount?.toLocaleString('en-IN')} at ${tx.merchant}`);
   };
 
   const handleDelete = (tx: Transaction) => {
     Alert.alert(
       'Ignore Transaction',
-      `Remove ₹${tx.amount?.toLocaleString('en-IN')} at ${tx.merchant}?`,
+      `Remove ${currency}${tx.amount?.toLocaleString('en-IN')} at ${tx.merchant}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {

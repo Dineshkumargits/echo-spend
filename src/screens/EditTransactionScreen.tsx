@@ -124,7 +124,8 @@ export const EditTransactionScreen = () => {
       newErrors.amount = 'Enter a valid amount greater than 0';
     }
     if (parsedAmount > 10_000_000) {
-      newErrors.amount = 'Amount cannot exceed ₹1,00,00,000';
+      const currency = preferences?.currency ?? '₹';
+      newErrors.amount = `Amount cannot exceed ${currency}1,00,00,000`;
     }
     if (!merchant.trim()) {
       newErrors.merchant = 'Merchant name is required';
@@ -218,7 +219,7 @@ export const EditTransactionScreen = () => {
             <View style={{ flexDirection: 'row', gap: 16, marginBottom: 24, alignItems: 'center' }}>
               {/* 1. Amount */}
               <View style={{ flex: 1 }}>
-                <ThemedText type="secondary" style={themedStyles.label}>Amount (₹)</ThemedText>
+                <ThemedText type="secondary" style={themedStyles.label}>Amount ({preferences?.currency ?? '₹'})</ThemedText>
                 <TextInput
                   style={[
                     themedStyles.amountInput,

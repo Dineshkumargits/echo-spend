@@ -94,6 +94,8 @@ interface DonutChartProps {
 }
 
 const DonutChart = React.memo(({ slices, selectedIndex, onSelect, themeColors }: DonutChartProps) => {
+  const { preferences } = useStore();
+  const currency = preferences?.currency ?? '₹';
   const size = Math.min(SCREEN_WIDTH - 80, 220);
   const cx = size / 2;
   const cy = size / 2;
@@ -167,7 +169,7 @@ const DonutChart = React.memo(({ slices, selectedIndex, onSelect, themeColors }:
             {sel.category.length > 11 ? sel.category.slice(0, 11) + '…' : sel.category}
           </SvgText>
           <SvgText x={cx} y={cy + 7} textAnchor="middle" fontSize={13} fill={themeColors.primary} fontWeight="bold">
-            ₹{sel.total.toLocaleString('en-IN')}
+            {currency}{sel.total.toLocaleString('en-IN')}
           </SvgText>
           <SvgText x={cx} y={cy + 23} textAnchor="middle" fontSize={11} fill={sel.color} fontWeight="bold">
             {sel.percentage}%

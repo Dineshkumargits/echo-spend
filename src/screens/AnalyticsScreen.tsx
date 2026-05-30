@@ -36,6 +36,7 @@ import {
 } from '../services/database';
 import { useAIInsights } from '../hooks/useAIInsights';
 import { useTheme } from '../theme/ThemeProvider';
+import { useStore } from '../store/useStore';
 
 const INSIGHT_ICONS: Record<string, any> = {
   anomaly: LucideAlertCircle,
@@ -64,6 +65,8 @@ const AnalyticsScreen = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [trendDays, setTrendDays] = useState(7);
   const { getInsights, generateInsights } = useAIInsights();
+  const { preferences } = useStore();
+  const currency = preferences?.currency ?? '₹';
 
   const loadData = useCallback(async () => {
     const dStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10) + ' 00:00:00';
@@ -172,10 +175,10 @@ const AnalyticsScreen = () => {
         <View className="p-4 rounded-apple-md border mb-6" style={{ backgroundColor: colors.surface, borderColor: colors.border }}>
           <View className="mb-4">
             <ThemedText type="secondary" className="text-xs">Total Spend ({trendDays}D)</ThemedText>
-            <ThemedText className="text-2xl font-bold">₹{totalThisPeriod.toLocaleString('en-IN')}</ThemedText>
+            <ThemedText className="text-2xl font-bold">{currency}{totalThisPeriod.toLocaleString('en-IN')}</ThemedText>
             {maxDay.total > 0 && (
               <ThemedText type="secondary" className="text-xs mt-1">
-                Peak: {maxDay.date} — ₹{maxDay.total.toLocaleString('en-IN')}
+                Peak: {maxDay.date} — {currency}{maxDay.total.toLocaleString('en-IN')}
               </ThemedText>
             )}
           </View>
@@ -225,14 +228,14 @@ const AnalyticsScreen = () => {
                 <View className="flex-row justify-between">
                   <View className="flex-row items-center">
                     <LucideTrendingDown color={colors.danger} size={14} />
-                    <ThemedText className="text-sm ml-1">₹{Number(row.expense).toLocaleString('en-IN')}</ThemedText>
+                    <ThemedText className="text-sm ml-1">{currency}{Number(row.expense).toLocaleString('en-IN')}</ThemedText>
                   </View>
                   <View className="flex-row items-center">
                     <LucideTrendingUp color={colors.success} size={14} />
-                    <ThemedText className="text-sm ml-1" style={{ color: colors.success }}>₹{Number(row.income).toLocaleString('en-IN')}</ThemedText>
+                    <ThemedText className="text-sm ml-1" style={{ color: colors.success }}>{currency}{Number(row.income).toLocaleString('en-IN')}</ThemedText>
                   </View>
                   <ThemedText className="text-sm font-bold" style={{ color: row.income >= row.expense ? colors.success : colors.danger }}>
-                    {row.income >= row.expense ? '+' : '-'}₹{Math.abs(row.income - row.expense).toLocaleString('en-IN')}
+                    {row.income >= row.expense ? '+' : '-'}{currency}{Math.abs(row.income - row.expense).toLocaleString('en-IN')}
                   </ThemedText>
                 </View>
               </MotiView>
@@ -291,7 +294,7 @@ const AnalyticsScreen = () => {
                           <ThemedText className="font-bold">{parentName}</ThemedText>
                         </View>
                         <View className="items-end">
-                          <ThemedText className="font-bold">₹{data.total.toLocaleString('en-IN')}</ThemedText>
+                          <ThemedText className="font-bold">{currency}{data.total.toLocaleString('en-IN')}</ThemedText>
                           <ThemedText type="secondary" className="text-[10px]">{data.count} txn{data.count !== 1 ? 's' : ''}</ThemedText>
                         </View>
                       </View>
@@ -305,7 +308,7 @@ const AnalyticsScreen = () => {
                           {data.subs.sort((a, b) => b.total - a.total).map(sub => (
                             <View key={sub.category} className="flex-row justify-between items-center py-1.5">
                               <ThemedText type="secondary" className="text-xs">• {sub.category}</ThemedText>
-                              <ThemedText type="secondary" className="text-xs font-medium">₹{sub.total.toLocaleString('en-IN')}</ThemedText>
+                              <ThemedText type="secondary" className="text-xs font-medium">{currency}{sub.total.toLocaleString('en-IN')}</ThemedText>
                             </View>
                           ))}
                         </View>
@@ -335,7 +338,7 @@ const AnalyticsScreen = () => {
                     <ThemedText className="font-bold text-sm" style={{ color: colors.accent }} numberOfLines={1}>#{tag.tag}</ThemedText>
                     <ThemedText type="secondary" className="text-[10px] mt-0.5">{tag.count} txn{tag.count !== 1 ? 's' : ''}</ThemedText>
                   </View>
-                  <ThemedText className="font-bold text-sm ml-2">₹{tag.total >= 1000 ? (tag.total / 1000).toFixed(1) + 'k' : tag.total}</ThemedText>
+                  <ThemedText className="font-bold text-sm ml-2">{currency}{tag.total >= 1000 ? (tag.total / 1000).toFixed(1) + 'k' : tag.total}</ThemedText>
                 </MotiView>
               ))}
             </View>

@@ -555,7 +555,7 @@ const SettingsScreen = ({ navigation }: any) => {
           <Row
             icon={<LucideBrain color={colors.primary} size={20} />}
             label="Auto-approve Small Spends"
-            sub={`Threshold: ₹${preferences.autoApproveThreshold}`}
+            sub={`Threshold: ${preferences.currency}${preferences.autoApproveThreshold}`}
             right={<Switch value={preferences.autoApproveSmallSpends} onValueChange={toggleAutoApprove} trackColor={{ true: colors.success }} />}
           />
           <Row
@@ -578,7 +578,7 @@ const SettingsScreen = ({ navigation }: any) => {
           />
           {preferences.autoApproveSmallSpends && (
             <View className="p-4 border-t" style={{ borderTopColor: colors.border }}>
-               <ThemedText type="secondary" className="text-[10px] uppercase font-bold mb-2">Threshold Amount (₹)</ThemedText>
+               <ThemedText type="secondary" className="text-[10px] uppercase font-bold mb-2">Threshold Amount ({preferences.currency})</ThemedText>
                <View className="flex-row gap-2">
                  <TextInput 
                     className="bg-border flex-1 p-2 rounded-apple-sm font-bold" 
@@ -850,13 +850,13 @@ const SettingsScreen = ({ navigation }: any) => {
                  icon={<LucideBell color={colors.warning} size={20} />} 
                  label="Test Budget Alert" 
                  sub="80% utilization deep-link to Home" 
-                 onPress={() => NotificationService.notifyBudgetAlert(42000, 50000, '₹')} 
+                 onPress={() => NotificationService.notifyBudgetAlert(42000, 50000, preferences.currency)} 
                />
                <Row 
                  icon={<LucideLayout color={colors.primary} size={20} />} 
                  label="Test Weekly Digest" 
                  sub="Summary deep-link to Analytics" 
-                 onPress={() => NotificationService.notifyWeeklyDigest(15400, 'Shopping', '₹')} 
+                 onPress={() => NotificationService.notifyWeeklyDigest(15400, 'Shopping', preferences.currency)} 
                />
                <Row 
                  icon={<LucideBell color={colors.accent} size={20} />} 

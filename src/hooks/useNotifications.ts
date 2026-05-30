@@ -24,7 +24,7 @@ export const useNotifications = () => {
 
   /** Check per-category budgets and fire alerts if thresholds are hit. */
   const checkBudgetAlerts = useCallback(async () => {
-    const { budgetAlerts, budgetNotificationHistory, salaryDay } = useStore.getState().preferences;
+    const { budgetAlerts, budgetNotificationHistory, salaryDay, currency } = useStore.getState().preferences;
     const { updateBudgetNotificationHistory } = useStore.getState();
 
     if (!budgetAlerts) return;
@@ -40,14 +40,14 @@ export const useNotifications = () => {
           if (pct >= 100) {
             await scheduleLocalNotification(
               `Budget Exceeded: ${u.budget.categoryName}`,
-              `You've overspent your ${u.budget.categoryName} budget by ₹${(u.spent - u.budget.amount).toFixed(0)}.`,
+              `You've overspent your ${u.budget.categoryName} budget by ${currency}${(u.spent - u.budget.amount).toFixed(0)}.`,
               'budget',
               { screen: 'Budget' }
             );
           } else {
             await scheduleLocalNotification(
               `Budget Alert: ${u.budget.categoryName}`,
-              `You've used ${u.percentage.toFixed(0)}% of your ${u.budget.categoryName} budget (₹${u.spent.toFixed(0)} / ₹${u.budget.amount.toFixed(0)}).`,
+              `You've used ${u.percentage.toFixed(0)}% of your ${u.budget.categoryName} budget (${currency}${u.spent.toFixed(0)} / ${currency}${u.budget.amount.toFixed(0)}).`,
               'budget',
               { screen: 'Budget' }
             );

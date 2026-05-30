@@ -33,6 +33,7 @@ import {
 } from 'lucide-react-native';
 import { ThemedSafeAreaView, ThemedText } from '../components/ThemedSafeAreaView';
 import { useTheme } from '../theme/ThemeProvider';
+import { useStore } from '../store/useStore';
 import {
   deleteTransaction,
   getAccounts,
@@ -53,8 +54,8 @@ type RootStackParamList = {
 };
 type RouteProps = RouteProp<RootStackParamList, 'TransactionDetail'>;
 
-const formatAmount = (amount: number) =>
-  `₹${amount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+const formatAmount = (amount: number, currency = '₹') =>
+  `${currency}${amount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 
 const formatDate = (dateStr: string) => {
   const d = new Date(dateStr);
@@ -63,6 +64,8 @@ const formatDate = (dateStr: string) => {
 
 const TransactionDetailScreen = () => {
   const { colors } = useTheme();
+  const { preferences } = useStore();
+  const currency = preferences?.currency ?? '₹';
   const navigation = useNavigation<any>();
   const route = useRoute<RouteProps>();
   const { transaction } = route.params;
@@ -113,7 +116,7 @@ const TransactionDetailScreen = () => {
   const handleDelete = () => {
     Alert.alert(
       'Delete Transaction',
-      `Delete "${transaction.merchant}" for ${formatAmount(transaction.amount)}?\n\nThis will revert any account, goal and loan impacts.`,
+      `Delete "${transaction.merchant}" for ${formatAmount(transaction.amount, currency)}?\n\nThis will revert any account, goal and loan impacts.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -221,7 +224,7 @@ const TransactionDetailScreen = () => {
           </View>
 
           <ThemedText style={{ fontSize: 36, fontWeight: 'bold', color: amountColor, marginTop: 14 }}>
-            {amountPrefix}{formatAmount(transaction.amount)}
+            {amountPrefix}{formatAmount(transaction.amount, currency)}
           </ThemedText>
 
           <ThemedText style={{ fontSize: 20, fontWeight: '600', marginTop: 4 }}>

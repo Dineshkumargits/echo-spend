@@ -30,6 +30,7 @@ import {
 import { FlashList } from '@shopify/flash-list';
 import { useIsFocused, useNavigation, useRoute } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
+import { useStore } from '../store/useStore';
 import {
   getTransactions,
   getCategories,
@@ -124,8 +125,8 @@ const countActiveFilters = (f: Filters): number => {
   return count;
 };
 
-const formatAmount = (amount: number) =>
-  `₹${amount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+const formatAmount = (amount: number, currency = '₹') =>
+  `${currency}${amount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 
 
 const formatDateShort = (dateStr: string) => {
@@ -137,6 +138,8 @@ const formatDateShort = (dateStr: string) => {
 
 const TransactionsScreen = () => {
   const { colors } = useTheme();
+  const { preferences } = useStore();
+  const currency = preferences?.currency ?? '₹';
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const isFocused = useIsFocused();
@@ -399,7 +402,7 @@ const TransactionsScreen = () => {
         </View>
       </View>
       <ThemedText className="font-bold text-[15px]" style={{ color: amountColor(item) }}>
-        {amountPrefix(item)}{formatAmount(item.amount)}
+        {amountPrefix(item)}{formatAmount(item.amount, currency)}
       </ThemedText>
     </TouchableOpacity>
   );
@@ -635,7 +638,7 @@ const TransactionsScreen = () => {
             </ScrollView>
 
             {/* Amount Range */}
-            <SectionLabel label="Amount Range (₹)" />
+            <SectionLabel label={`Amount Range (${currency})`} />
             <View style={{ flexDirection: 'row', gap: 8 }}>
               <TextInput
                 style={[themedStyles.dateInput, { color: colors.primary, borderColor: colors.border, flex: 1 }]}
@@ -743,10 +746,10 @@ const TransactionsScreen = () => {
         </ThemedText>
         <View style={{ flexDirection: 'row', gap: 12 }}>
           <ThemedText className="text-xs font-bold" style={{ color: colors.danger }}>
-            {`-${formatAmount(stats.expenses)}`}
+            {`-${formatAmount(stats.expenses, currency)}`}
           </ThemedText>
           <ThemedText className="text-xs font-bold" style={{ color: colors.success }}>
-            {`+${formatAmount(stats.income)}`}
+            {`+${formatAmount(stats.income, currency)}`}
           </ThemedText>
         </View>
       </View>

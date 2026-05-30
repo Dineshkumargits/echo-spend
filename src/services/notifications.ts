@@ -1,5 +1,6 @@
 import * as Notifications from 'expo-notifications';
 import { Platform, AppState } from 'react-native';
+import { useStore } from '../store/useStore';
 
 // Single authoritative handler — keeps badge, plays sound, shows alert.
 // Refactored to silence alerts when the app is active to prevent "notification bombing"
@@ -69,8 +70,10 @@ export const NotificationService = {
   /** Single new transaction detected in background */
   async notifyNewTransaction(amount: number, merchant: string, category?: string) {
     try {
+      const { preferences } = useStore.getState();
+      const currency = preferences?.currency ?? '₹';
       const categoryLabel = category ? ` · ${category}` : '';
-      const text = `₹${amount.toLocaleString('en-IN')} at ${merchant}${categoryLabel}`;
+      const text = `${currency}${amount.toLocaleString('en-IN')} at ${merchant}${categoryLabel}`;
       
       if (AppState.currentState === 'active') {
         notify.info('New Transaction Found', text);
@@ -93,8 +96,10 @@ export const NotificationService = {
   /** Multiple transactions found in a background scan */
   async notifyBatchTransactions(count: number, totalAmount: number, topMerchant?: string) {
     try {
+      const { preferences } = useStore.getState();
+      const currency = preferences?.currency ?? '₹';
       const merchantLine = topMerchant ? ` Top: ${topMerchant}.` : '';
-      const body = `₹${totalAmount.toLocaleString('en-IN')} total detected.${merchantLine} Tap to review.`;
+      const body = `${currency}${totalAmount.toLocaleString('en-IN')} total detected.${merchantLine} Tap to review.`;
 
       if (AppState.currentState === 'active') {
         notify.info(`${count} New Transactions`, body);
@@ -162,32 +167,23 @@ export const NotificationService = {
       // so there is never more than one daily reminder in the queue.
       await NotificationService.cancelDailyReminder();
 
-      // Compute the next occurrence of 9:00 PM local time.
-      // If it's already past 9 PM today, schedule for tomorrow.
-      const now = new Date();
-      const target = new Date(now);
-      target.setHours(21, 0, 0, 0);
-      if (target.getTime() <= now.getTime()) {
-        target.setDate(target.getDate() + 1);
-      }
-
-      // Use a DATE trigger (maps to AlarmManager.setExact on Android when
-      // SCHEDULE_EXACT_ALARM permission is granted). This fires at the precise
-      // time, unlike DAILY which uses setInexactRepeating and is subject to
-      // Doze-mode batching (causing 30–40 minute delays).
+      // Use a natively repeating DAILY trigger. This survives app termination and does not
+      // require the JavaScript environment to wake up and manually schedule the next instance.
       await Notifications.scheduleNotificationAsync({
         identifier: 'echo-daily-reminder',
         content: {
           title: 'Daily Expense Check-in',
           body: "Don't forget to add today's expenses! Tap to open Echo Spend.",
-          data: { screen: 'Home', rescheduleDaily: true },
+          data: { screen: 'Home' },
           sound: 'default',
         },
         trigger: {
-          type: Notifications.SchedulableTriggerInputTypes.DATE,
-          date: target,
+          type: Notifications.SchedulableTriggerInputTypes.DAILY,
+          hour: 21,
+          minute: 0,
+          repeats: true,
           ...(Platform.OS === 'android' && { channelId: 'alerts' }),
-        },
+        } as any,
       });
     } catch (e) {
       console.error('[Notifications] Failed to schedule daily reminder:', e);

@@ -8,6 +8,7 @@ import { notify } from '../utils/notify';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { addAccount, updateAccount, deleteAccount, Account } from '../services/database';
 import { useTheme } from '../theme/ThemeProvider';
+import { useStore } from '../store/useStore';
 
 type AccountType = Account['accountType'];
 
@@ -33,6 +34,8 @@ const ordinal = (n: number) => {
 
 export const AddAccountScreen = () => {
   const { colors, isDark } = useTheme();
+  const { preferences } = useStore();
+  const currency = preferences?.currency ?? '₹';
   const navigation = useNavigation();
   const route = useRoute<AddAccountScreenRouteProp>();
   const accountToEdit = route.params?.accountToEdit;
@@ -350,7 +353,7 @@ export const AddAccountScreen = () => {
             {!accountToEdit && (
               <View style={themedStyles.field}>
                 <ThemedText type="secondary" style={themedStyles.label}>
-                  {isCC ? 'Current Outstanding (₹)' : 'Opening Balance (₹)'}
+                  {isCC ? `Current Outstanding (${currency})` : `Opening Balance (${currency})`}
                 </ThemedText>
                 <TextInput
                   style={[
@@ -381,7 +384,7 @@ export const AddAccountScreen = () => {
               <>
                 {/* Credit Limit */}
                 <View style={themedStyles.field}>
-                  <ThemedText type="secondary" style={themedStyles.label}>Credit Limit (₹) — optional</ThemedText>
+                  <ThemedText type="secondary" style={themedStyles.label}>Credit Limit ({currency}) — optional</ThemedText>
                   <TextInput
                     style={[
                       themedStyles.input,
@@ -397,7 +400,7 @@ export const AddAccountScreen = () => {
                     ? <ThemedText style={{ color: colors.danger, fontSize: 12, marginTop: 4 }}>{errors.creditLimit}</ThemedText>
                     : creditLimit && !isNaN(parseFloat(creditLimit)) && !isNaN(parseFloat(balance)) && (
                       <ThemedText type="secondary" className="text-[11px] mt-1 italic">
-                        Available credit: ₹{(parseFloat(creditLimit) - (parseFloat(balance) || 0)).toLocaleString('en-IN')}
+                        Available credit: {currency}{(parseFloat(creditLimit) - (parseFloat(balance) || 0)).toLocaleString('en-IN')}
                       </ThemedText>
                     )
                   }

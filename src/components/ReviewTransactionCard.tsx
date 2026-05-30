@@ -18,6 +18,7 @@ import {
 import { renderCategoryIcon } from './CategoryManager';
 import { ThemedText } from './ThemedSafeAreaView';
 import { useTheme } from '../theme/ThemeProvider';
+import { useStore } from '../store/useStore';
 import { Transaction, Account, Category, updateTransaction } from '../services/database';
 import { TagInput } from './TagInput';
 
@@ -50,6 +51,8 @@ export const ReviewTransactionCard = ({
   onChangeAccount,
 }: Props) => {
   const { colors } = useTheme();
+  const { preferences } = useStore();
+  const currency = preferences?.currency ?? '₹';
   const [isExpanded, setIsExpanded] = useState(false);
   const [showCatPicker, setShowCatPicker] = useState(false);
   const [catTab, setCatTab] = useState<'expense' | 'income' | 'transfer'>(
@@ -159,7 +162,7 @@ export const ReviewTransactionCard = ({
                   : <LucideArrowUpRight color={colors.danger} size={18} />
               }
               <ThemedText className="font-bold text-2xl ml-1.5">
-                {tx.type === 'credit' ? '+' : '-'}₹{tx.amount?.toLocaleString('en-IN') ?? '0'}
+                {tx.type === 'credit' ? '+' : '-'}{currency}{tx.amount?.toLocaleString('en-IN') ?? '0'}
               </ThemedText>
               <View
                 className="ml-2 px-2 py-0.5 rounded-full"

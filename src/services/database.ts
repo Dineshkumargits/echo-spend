@@ -31,6 +31,7 @@ export interface Transaction {
   isTransfer?: boolean;
   tags?: string[];
   balanceAfter?: number;
+  splitMemberId?: number;
 }
 
 export interface Subscription {
@@ -252,8 +253,10 @@ export const initDatabase = async () => {
         tags TEXT,
         balanceAfter REAL,
         toAccountId INTEGER,
+        splitMemberId INTEGER,
         FOREIGN KEY(accountId) REFERENCES accounts(id) ON DELETE SET NULL,
-        FOREIGN KEY(toAccountId) REFERENCES accounts(id) ON DELETE SET NULL
+        FOREIGN KEY(toAccountId) REFERENCES accounts(id) ON DELETE SET NULL,
+        FOREIGN KEY(splitMemberId) REFERENCES split_members(id) ON DELETE SET NULL
       );`);
 
       await db.execAsync(`CREATE TABLE IF NOT EXISTS budgets (
@@ -493,6 +496,17 @@ const runMigrations = async () => {
     `);
     await db.execAsync('PRAGMA user_version = 4');
   }
+
+  if (dbVersion < 5) {
+    try {
+      await db.execAsync(
+        'ALTER TABLE transactions ADD COLUMN splitMemberId INTEGER REFERENCES split_members(id) ON DELETE SET NULL'
+      );
+    } catch (e) {
+      console.warn('[Database] Migration to v5 warning:', e);
+    }
+    await db.execAsync('PRAGMA user_version = 5');
+  }
 };
 
 export const seedDatabase = async () => {
@@ -679,8 +693,8 @@ export const getTransactions = async (opts?: {
 export const addTransaction = async (transaction: Omit<Transaction, 'id'>) => {
   const result = await db.runAsync(
     `INSERT INTO transactions
-      (amount, category, merchant, type, date, accountId, toAccountId, isConfirmed, rawSms, isRecurring, recurrenceRule, notes, subscriptionId, goalId, loanId, confidence, source, isTransfer, tags, balanceAfter)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (amount, category, merchant, type, date, accountId, toAccountId, isConfirmed, rawSms, isRecurring, recurrenceRule, notes, subscriptionId, goalId, loanId, confidence, source, isTransfer, tags, balanceAfter, splitMemberId)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     transaction.amount,
     transaction.category,
     transaction.merchant,
@@ -701,6 +715,7 @@ export const addTransaction = async (transaction: Omit<Transaction, 'id'>) => {
     transaction.isTransfer ? 1 : 0,
     transaction.tags ? JSON.stringify(transaction.tags) : null,
     transaction.balanceAfter ?? null,
+    (transaction as any).splitMemberId ?? null,
   );
 
   const insertId = result.lastInsertRowId;
@@ -714,7 +729,7 @@ export const addTransaction = async (transaction: Omit<Transaction, 'id'>) => {
 };
 
 /** Internal helper to apply impact of a transaction to linked entities */
-const applyTransactionImpact = async (tx: Omit<Transaction, 'id'> | Transaction) => {
+const applyTransactionImpact = async (tx: Omit<Transaction, 'id'> | Transaction, isReapplying?: boolean) => {
   const amount = tx.amount;
   const type = tx.type;
 
@@ -764,6 +779,22 @@ const applyTransactionImpact = async (tx: Omit<Transaction, 'id'> | Transaction)
         newRemaining = type === 'debit' ? loan.remainingAmount - amount : loan.remainingAmount + amount;
       }
       await db.runAsync('UPDATE loans SET remainingAmount = ? WHERE id = ?', Math.max(0, newRemaining), tx.loanId);
+
+      // Advance loan nextDueDate if this transaction is a debt reduction payment (credit for lent, debit for borrowed)
+      const isRepayment = (loan.type === 'lent' && type === 'credit') || (loan.type !== 'lent' && type === 'debit');
+      if (isRepayment && loan.nextDueDate) {
+        const paidAt = (tx as any).date ?? new Date().toISOString();
+        const loanDueDate = new Date(loan.nextDueDate);
+        const txDate = new Date(paidAt);
+        const loanDueNormalized = new Date(loanDueDate.getFullYear(), loanDueDate.getMonth(), loanDueDate.getDate());
+        const txNormalized = new Date(txDate.getFullYear(), txDate.getMonth(), txDate.getDate());
+
+        if (isReapplying || loanDueNormalized <= txNormalized || tx.source === 'manual') {
+          const next = new Date(loan.nextDueDate);
+          next.setMonth(next.getMonth() + 1);
+          await db.runAsync('UPDATE loans SET nextDueDate = ? WHERE id = ?', next.toISOString(), tx.loanId);
+        }
+      }
     }
   }
 
@@ -775,8 +806,9 @@ const applyTransactionImpact = async (tx: Omit<Transaction, 'id'> | Transaction)
     if (sub) {
       const paidAt = (tx as any).date ?? new Date().toISOString();
       const next = new Date(sub.nextDueDate);
-      // Only advance if nextDueDate hasn't already been pushed past this transaction's date
-      if (new Date(sub.nextDueDate) <= new Date(paidAt)) {
+      // Only advance if nextDueDate hasn't already been pushed past this transaction's date,
+      // or if we are reapplying an edited transaction (bypassing the date check).
+      if (isReapplying || new Date(sub.nextDueDate) <= new Date(paidAt)) {
         if (sub.frequency === 'monthly') next.setMonth(next.getMonth() + 1);
         else if (sub.frequency === 'yearly') next.setFullYear(next.getFullYear() + 1);
         else if (sub.frequency === 'weekly') next.setDate(next.getDate() + 7);
@@ -804,6 +836,13 @@ const revertTransactionImpact = async (tx: Transaction) => {
     await updateAccountBalance(tx.toAccountId, amount, 'debit');
   }
 
+  if ((tx as any).splitMemberId) {
+    await db.runAsync(
+      'UPDATE split_members SET isPaid = 0, paidDate = NULL, repaidToAccountId = NULL WHERE id = ?',
+      (tx as any).splitMemberId
+    );
+  }
+
   if (tx.goalId) {
     const goal = await db.getFirstAsync<{ currentAmount: number }>(
       'SELECT currentAmount FROM goals WHERE id = ?', tx.goalId
@@ -827,6 +866,14 @@ const revertTransactionImpact = async (tx: Transaction) => {
         newRemaining = type === 'debit' ? loan.remainingAmount + amount : loan.remainingAmount - amount;
       }
       await db.runAsync('UPDATE loans SET remainingAmount = ? WHERE id = ?', Math.max(0, newRemaining), tx.loanId);
+
+      // Revert the next due date by 1 month
+      const isRepayment = (loan.type === 'lent' && type === 'credit') || (loan.type !== 'lent' && type === 'debit');
+      if (isRepayment && loan.nextDueDate) {
+        const prev = new Date(loan.nextDueDate);
+        prev.setMonth(prev.getMonth() - 1);
+        await db.runAsync('UPDATE loans SET nextDueDate = ? WHERE id = ?', prev.toISOString(), tx.loanId);
+      }
     }
   }
 
@@ -865,7 +912,7 @@ export const updateTransaction = async (id: number, fields: Partial<Omit<Transac
   if (keys.length === 0) {
     // If we only reverted, we should re-apply if no fields changed, 
     // but usually update is called with something.
-    if (oldTx && oldTx.isConfirmed) await applyTransactionImpact(oldTx);
+    if (oldTx && oldTx.isConfirmed) await applyTransactionImpact(oldTx, true);
     return;
   }
 
@@ -880,7 +927,7 @@ export const updateTransaction = async (id: number, fields: Partial<Omit<Transac
 
   const newTx = await db.getFirstAsync<Transaction>('SELECT * FROM transactions WHERE id = ?', id);
   if (newTx && newTx.isConfirmed) {
-    await applyTransactionImpact(newTx);
+    await applyTransactionImpact(newTx, true);
   }
 };
 
@@ -933,11 +980,11 @@ export const getSpendTrend = async (days = 7): Promise<SpendTrendPoint[]> => {
   since.setHours(0, 0, 0, 0);
 
   const rows = await db.getAllAsync<{ date: string; total: number }>(
-    `SELECT DATE(t.date) as date, SUM(${EFFECTIVE_DEBIT_AMOUNT}) as total
+    `SELECT DATE(t.date, 'localtime') as date, SUM(${EFFECTIVE_DEBIT_AMOUNT}) as total
      FROM transactions t
      WHERE t.type = 'debit' AND t.isConfirmed = 1 AND (t.isTransfer = 0 OR t.isTransfer IS NULL) AND t.date >= ?
-     GROUP BY DATE(t.date)
-     ORDER BY DATE(t.date) ASC`,
+     GROUP BY DATE(t.date, 'localtime')
+     ORDER BY DATE(t.date, 'localtime') ASC`,
     since.toISOString()
   );
 
@@ -960,7 +1007,7 @@ export const getCategoryBreakdown = async (
   const rows = await db.getAllAsync<{ category: string; total: number; count: number }>(
     `SELECT t.category, SUM(${EFFECTIVE_DEBIT_AMOUNT}) as total, COUNT(*) as count
      FROM transactions t
-     WHERE t.type = 'debit' AND t.isConfirmed = 1 AND (t.isTransfer = 0 OR t.isTransfer IS NULL) AND strftime('%Y-%m', t.date) = ?
+     WHERE t.type = 'debit' AND t.isConfirmed = 1 AND (t.isTransfer = 0 OR t.isTransfer IS NULL) AND strftime('%Y-%m', t.date, 'localtime') = ?
      GROUP BY t.category
      ORDER BY total DESC`,
     target
@@ -975,11 +1022,11 @@ export const getCategoryBreakdown = async (
 export const getMonthlyTotals = async (): Promise<{ month: string; income: number; expense: number }[]> => {
   return await db.getAllAsync(
     `SELECT
-       strftime('%Y-%m', t.date) as month,
+       strftime('%Y-%m', t.date, 'localtime') as month,
        SUM(CASE WHEN t.type = 'credit' AND (t.isTransfer = 0 OR t.isTransfer IS NULL) THEN t.amount ELSE 0 END) as income,
        SUM(CASE WHEN t.type = 'debit' AND (t.isTransfer = 0 OR t.isTransfer IS NULL) THEN ${EFFECTIVE_DEBIT_AMOUNT} ELSE 0 END) as expense
      FROM transactions t WHERE t.isConfirmed = 1
-     GROUP BY strftime('%Y-%m', t.date)
+     GROUP BY strftime('%Y-%m', t.date, 'localtime')
      ORDER BY month DESC
      LIMIT 6`
   );
@@ -991,11 +1038,11 @@ export const getAccountSpendTrend = async (accountId: number, days = 30): Promis
   since.setHours(0, 0, 0, 0);
 
   const rows = await db.getAllAsync<{ date: string; total: number }>(
-    `SELECT DATE(t.date) as date, SUM(${EFFECTIVE_DEBIT_AMOUNT}) as total
+    `SELECT DATE(t.date, 'localtime') as date, SUM(${EFFECTIVE_DEBIT_AMOUNT}) as total
      FROM transactions t
      WHERE (t.accountId = ?) AND (t.type = 'debit' OR t.type = 'transfer') AND t.isConfirmed = 1 AND t.date >= ?
-     GROUP BY DATE(t.date)
-     ORDER BY DATE(t.date) ASC`,
+     GROUP BY DATE(t.date, 'localtime')
+     ORDER BY DATE(t.date, 'localtime') ASC`,
     accountId, since.toISOString()
   );
 
@@ -1274,9 +1321,10 @@ export const syncAccountBalanceFromSms = async (accountId: number) => {
 
   let currentBal = lastWithBalance.balanceAfter;
   
-  // Find all confirmed transactions that happened AFTER this checkpoint
+  // Find all confirmed transactions that happened AFTER this checkpoint (involving the account as sender or receiver)
   const newerTxs = await db.getAllAsync<Transaction>(
-    'SELECT * FROM transactions WHERE accountId = ? AND isConfirmed = 1 AND date > ? ORDER BY date ASC',
+    'SELECT * FROM transactions WHERE (accountId = ? OR toAccountId = ?) AND isConfirmed = 1 AND date > ? ORDER BY date ASC',
+    accountId,
     accountId,
     lastWithBalance.date
   );
@@ -1290,12 +1338,13 @@ export const syncAccountBalanceFromSms = async (accountId: number) => {
   const isCC = account.accountType === 'credit_card';
 
   for (const tx of newerTxs) {
+    const isIncoming = tx.type === 'credit' || (tx.type === 'transfer' && tx.toAccountId === accountId);
     if (isCC) {
-      // CC: credit reduces debt, debit/transfer increases it
-      currentBal = (tx.type === 'credit') ? currentBal - tx.amount : currentBal + tx.amount;
+      // CC: credit/incoming reduces debt, debit/outgoing increases it
+      currentBal = isIncoming ? currentBal - tx.amount : currentBal + tx.amount;
     } else {
-      // Bank: credit adds, debit/transfer subtracts
-      currentBal = (tx.type === 'credit') ? currentBal + tx.amount : currentBal - tx.amount;
+      // Bank: credit/incoming adds, debit/outgoing/transfer-out subtracts
+      currentBal = isIncoming ? currentBal + tx.amount : currentBal - tx.amount;
     }
   }
 
@@ -1312,7 +1361,8 @@ export const recalculateAccountBalance = async (accountId: number) => {
   if (!account) return false;
 
   const txs = await db.getAllAsync<Transaction>(
-    'SELECT * FROM transactions WHERE accountId = ? AND isConfirmed = 1 ORDER BY date ASC',
+    'SELECT * FROM transactions WHERE (accountId = ? OR toAccountId = ?) AND isConfirmed = 1 ORDER BY date ASC',
+    accountId,
     accountId
   );
 
@@ -1320,10 +1370,11 @@ export const recalculateAccountBalance = async (accountId: number) => {
   const isCC = account.accountType === 'credit_card';
 
   for (const tx of txs) {
+    const isIncoming = tx.type === 'credit' || (tx.type === 'transfer' && tx.toAccountId === accountId);
     if (isCC) {
-      currentBal = (tx.type === 'credit') ? currentBal - tx.amount : currentBal + tx.amount;
+      currentBal = isIncoming ? currentBal - tx.amount : currentBal + tx.amount;
     } else {
-      currentBal = (tx.type === 'credit') ? currentBal + tx.amount : currentBal - tx.amount;
+      currentBal = isIncoming ? currentBal + tx.amount : currentBal - tx.amount;
     }
   }
 
@@ -1976,11 +2027,6 @@ export const recordLoanPayment = async (
       : `EMI payment to ${loan.lender}`,
   });
 
-  // Advance next due date by one month
-  const next = new Date(loan.nextDueDate);
-  next.setMonth(next.getMonth() + 1);
-  await updateLoan(loanId, { nextDueDate: next.toISOString() });
-
   return txId;
 };
 
@@ -2204,7 +2250,8 @@ export const receiveSplitPayment = async (
     isTransfer: true,
     source: 'manual',
     notes: `Split repayment from ${memberName}`,
-  });
+    splitMemberId: memberId,
+  } as any);
 
   // Mark member as paid
   await db.runAsync(

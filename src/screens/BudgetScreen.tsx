@@ -25,6 +25,7 @@ import {
 import { useNotifications } from '../hooks/useNotifications';
 import { useTheme } from '../theme/ThemeProvider';
 import { CategoryPicker } from '../components/CategoryPicker';
+import { useStore } from '../store/useStore';
 
 
 interface BudgetRow {
@@ -35,6 +36,8 @@ interface BudgetRow {
 
 const BudgetScreen = () => {
   const { colors, theme } = useTheme();
+  const { preferences } = useStore();
+  const currency = preferences?.currency ?? '₹';
   const [rows, setRows] = useState<BudgetRow[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
@@ -186,10 +189,10 @@ const BudgetScreen = () => {
 
                     <View className="flex-row justify-between mb-2">
                       <ThemedText type="secondary" className="text-xs">
-                        ₹{row.spent.toLocaleString('en-IN')} spent
+                        {currency}{row.spent.toLocaleString('en-IN')} spent
                       </ThemedText>
                       <ThemedText className="text-xs font-bold" style={{ color: barColor }}>
-                        {row.percentage}% of ₹{row.budget.amount.toLocaleString('en-IN')}
+                        {row.percentage}% of {currency}{row.budget.amount.toLocaleString('en-IN')}
                       </ThemedText>
                     </View>
 
@@ -205,7 +208,7 @@ const BudgetScreen = () => {
 
                     {row.percentage >= 100 && (
                       <ThemedText className="text-xs mt-2 font-bold" style={{ color: colors.danger }}>
-                        Over budget by ₹{(row.spent - row.budget.amount).toLocaleString('en-IN')}
+                        Over budget by {currency}{(row.spent - row.budget.amount).toLocaleString('en-IN')}
                       </ThemedText>
                     )}
                   </MotiView>

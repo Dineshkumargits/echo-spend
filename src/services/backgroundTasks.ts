@@ -88,6 +88,9 @@ TaskManager.defineTask(BACKGROUND_SYNC_TASK, async () => {
       const nowIso = new Date().toISOString();
       await setLastSyncTimeInDb(nowIso);
       // Zustand updateLastSynced is already called inside syncToGoogleDrive()
+
+      // Reschedule the exact silent alarm for tomorrow
+      await NotificationService.scheduleSyncTask(preferences.syncTime).catch(() => {});
     }
     return result
       ? BackgroundFetch.BackgroundFetchResult.NewData

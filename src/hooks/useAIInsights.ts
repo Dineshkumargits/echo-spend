@@ -26,6 +26,7 @@ export const useAIInsights = () => {
     await pruneOldInsights();
 
     const { preferences } = useStore.getState();
+    const currency = preferences.currency ?? '₹';
 
     const [trend14, trend7, breakdown, budgetUtil] = await Promise.all([
       getSpendTrend(14),
@@ -45,7 +46,7 @@ export const useAIInsights = () => {
       insights.push({
         type: 'weekly_digest',
         title: `Top spend: ${top.category}`,
-        body: `${top.category} accounts for ${top.percentage}% of your spending this month (₹${top.total.toFixed(0)}).`,
+        body: `${top.category} accounts for ${top.percentage}% of your spending this month (${currency}${top.total.toFixed(0)}).`,
         generatedAt: now,
       });
     }
@@ -58,7 +59,7 @@ export const useAIInsights = () => {
       insights.push({
         type: 'suggestion',
         title: 'Daily average',
-        body: `Your average daily spend is ₹${avgDaily.toFixed(0)} over the past 14 days.`,
+        body: `Your average daily spend is ${currency}${avgDaily.toFixed(0)} over the past 14 days.`,
         generatedAt: now,
       });
     }
@@ -76,7 +77,7 @@ export const useAIInsights = () => {
         insights.push({
           type: changePercent > 30 ? 'anomaly' : 'suggestion',
           title: `${Math.abs(changePercent)}% ${direction} this week`,
-          body: `You spent ₹${thisWeekTotal.toFixed(0)} this week vs ₹${lastWeekTotal.toFixed(0)} last week.`,
+          body: `You spent ${currency}${thisWeekTotal.toFixed(0)} this week vs ${currency}${lastWeekTotal.toFixed(0)} last week.`,
           generatedAt: now,
         });
       }
@@ -90,7 +91,7 @@ export const useAIInsights = () => {
         insights.push({
           type: 'anomaly',
           title: `High spend on ${highDay.date}`,
-          body: `You spent ₹${highDay.total.toFixed(0)} on ${highDay.date}, ${Math.round(highDay.total / avgDaily)}x your daily average.`,
+          body: `You spent ${currency}${highDay.total.toFixed(0)} on ${highDay.date}, ${Math.round(highDay.total / avgDaily)}x your daily average.`,
           generatedAt: now,
         });
       }
@@ -127,7 +128,7 @@ export const useAIInsights = () => {
         insights.push({
           type: 'suggestion',
           title: `${u.budget.categoryName}: ${u.percentage}% used`,
-          body: `₹${(u.budget.amount - u.spent).toFixed(0)} remaining with ${daysLeft} days left in this cycle.`,
+          body: `${currency}${(u.budget.amount - u.spent).toFixed(0)} remaining with ${daysLeft} days left in this cycle.`,
           generatedAt: now,
         });
         break; // Only show the most critical budget warning
@@ -177,8 +178,8 @@ export const useAIInsights = () => {
         if (savingsAmount > 100) {
           insights.push({
             type: 'suggestion',
-            title: `Save ₹${savingsAmount}/month`,
-            body: `Reducing ${target.category} by 20% could save ₹${savingsAmount} monthly.`,
+            title: `Save ${currency}${savingsAmount}/month`,
+            body: `Reducing ${target.category} by 20% could save ${currency}${savingsAmount} monthly.`,
             generatedAt: now,
           });
         }

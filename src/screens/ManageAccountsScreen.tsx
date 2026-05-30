@@ -30,9 +30,12 @@ import {
 } from '../services/database';
 import { useTheme } from '../theme/ThemeProvider';
 import { MotiView, AnimatePresence } from 'moti';
+import { useStore } from '../store/useStore';
 
 export const ManageAccountsScreen = () => {
   const { colors, isDark } = useTheme();
+  const { preferences } = useStore();
+  const currency = preferences?.currency ?? '₹';
   const navigation = useNavigation<any>();
   const isFocused = useIsFocused();
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -179,7 +182,7 @@ export const ManageAccountsScreen = () => {
                     </ThemedText>
                   </View>
                   <View style={{ alignItems: 'flex-end', marginLeft: 8 }}>
-                    <ThemedText className="font-bold text-sm">{acc.accountType === 'credit_card' ? '-' : ''}₹{acc.balance.toLocaleString('en-IN')}</ThemedText>
+                    <ThemedText className="font-bold text-sm">{acc.accountType === 'credit_card' ? '-' : ''}{currency}{acc.balance.toLocaleString('en-IN')}</ThemedText>
                     <TouchableOpacity
                       onPress={() => navigation.navigate('BankAccountDetail', { accountId: acc.id })}
                       activeOpacity={0.6}

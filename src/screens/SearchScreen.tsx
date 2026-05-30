@@ -22,16 +22,22 @@ import { FlashList } from '@shopify/flash-list';
 import { useIsFocused, useNavigation } from '@react-navigation/native';
 import { getTransactions, Transaction } from '../services/database';
 import { useTheme } from '../theme/ThemeProvider';
+import { useStore } from '../store/useStore';
 
 type FilterId = 'high' | 'recurring' | null;
 
-const FILTERS = [
-  { id: 'high' as const, label: 'High Spends (₹2k+)', icon: LucideTrendingUp },
-  { id: 'recurring' as const, label: 'Recurring', icon: LucideRepeat },
-];
+// Removed static FILTERS declaration to make it dynamic inside the component
 
 const SearchScreen = () => {
   const { colors, isDark } = useTheme();
+  const { preferences } = useStore();
+  const currency = preferences?.currency ?? '₹';
+
+  const FILTERS = [
+    { id: 'high' as const, label: `High Spends (${currency}2k+)`, icon: LucideTrendingUp },
+    { id: 'recurring' as const, label: 'Recurring', icon: LucideRepeat },
+  ];
+
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<FilterId>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -110,7 +116,7 @@ const SearchScreen = () => {
           className="font-bold text-base"
           style={{ color: item.type === 'transfer' ? colors.warning : (item.type === 'credit' ? colors.success : colors.primary) }}
         >
-          {item.type === 'credit' ? '+' : (item.type === 'transfer' ? '⇄' : '-')}₹{item.amount.toLocaleString('en-IN')}
+          {item.type === 'credit' ? '+' : (item.type === 'transfer' ? '⇄' : '-')}{currency}{item.amount.toLocaleString('en-IN')}
         </ThemedText>
       </MotiView>
     </TouchableOpacity>

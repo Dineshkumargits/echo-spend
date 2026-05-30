@@ -33,18 +33,20 @@ function AppContent() {
   // reminder effect only runs after they exist (prevents scheduling before
   // permissions, which causes the notification to mis-fire on every startup).
   const [notifPermGranted, setNotifPermGranted] = useState(false);
-  const { preferences, updateLastActiveAt, dbReloadKey, googleUser } = useStore();
+  const { preferences, updateLastActiveAt, dbReloadKey, googleUser, hasHydrated } = useStore();
   const { authenticate, checkSupport } = useBiometric();
   const { requestPermissions } = useNotifications();
   const { isDark } = useTheme();
 
   // Initial Lock Check
   useEffect(() => {
-    if (!hasCheckedInitialLock && preferences.biometricLock) {
-      setIsLocked(true);
+    if (hasHydrated && !hasCheckedInitialLock) {
+      if (preferences.biometricLock) {
+        setIsLocked(true);
+      }
       setHasCheckedInitialLock(true);
     }
-  }, [preferences.biometricLock, hasCheckedInitialLock]);
+  }, [hasHydrated, preferences.biometricLock, hasCheckedInitialLock]);
 
   const handleUnlock = React.useCallback(async () => {
     const ok = await checkSupport();
@@ -145,16 +147,9 @@ function AppContent() {
         }
       }
 
-      // Re-schedule the daily reminder whenever it fires. Since we use a one-shot
-      // DATE trigger for exact timing (instead of repeating DAILY which is inexact),
-      // we must chain the next occurrence each time the notification is received.
+      // Listener for notifications received while the app is active/backgrounded
       receivedSub = Notifications.addNotificationReceivedListener(notification => {
         const data = notification.request.content.data;
-        
-        // Handle Daily Reminder
-        if (data?.rescheduleDaily && preferences.dailyReminder) {
-          NotificationService.scheduleDailyReminder();
-        }
 
         // Handle Background Sync
         if (data?.triggerSync) {
@@ -284,7 +279,7 @@ function AppContent() {
     );
   }
 
-  if (!dbInitialized) return null;
+  if (!dbInitialized || !hasHydrated) return null;
 
   if (isLocked) {
     return (

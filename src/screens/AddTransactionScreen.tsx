@@ -432,7 +432,8 @@ export const AddTransactionScreen = ({ navigation: navProp, route }: any) => {
     if (!amount || isNaN(parsed) || parsed <= 0) {
       newErrors.amount = 'Enter a valid amount greater than 0';
     } else if (parsed > 10_000_000) {
-      newErrors.amount = 'Amount cannot exceed ₹1,00,00,000';
+      const currency = preferences?.currency ?? '₹';
+      newErrors.amount = `Amount cannot exceed ${currency}1,00,00,000`;
     }
     if (!merchant.trim()) {
       newErrors.merchant = 'Merchant / source name is required';
