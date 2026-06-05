@@ -785,17 +785,9 @@ const applyTransactionImpact = async (tx: Omit<Transaction, 'id'> | Transaction,
       // Advance loan nextDueDate if this transaction is a debt reduction payment (credit for lent, debit for borrowed)
       const isRepayment = (loan.type === 'lent' && type === 'credit') || (loan.type !== 'lent' && type === 'debit');
       if (isRepayment && loan.nextDueDate) {
-        const paidAt = (tx as any).date ?? new Date().toISOString();
-        const loanDueDate = new Date(loan.nextDueDate);
-        const txDate = new Date(paidAt);
-        const loanDueNormalized = new Date(loanDueDate.getFullYear(), loanDueDate.getMonth(), loanDueDate.getDate());
-        const txNormalized = new Date(txDate.getFullYear(), txDate.getMonth(), txDate.getDate());
-
-        if (isReapplying || loanDueNormalized <= txNormalized || tx.source === 'manual') {
-          const next = new Date(loan.nextDueDate);
-          next.setMonth(next.getMonth() + 1);
-          await db.runAsync('UPDATE loans SET nextDueDate = ? WHERE id = ?', next.toISOString(), tx.loanId);
-        }
+        const next = new Date(loan.nextDueDate);
+        next.setMonth(next.getMonth() + 1);
+        await db.runAsync('UPDATE loans SET nextDueDate = ? WHERE id = ?', next.toISOString(), tx.loanId);
       }
     }
   }
@@ -808,13 +800,9 @@ const applyTransactionImpact = async (tx: Omit<Transaction, 'id'> | Transaction,
     if (sub) {
       const paidAt = (tx as any).date ?? new Date().toISOString();
       const next = new Date(sub.nextDueDate);
-      // Only advance if nextDueDate hasn't already been pushed past this transaction's date,
-      // or if we are reapplying an edited transaction (bypassing the date check).
-      if (isReapplying || new Date(sub.nextDueDate) <= new Date(paidAt)) {
-        if (sub.frequency === 'monthly') next.setMonth(next.getMonth() + 1);
-        else if (sub.frequency === 'yearly') next.setFullYear(next.getFullYear() + 1);
-        else if (sub.frequency === 'weekly') next.setDate(next.getDate() + 7);
-      }
+      if (sub.frequency === 'monthly') next.setMonth(next.getMonth() + 1);
+      else if (sub.frequency === 'yearly') next.setFullYear(next.getFullYear() + 1);
+      else if (sub.frequency === 'weekly') next.setDate(next.getDate() + 7);
       await db.runAsync(
         'UPDATE subscriptions SET lastPaidDate = ?, nextDueDate = ? WHERE id = ?',
         paidAt, next.toISOString(), tx.subscriptionId
