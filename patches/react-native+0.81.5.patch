@@ -1,0 +1,18 @@
+diff --git a/node_modules/react-native/ReactAndroid/cmake-utils/ReactNative-application.cmake b/node_modules/react-native/ReactAndroid/cmake-utils/ReactNative-application.cmake
+index baa0fef..e9ca60d 100644
+--- a/node_modules/react-native/ReactAndroid/cmake-utils/ReactNative-application.cmake
++++ b/node_modules/react-native/ReactAndroid/cmake-utils/ReactNative-application.cmake
+@@ -92,9 +92,11 @@ target_compile_options(common_flags INTERFACE ${folly_FLAGS})
+ # If project is on RN CLI v9, then we can use the following lines to link against the autolinked 3rd party libraries.
+ if(EXISTS ${PROJECT_BUILD_DIR}/generated/autolinking/src/main/jni/Android-autolinking.cmake)
+         include(${PROJECT_BUILD_DIR}/generated/autolinking/src/main/jni/Android-autolinking.cmake)
+-        target_link_libraries(${CMAKE_PROJECT_NAME} ${AUTOLINKED_LIBRARIES})
+         foreach(autolinked_library ${AUTOLINKED_LIBRARIES})
+-            target_link_libraries(${autolinked_library} common_flags)
++            if(TARGET ${autolinked_library})
++                target_link_libraries(${CMAKE_PROJECT_NAME} ${autolinked_library})
++                target_link_libraries(${autolinked_library} common_flags)
++            endif()
+         endforeach()
+ endif()
+ 
