@@ -129,6 +129,7 @@ android {
         }
         release {
             signingConfig signingConfigs.release
+            matchingFallbacks = ['release', 'debug']
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds
