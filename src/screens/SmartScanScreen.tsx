@@ -762,6 +762,31 @@ const SmartScanScreen = ({ navigation }: any) => {
             >
               <ThemedText className="font-bold" style={{ color: '#FFFFFF' }}>Done</ThemedText>
             </TouchableOpacity>
+
+            <View 
+              style={{ 
+                marginTop: 40, 
+                padding: 16, 
+                borderRadius: 16, 
+                backgroundColor: `${colors.accent}10`, 
+                borderColor: `${colors.accent}30`, 
+                borderWidth: 1, 
+                flexDirection: 'row',
+                alignItems: 'flex-start',
+                width: '100%',
+              }}
+            >
+              <LucideInfo color={colors.accent} size={16} style={{ marginTop: 2, marginRight: 10 }} />
+              <View style={{ flex: 1 }}>
+                <ThemedText className="font-bold text-xs mb-1" style={{ color: colors.accent }}>
+                  Missing recent transactions?
+                </ThemedText>
+                <ThemedText type="secondary" style={{ fontSize: 11, lineHeight: 16 }}>
+                  Some banks send alerts via RCS (Internet Chat) instead of standard SMS. Android prevents third-party apps from reading RCS chats. To fix this, you can turn off RCS in your messages app settings:
+                  {"\n"}• Google Messages → Profile Icon → Messages settings → RCS chats → Toggle off "Turn on RCS chats".
+                </ThemedText>
+              </View>
+            </View>
           </View>
         ) : (
           <AnimatePresence>
