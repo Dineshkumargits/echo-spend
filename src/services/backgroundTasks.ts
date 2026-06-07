@@ -1,5 +1,6 @@
 import * as BackgroundFetch from 'expo-background-fetch';
 import * as TaskManager from 'expo-task-manager';
+import * as Notifications from 'expo-notifications';
 import { Platform, PermissionsAndroid } from 'react-native';
 import { SyncService } from './sync';
 import { useStore } from '../store/useStore';
@@ -102,6 +103,129 @@ TaskManager.defineTask(BACKGROUND_SYNC_TASK, async () => {
     _syncRunning = false;
   }
 });
+
+// ─── Background Notification Task for Exact Alarm Sync ──────────────────────
+const BACKGROUND_NOTIFICATION_TASK = 'BACKGROUND_NOTIFICATION_TASK';
+
+TaskManager.defineTask(BACKGROUND_NOTIFICATION_TASK, async ({ data, error }) => {
+  if (error) {
+    console.error('[BackgroundNotification] Task error:', error);
+    return;
+  }
+
+  const payload = (data as any).notification?.request?.content?.data;
+  console.log('[BackgroundNotification] Received background notification with data:', payload);
+
+  if (payload?.triggerSync) {
+    try {
+      const { preferences, googleUser } = useStore.getState();
+      if (googleUser && preferences.syncSchedule !== 'none') {
+        const due = await SyncService.shouldAutoSync();
+        if (due) {
+          console.log('[BackgroundNotification] Syncing to Google Drive...');
+          await SyncService.syncToGoogleDrive();
+          const nowIso = new Date().toISOString();
+          await setLastSyncTimeInDb(nowIso);
+        }
+      }
+    } catch (e) {
+      console.error('[BackgroundNotification] Google Drive sync failed:', e);
+    }
+  }
+
+  if (payload?.rescheduleSync && payload?.syncTime) {
+    try {
+      await NotificationService.scheduleSyncTask(payload.syncTime as string);
+    } catch (e) {
+      console.error('[BackgroundNotification] Failed to reschedule sync task:', e);
+    }
+  }
+});
+
+// ─── Real-time Incoming SMS processor ────────────────────────────────────────
+export const processIncomingSms = async (body: string, date: number) => {
+  if (_foregroundScanActive) return;
+  if (_scanRunning) return; // Prevent concurrent runs
+  _scanRunning = true;
+
+  console.log('[BackgroundSms] Processing incoming SMS...');
+  try {
+    const { preferences } = useStore.getState();
+    if (!preferences.autoSmsScan) return;
+
+    const ranges = await getAccountScanRanges();
+    const trackableRanges = ranges.filter(
+      r => r.account.accountType === 'bank' || r.account.accountType === 'credit_card'
+    );
+    if (trackableRanges.length === 0) return;
+
+    const accountsForMatch = trackableRanges.map(r => r.account);
+    const matched = matchSmsToAccount(body, accountsForMatch);
+    if (!matched) return;
+    if (matched.last4Digits && matched.matchType !== 'last4') return;
+
+    // Check raw SMS hash or semantic duplicate first
+    const hashed = hashSms(body);
+    const savedHashes = await getAllSmsHashes();
+    if (savedHashes.has(hashed)) return;
+
+    if (await isRawSmsAlreadyExists(body)) {
+      await markSmsProcessed(hashed);
+      return;
+    }
+
+    const { context, merchantHints } = await SmsParserService.getContext();
+
+    if (!AIModelManager.isModelLoaded()) {
+      await AIModelManager.initModel().catch(() => {});
+    }
+
+    const result = await SmsParserService.parse(body, [], merchantHints, context, date);
+    if (result.alreadySaved || !result.isTransaction) {
+      await markSmsProcessed(hashed);
+      return;
+    }
+
+    const accountId = matched.id ?? result.suggestedAccountId ?? accountsForMatch[0]?.id;
+    if (result.transaction.amount && result.transaction.amount > 0 && accountId) {
+      if (await isSmsDuplicateTransaction(
+        result.transaction.amount,
+        (result.transaction.type as 'credit' | 'debit' | 'transfer') ?? 'debit',
+        result.transaction.date ?? new Date(date).toISOString(),
+        accountId,
+      )) {
+        await markSmsProcessed(hashed);
+        return;
+      }
+
+      const txData = {
+        ...result.transaction,
+        accountId,
+        isConfirmed: false,
+        rawSms: body,
+        source: 'sms' as const,
+      } as Omit<Transaction, 'id'>;
+
+      await addTransaction(txData);
+      const nowStr = new Date().toISOString();
+      await updateAccountLastScanned(accountId, nowStr);
+
+      // Notify
+      await NotificationService.notifyNewTransaction(
+        txData.amount ?? 0,
+        txData.merchant || 'Unknown Merchant',
+        txData.category || undefined
+      );
+    }
+
+    await markSmsProcessed(hashed);
+  } catch (error) {
+    console.error('[BackgroundSms] Failed to process incoming SMS:', error);
+  } finally {
+    _scanRunning = false;
+    AIModelManager.releaseModel().catch(() => {});
+  }
+};
 
 // ─── 2. Auto SMS Scan Task ───────────────────────────────────────────────────
 
@@ -423,6 +547,11 @@ const safeUnregister = async (taskName: string) => {
 export const registerBackgroundTasks = async () => {
   try {
     const { preferences, googleUser } = useStore.getState();
+
+    // Register Background Notification Task to handle exact silent alarms for backup
+    await Notifications.registerTaskAsync(BACKGROUND_NOTIFICATION_TASK).catch((e) => {
+      console.warn('[Background] Failed to register background notifications task:', e);
+    });
 
     if (googleUser && preferences.syncSchedule !== 'none') {
       await safeRegister(BACKGROUND_SYNC_TASK, 15 * 60);

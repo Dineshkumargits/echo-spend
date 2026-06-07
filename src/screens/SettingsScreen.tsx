@@ -10,6 +10,9 @@ import {
   TextInput,
   Platform,
   KeyboardAvoidingView,
+  Linking,
+  NativeModules,
+  AppState,
 } from 'react-native';
 import { MotiView } from 'moti';
 import {
@@ -93,6 +96,93 @@ const SettingsScreen = ({ navigation }: any) => {
   const aiModelStatus = useStore(s => s.aiModelStatus);
   const aiModelProgress = useStore(s => s.aiModelProgress);
   const aiModelError = useStore(s => s.aiModelError);
+
+  const { BackgroundOptimizationModule } = NativeModules;
+
+  const [isBatteryOptimized, setIsBatteryOptimized] = useState(true);
+  const [isExactAlarmAllowed, setIsExactAlarmAllowed] = useState(true);
+
+  const checkBackgroundPermissions = async () => {
+    if (Platform.OS !== 'android' || !BackgroundOptimizationModule) return;
+    try {
+      const ignoring = await BackgroundOptimizationModule.isIgnoringBatteryOptimizations();
+      setIsBatteryOptimized(!ignoring);
+
+      const alarmAllowed = await BackgroundOptimizationModule.isExactAlarmAllowed();
+      setIsExactAlarmAllowed(alarmAllowed);
+    } catch (e) {
+      console.warn('[Settings] Failed to check background permissions:', e);
+    }
+  };
+
+  useEffect(() => {
+    checkBackgroundPermissions();
+    
+    if (Platform.OS === 'android') {
+      const subscription = AppState.addEventListener('change', (nextState) => {
+        if (nextState === 'active') {
+          checkBackgroundPermissions();
+        }
+      });
+      return () => subscription.remove();
+    }
+  }, []);
+
+  const handleBatteryOptimizationPress = async () => {
+    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+    if (!BackgroundOptimizationModule) return;
+    try {
+      const isIgnoringNow = await BackgroundOptimizationModule.isIgnoringBatteryOptimizations();
+      if (isIgnoringNow) {
+        Alert.alert("Already Allowed", "Echo Spend is already whitelisted from battery optimizations.");
+        return;
+      }
+      
+      Alert.alert(
+        "Disable Battery Optimization",
+        "Android restricts network and background task execution for battery-saving. To run cloud backups and scan SMS instantly, allow Echo Spend to run unrestricted in the background.",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Request Whitelist",
+            onPress: async () => {
+              await BackgroundOptimizationModule.requestIgnoreBatteryOptimizations();
+            }
+          }
+        ]
+      );
+    } catch (e: any) {
+      notify.error("Failed to request battery whitelisting", e?.message);
+    }
+  };
+
+  const handleExactAlarmPress = async () => {
+    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+    if (!BackgroundOptimizationModule) return;
+    try {
+      const isAllowedNow = await BackgroundOptimizationModule.isExactAlarmAllowed();
+      if (isAllowedNow) {
+        Alert.alert("Already Allowed", "Echo Spend already has exact alarm scheduling permissions.");
+        return;
+      }
+
+      Alert.alert(
+        "Allow Exact Alarms",
+        "To sync and backup exactly at your scheduled time daily, Echo Spend needs the 'Alarms & Reminders' permission. Tap to open Settings and toggle it on.",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Open Settings",
+            onPress: async () => {
+              await BackgroundOptimizationModule.openExactAlarmSettings();
+            }
+          }
+        ]
+      );
+    } catch (e: any) {
+      notify.error("Failed to open exact alarm settings", e?.message);
+    }
+  };
   
   const { colors, isDark } = useTheme();
   
@@ -388,6 +478,51 @@ const SettingsScreen = ({ navigation }: any) => {
           )}
           <Row icon={<LucideDownload color={colors.primary} size={20} />} label="Restore Data" sub="Replace local data with Drive backup" onPress={handleRestoreFromDrive} />
         </View>
+
+        {/* ── Android Background Tasks (Android Only) ── */}
+        {Platform.OS === 'android' && (
+          <>
+            <Section title="Background Tasks & Sync (Android)" />
+            <View className="rounded-apple-md overflow-hidden" style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
+              <Row
+                icon={<LucideZap color={isBatteryOptimized ? colors.warning : colors.success} size={20} />}
+                label="Unrestricted Background Run"
+                sub={isBatteryOptimized ? "Restricted — tap to request whitelisting" : "Allowed — app runs freely in background"}
+                onPress={handleBatteryOptimizationPress}
+                right={
+                  <View style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: isBatteryOptimized ? `${colors.warning}20` : `${colors.success}20` }}>
+                    <ThemedText style={{ fontSize: 10, fontWeight: '700', color: isBatteryOptimized ? colors.warning : colors.success }}>
+                      {isBatteryOptimized ? "RESTRICTED" : "UNRESTRICTED"}
+                    </ThemedText>
+                  </View>
+                }
+              />
+              <Row
+                icon={<LucideTimer color={isExactAlarmAllowed ? colors.success : colors.warning} size={20} />}
+                label="Exact Alarm Scheduling"
+                sub={isExactAlarmAllowed ? "Allowed — backups run precisely on time" : "Delayed — tap to grant exact alarm permission"}
+                onPress={handleExactAlarmPress}
+                right={
+                  <View style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: isExactAlarmAllowed ? `${colors.success}20` : `${colors.warning}20` }}>
+                    <ThemedText style={{ fontSize: 10, fontWeight: '700', color: isExactAlarmAllowed ? colors.success : colors.warning }}>
+                      {isExactAlarmAllowed ? "ALLOWED" : "DELAYED"}
+                    </ThemedText>
+                  </View>
+                }
+              />
+              <Row
+                icon={<LucideAlertTriangle color={colors.accent} size={20} />}
+                label="Background Troubleshooting Guide"
+                sub="Guide to keep background tasks alive on OEM devices"
+                onPress={() => {
+                  Linking.openURL('https://donotkillmyapp.com').catch(() => {
+                    notify.error("Could not open troubleshooting URL");
+                  });
+                }}
+              />
+            </View>
+          </>
+        )}
 
         {/* ── Privacy & Security ── */}
         <Section title="Privacy & Security" />
