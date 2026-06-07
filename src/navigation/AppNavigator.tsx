@@ -24,6 +24,7 @@ import SplitDetailScreen from '../screens/SplitDetailScreen';
 import { useTheme } from '../theme/ThemeProvider';
 
 import ManageAccountsScreen from '../screens/ManageAccountsScreen';
+import TipsScreen from '../screens/TipsScreen';
 
 const Stack = createStackNavigator();
 
@@ -61,6 +62,7 @@ export const AppNavigator = () => {
             <Stack.Screen name="BankAccountDetail" component={BankAccountDetailScreen} options={{ presentation: 'card' }} />
             <Stack.Screen name="SplitExpense" component={SplitExpenseScreen} options={{ presentation: 'modal' }} />
             <Stack.Screen name="SplitDetail" component={SplitDetailScreen} options={{ presentation: 'card' }} />
+            <Stack.Screen name="Tips" component={TipsScreen} options={{ presentation: 'card' }} />
           </>
         )}
       </Stack.Navigator>

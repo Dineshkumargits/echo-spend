@@ -42,6 +42,7 @@ import {
   LucidePause,
   LucideX,
   LucideSparkles,
+  LucideLightbulb,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
@@ -132,7 +133,13 @@ const SettingsScreen = ({ navigation }: any) => {
 
   const handleBatteryOptimizationPress = async () => {
     triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
-    if (!BackgroundOptimizationModule) return;
+    if (!BackgroundOptimizationModule) {
+      Alert.alert(
+        "Rebuild Required",
+        "We've added native Android code to handle background tasks and SMS listening. Please stop your current run and execute 'yarn android' in your terminal to compile the new native features."
+      );
+      return;
+    }
     try {
       const isIgnoringNow = await BackgroundOptimizationModule.isIgnoringBatteryOptimizations();
       if (isIgnoringNow) {
@@ -160,7 +167,13 @@ const SettingsScreen = ({ navigation }: any) => {
 
   const handleExactAlarmPress = async () => {
     triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
-    if (!BackgroundOptimizationModule) return;
+    if (!BackgroundOptimizationModule) {
+      Alert.alert(
+        "Rebuild Required",
+        "We've added native Android code to handle background tasks and SMS listening. Please stop your current run and execute 'yarn android' in your terminal to compile the new native features."
+      );
+      return;
+    }
     try {
       const isAllowedNow = await BackgroundOptimizationModule.isExactAlarmAllowed();
       if (isAllowedNow) {
@@ -482,51 +495,6 @@ const SettingsScreen = ({ navigation }: any) => {
           <Row icon={<LucideDownload color={colors.primary} size={20} />} label="Restore Data" sub="Replace local data with Drive backup" onPress={handleRestoreFromDrive} />
         </View>
 
-        {/* ── Android Background Tasks (Android Only) ── */}
-        {Platform.OS === 'android' && (
-          <>
-            <Section title="Background Tasks & Sync (Android)" />
-            <View className="rounded-apple-md overflow-hidden" style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
-              <Row
-                icon={<LucideZap color={isBatteryOptimized ? colors.warning : colors.success} size={20} />}
-                label="Unrestricted Background Run"
-                sub={isBatteryOptimized ? "Restricted — tap to request whitelisting" : "Allowed — app runs freely in background"}
-                onPress={handleBatteryOptimizationPress}
-                right={
-                  <View style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: isBatteryOptimized ? `${colors.warning}20` : `${colors.success}20` }}>
-                    <ThemedText style={{ fontSize: 10, fontWeight: '700', color: isBatteryOptimized ? colors.warning : colors.success }}>
-                      {isBatteryOptimized ? "RESTRICTED" : "UNRESTRICTED"}
-                    </ThemedText>
-                  </View>
-                }
-              />
-              <Row
-                icon={<LucideTimer color={isExactAlarmAllowed ? colors.success : colors.warning} size={20} />}
-                label="Exact Alarm Scheduling"
-                sub={isExactAlarmAllowed ? "Allowed — backups run precisely on time" : "Delayed — tap to grant exact alarm permission"}
-                onPress={handleExactAlarmPress}
-                right={
-                  <View style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: isExactAlarmAllowed ? `${colors.success}20` : `${colors.warning}20` }}>
-                    <ThemedText style={{ fontSize: 10, fontWeight: '700', color: isExactAlarmAllowed ? colors.success : colors.warning }}>
-                      {isExactAlarmAllowed ? "ALLOWED" : "DELAYED"}
-                    </ThemedText>
-                  </View>
-                }
-              />
-              <Row
-                icon={<LucideAlertTriangle color={colors.accent} size={20} />}
-                label="Background Troubleshooting Guide"
-                sub="Guide to keep background tasks alive on OEM devices"
-                onPress={() => {
-                  Linking.openURL('https://donotkillmyapp.com').catch(() => {
-                    notify.error("Could not open troubleshooting URL");
-                  });
-                }}
-              />
-            </View>
-          </>
-        )}
-
         {/* ── Privacy & Security ── */}
         <Section title="Privacy & Security" />
         <View className="rounded-apple-md overflow-hidden" style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
@@ -588,6 +556,12 @@ const SettingsScreen = ({ navigation }: any) => {
             label="Echo Spend Tour Guide"
             sub="Explore all features and power-user tips"
             onPress={() => { triggerHaptic(); setShowTour(true); }}
+          />
+          <Row
+            icon={<LucideLightbulb color={colors.primary} size={18} />}
+            label="Tips & Tricks"
+            sub="Unlock and configure the app's full potential"
+            onPress={() => { triggerHaptic(); navigation.navigate('Tips'); }}
           />
         </View>
 
@@ -1015,6 +989,51 @@ const SettingsScreen = ({ navigation }: any) => {
                    );
                  }} 
                />
+            </View>
+          </>
+        )}
+
+        {/* ── Android Background Tasks (Android Only) ── */}
+        {Platform.OS === 'android' && (
+          <>
+            <Section title="Background Tasks & Sync (Android)" />
+            <View className="rounded-apple-md overflow-hidden mb-24" style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
+              <Row
+                icon={<LucideZap color={isBatteryOptimized ? colors.warning : colors.success} size={20} />}
+                label="Unrestricted Background Run"
+                sub={isBatteryOptimized ? "Restricted — tap to request whitelisting" : "Allowed — app runs freely in background"}
+                onPress={handleBatteryOptimizationPress}
+                right={
+                  <View style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: isBatteryOptimized ? `${colors.warning}20` : `${colors.success}20` }}>
+                    <ThemedText style={{ fontSize: 10, fontWeight: '700', color: isBatteryOptimized ? colors.warning : colors.success }}>
+                      {isBatteryOptimized ? "RESTRICTED" : "UNRESTRICTED"}
+                    </ThemedText>
+                  </View>
+                }
+              />
+              <Row
+                icon={<LucideTimer color={isExactAlarmAllowed ? colors.success : colors.warning} size={20} />}
+                label="Exact Alarm Scheduling"
+                sub={isExactAlarmAllowed ? "Allowed — backups run precisely on time" : "Delayed — tap to grant exact alarm permission"}
+                onPress={handleExactAlarmPress}
+                right={
+                  <View style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: isExactAlarmAllowed ? `${colors.success}20` : `${colors.warning}20` }}>
+                    <ThemedText style={{ fontSize: 10, fontWeight: '700', color: isExactAlarmAllowed ? colors.success : colors.warning }}>
+                      {isExactAlarmAllowed ? "ALLOWED" : "DELAYED"}
+                    </ThemedText>
+                  </View>
+                }
+              />
+              <Row
+                icon={<LucideAlertTriangle color={colors.accent} size={20} />}
+                label="Background Troubleshooting Guide"
+                sub="Guide to keep background tasks alive on OEM devices"
+                onPress={() => {
+                  Linking.openURL('https://dontkillmyapp.com').catch(() => {
+                    notify.error("Could not open troubleshooting URL");
+                  });
+                }}
+              />
             </View>
           </>
         )}
