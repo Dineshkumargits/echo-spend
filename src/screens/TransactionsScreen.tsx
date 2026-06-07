@@ -9,6 +9,9 @@ import {
   StyleSheet,
   Platform,
   RefreshControl,
+  Modal,
+  Pressable,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { MotiView } from 'moti';
 import {
@@ -407,38 +410,7 @@ const TransactionsScreen = () => {
     </TouchableOpacity>
   );
 
-  // ─── Filter Panel ─────────────────────────────────────────────────────────
 
-  const FilterChip = ({
-    label,
-    active,
-    onPress,
-    color,
-  }: {
-    label: string;
-    active: boolean;
-    onPress: () => void;
-    color?: string;
-  }) => (
-    <TouchableOpacity
-      onPress={onPress}
-      style={[
-        themedStyles.chip,
-        {
-          backgroundColor: active ? (color ?? colors.accent) + '20' : colors.surface,
-          borderColor: active ? (color ?? colors.accent) : colors.border,
-        },
-      ]}
-    >
-      {active && <LucideCheck color={color ?? colors.accent} size={12} style={{ marginRight: 4 }} />}
-      <ThemedText
-        className="text-xs font-bold"
-        style={{ color: active ? (color ?? colors.accent) : colors.secondary }}
-      >
-        {label}
-      </ThemedText>
-    </TouchableOpacity>
-  );
 
   const SectionLabel = ({ label }: { label: string }) => (
     <ThemedText
@@ -478,264 +450,498 @@ const TransactionsScreen = () => {
           autoCorrect={false}
         />
         {search.length > 0 && (
-          <TouchableOpacity onPress={() => setSearch('')} style={{ marginRight: 8 }}>
+          <TouchableOpacity onPress={() => setSearch('')}>
             <LucideX color={colors.muted} size={16} />
           </TouchableOpacity>
         )}
-        <View style={{ width: 1, height: 24, backgroundColor: colors.border, marginHorizontal: 8 }} />
-        <TouchableOpacity
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            setShowFilters(v => !v);
-          }}
-          style={{ flexDirection: 'row', alignItems: 'center', paddingLeft: 8 }}
-        >
-          <LucideFilter color={activeFilterCount > 0 ? colors.accent : colors.primary} size={18} />
-          {activeFilterCount > 0 ? (
-            <View style={{ marginLeft: 6, backgroundColor: colors.accent, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 10 }}>
-              <ThemedText style={{ color: '#FFF', fontSize: 10, fontWeight: 'bold' }}>{activeFilterCount}</ThemedText>
-            </View>
-          ) : (
-            <ThemedText style={{ marginLeft: 4, fontSize: 13, color: colors.secondary }}>Filter</ThemedText>
-          )}
-        </TouchableOpacity>
       </View>
 
-      {/* ── Filter Panel ── */}
-      {showFilters && (
-        <View
-          style={[themedStyles.filterPanel, { backgroundColor: colors.surface, borderColor: colors.border }]}
+      {/* ── Quick Filter Bar ── */}
+      <View style={{ marginBottom: 4 }}>
+        <ScrollView 
+          horizontal 
+          showsHorizontalScrollIndicator={false} 
+          contentContainerStyle={themedStyles.quickFilterScroll}
         >
-          <ScrollView showsVerticalScrollIndicator={false} nestedScrollEnabled contentContainerStyle={{ paddingBottom: 20 }}>
-            <ThemedText style={{ fontSize: 12, fontWeight: 'bold', marginBottom: 8, color: colors.accent }}>Advanced Filters</ThemedText>
-            {/* Type */}
-            <SectionLabel label="Type" />
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              {(['all', 'debit', 'credit', 'transfer'] as const).map(t => (
-                <FilterChip
-                  key={t}
-                  label={t === 'all' ? 'All' : t === 'debit' ? 'Expense' : t === 'credit' ? 'Income' : 'Transfer'}
-                  active={filters.type === t}
-                  onPress={() => setFilters(f => ({ ...f, type: t }))}
-                  color={t === 'debit' ? colors.danger : t === 'credit' ? colors.success : t === 'transfer' ? colors.warning : undefined}
-                />
-              ))}
-            </ScrollView>
-
-            {/* Date Range */}
-            <SectionLabel label="Date Range" />
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              {(
-                [
-                  { id: 'all', label: 'All Time' },
-                  { id: 'today', label: 'Today' },
-                  { id: 'week', label: 'Last 7 Days' },
-                  { id: 'month', label: 'This Month' },
-                  { id: 'last_month', label: 'Last Month' },
-                  { id: 'custom', label: 'Custom' },
-                ] as { id: DatePreset; label: string }[]
-              ).map(item => (
-                <FilterChip
-                  key={item.id}
-                  label={item.label}
-                  active={filters.datePreset === item.id}
-                  onPress={() => setFilters(f => ({ ...f, datePreset: item.id }))}
-                />
-              ))}
-            </ScrollView>
-            {filters.datePreset === 'custom' && (
-              <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-                <TextInput
-                  style={[themedStyles.dateInput, { color: colors.primary, borderColor: colors.border, flex: 1 }]}
-                  placeholder="From YYYY-MM-DD"
-                  placeholderTextColor={colors.muted}
-                  value={filters.customStart}
-                  onChangeText={v => setFilters(f => ({ ...f, customStart: v }))}
-                />
-                <TextInput
-                  style={[themedStyles.dateInput, { color: colors.primary, borderColor: colors.border, flex: 1 }]}
-                  placeholder="To YYYY-MM-DD"
-                  placeholderTextColor={colors.muted}
-                  value={filters.customEnd}
-                  onChangeText={v => setFilters(f => ({ ...f, customEnd: v }))}
-                />
+          {/* Advanced Filter Button */}
+          <TouchableOpacity
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setShowFilters(true);
+            }}
+            style={[
+              themedStyles.quickFilterBtn,
+              {
+                backgroundColor: activeFilterCount > 0 ? `${colors.accent}15` : colors.surface,
+                borderColor: activeFilterCount > 0 ? colors.accent : colors.border,
+              }
+            ]}
+          >
+            <LucideSlidersHorizontal color={activeFilterCount > 0 ? colors.accent : colors.primary} size={14} />
+            <ThemedText 
+              className="font-bold text-xs ml-1.5" 
+              style={{ color: activeFilterCount > 0 ? colors.accent : colors.primary }}
+            >
+              Filters
+            </ThemedText>
+            {activeFilterCount > 0 && (
+              <View style={{ marginLeft: 6, backgroundColor: colors.accent, paddingHorizontal: 5, paddingVertical: 1.5, borderRadius: 99 }}>
+                <ThemedText style={{ color: '#FFF', fontSize: 9, fontWeight: '900' }}>{activeFilterCount}</ThemedText>
               </View>
             )}
+          </TouchableOpacity>
 
-            {/* Category */}
-            <SectionLabel label="Category" />
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              <FilterChip
-                label="All"
-                active={filters.categoryName === null}
-                onPress={() => setFilters(f => ({ ...f, categoryName: null }))}
-              />
-              {categories.map(c => (
-                <FilterChip
-                  key={c.id}
-                  label={c.name}
-                  active={filters.categoryName === c.name}
-                  onPress={() =>
-                    setFilters(f => ({
-                      ...f,
-                      categoryName: f.categoryName === c.name ? null : c.name,
-                    }))
-                  }
-                  color={c.color}
-                />
-              ))}
-            </ScrollView>
+          {/* Quick Chip: Expense */}
+          <TouchableOpacity
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setFilters(f => ({ ...f, type: f.type === 'debit' ? 'all' : 'debit' }));
+            }}
+            style={[
+              themedStyles.quickFilterBtn,
+              {
+                backgroundColor: filters.type === 'debit' ? `${colors.danger}15` : colors.surface,
+                borderColor: filters.type === 'debit' ? colors.danger : colors.border,
+              }
+            ]}
+          >
+            <ThemedText 
+              className="font-bold text-xs" 
+              style={{ color: filters.type === 'debit' ? colors.danger : colors.secondary }}
+            >
+              Expense
+            </ThemedText>
+          </TouchableOpacity>
 
-            {/* Tags */}
-            {tagsList.length > 0 && (
-              <>
-                <SectionLabel label="Tags" />
-                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                  <FilterChip
-                    label="All"
-                    active={filters.tagValue === null}
-                    onPress={() => setFilters(f => ({ ...f, tagValue: null }))}
-                  />
-                  {tagsList.map(t => (
-                    <FilterChip
-                      key={t}
-                      label={`#${t}`}
-                      active={filters.tagValue === t}
-                      onPress={() =>
-                        setFilters(f => ({
-                          ...f,
-                          tagValue: f.tagValue === t ? null : t,
-                        }))
-                      }
-                      color={colors.accent}
-                    />
+          {/* Quick Chip: Income */}
+          <TouchableOpacity
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setFilters(f => ({ ...f, type: f.type === 'credit' ? 'all' : 'credit' }));
+            }}
+            style={[
+              themedStyles.quickFilterBtn,
+              {
+                backgroundColor: filters.type === 'credit' ? `${colors.success}15` : colors.surface,
+                borderColor: filters.type === 'credit' ? colors.success : colors.border,
+              }
+            ]}
+          >
+            <ThemedText 
+              className="font-bold text-xs" 
+              style={{ color: filters.type === 'credit' ? colors.success : colors.secondary }}
+            >
+              Income
+            </ThemedText>
+          </TouchableOpacity>
+
+          {/* Quick Chip: This Month */}
+          <TouchableOpacity
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setFilters(f => ({ ...f, datePreset: f.datePreset === 'month' ? 'all' : 'month' }));
+            }}
+            style={[
+              themedStyles.quickFilterBtn,
+              {
+                backgroundColor: filters.datePreset === 'month' ? `${colors.accent}15` : colors.surface,
+                borderColor: filters.datePreset === 'month' ? colors.accent : colors.border,
+              }
+            ]}
+          >
+            <ThemedText 
+              className="font-bold text-xs" 
+              style={{ color: filters.datePreset === 'month' ? colors.accent : colors.secondary }}
+            >
+              This Month
+            </ThemedText>
+          </TouchableOpacity>
+
+          {/* Quick Chip: Recurring */}
+          <TouchableOpacity
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setFilters(f => ({ ...f, recurring: !f.recurring }));
+            }}
+            style={[
+              themedStyles.quickFilterBtn,
+              {
+                backgroundColor: filters.recurring ? `${colors.accent}15` : colors.surface,
+                borderColor: filters.recurring ? colors.accent : colors.border,
+              }
+            ]}
+          >
+            <LucideRepeat color={filters.recurring ? colors.accent : colors.secondary} size={11} />
+            <ThemedText 
+              className="font-bold text-xs ml-1" 
+              style={{ color: filters.recurring ? colors.accent : colors.secondary }}
+            >
+              Recurring
+            </ThemedText>
+          </TouchableOpacity>
+        </ScrollView>
+      </View>
+
+      {/* ── Advanced Filters Modal ── */}
+      <Modal
+        visible={showFilters}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowFilters(false)}
+      >
+        <Pressable
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}
+          onPress={() => setShowFilters(false)}
+        >
+          <KeyboardAvoidingView 
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={{ maxHeight: '85%' }}
+          >
+            <Pressable
+              onPress={e => e.stopPropagation()}
+              style={[themedStyles.modalSheet, { backgroundColor: colors.surface, borderColor: colors.border }]}
+            >
+              {/* Header */}
+              <View style={[themedStyles.modalHeader, { borderBottomColor: colors.border }]}>
+                <View style={{ flex: 1 }}>
+                  <ThemedText className="font-bold text-lg">Filter Transactions</ThemedText>
+                  {activeFilterCount > 0 && (
+                    <ThemedText type="secondary" className="text-xs mt-0.5">
+                      {activeFilterCount} filter{activeFilterCount !== 1 ? 's' : ''} active
+                    </ThemedText>
+                  )}
+                </View>
+                {activeFilterCount > 0 && (
+                  <TouchableOpacity
+                    onPress={() => {
+                      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                      setFilters(DEFAULT_FILTERS);
+                    }}
+                    style={{ marginRight: 16 }}
+                  >
+                    <ThemedText style={{ color: colors.danger, fontWeight: '700', fontSize: 13 }}>Reset All</ThemedText>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity
+                  onPress={() => setShowFilters(false)}
+                  style={[themedStyles.closeBtn, { backgroundColor: colors.translucent }]}
+                >
+                  <LucideX color={colors.primary} size={18} />
+                </TouchableOpacity>
+              </View>
+
+              {/* Scrollable filters */}
+              <ScrollView 
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={{ padding: 20, paddingBottom: 120 }}
+              >
+                {/* Type */}
+                <SectionLabel label="Transaction Type" />
+                <View style={themedStyles.typeGrid}>
+                  {(['all', 'debit', 'credit', 'transfer'] as const).map(t => {
+                    const active = filters.type === t;
+                    const label = t === 'all' ? 'All' : t === 'debit' ? 'Expense' : t === 'credit' ? 'Income' : 'Transfer';
+                    const activeColor = t === 'debit' ? colors.danger : t === 'credit' ? colors.success : t === 'transfer' ? colors.warning : colors.accent;
+                    return (
+                      <TouchableOpacity
+                        key={t}
+                        onPress={() => setFilters(f => ({ ...f, type: t }))}
+                        style={[
+                          themedStyles.typeSegment,
+                          {
+                            backgroundColor: active ? `${activeColor}15` : colors.translucent,
+                            borderColor: active ? activeColor : 'transparent',
+                          }
+                        ]}
+                      >
+                        <ThemedText 
+                          className="font-bold text-xs" 
+                          style={{ color: active ? activeColor : colors.secondary }}
+                        >
+                          {label}
+                        </ThemedText>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                {/* Date presets */}
+                <SectionLabel label="Date Preset" />
+                <View style={themedStyles.presetGrid}>
+                  {(
+                    [
+                      { id: 'all', label: 'All Time' },
+                      { id: 'today', label: 'Today' },
+                      { id: 'week', label: 'Last 7 Days' },
+                      { id: 'month', label: 'This Month' },
+                      { id: 'last_month', label: 'Last Month' },
+                      { id: 'custom', label: 'Custom' },
+                    ] as { id: DatePreset; label: string }[]
+                  ).map(item => (
+                    <TouchableOpacity
+                      key={item.id}
+                      onPress={() => setFilters(f => ({ ...f, datePreset: item.id }))}
+                      style={[
+                        themedStyles.gridChip,
+                        {
+                          backgroundColor: filters.datePreset === item.id ? `${colors.accent}15` : colors.translucent,
+                          borderColor: filters.datePreset === item.id ? colors.accent : 'transparent',
+                        }
+                      ]}
+                    >
+                      <ThemedText 
+                        className="font-bold text-xs" 
+                        style={{ color: filters.datePreset === item.id ? colors.accent : colors.secondary }}
+                      >
+                        {item.label}
+                      </ThemedText>
+                    </TouchableOpacity>
                   ))}
+                </View>
+
+                {/* Custom date range picker (if custom is selected) */}
+                {filters.datePreset === 'custom' && (
+                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
+                    <View style={{ flex: 1 }}>
+                      <ThemedText type="secondary" style={{ fontSize: 10, fontWeight: 'bold', marginBottom: 4 }}>START DATE</ThemedText>
+                      <TextInput
+                        style={[themedStyles.dateInput, { color: colors.primary, borderColor: colors.border, backgroundColor: colors.translucent }]}
+                        placeholder="YYYY-MM-DD"
+                        placeholderTextColor={colors.muted}
+                        value={filters.customStart}
+                        onChangeText={v => setFilters(f => ({ ...f, customStart: v }))}
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <ThemedText type="secondary" style={{ fontSize: 10, fontWeight: 'bold', marginBottom: 4 }}>END DATE</ThemedText>
+                      <TextInput
+                        style={[themedStyles.dateInput, { color: colors.primary, borderColor: colors.border, backgroundColor: colors.translucent }]}
+                        placeholder="YYYY-MM-DD"
+                        placeholderTextColor={colors.muted}
+                        value={filters.customEnd}
+                        onChangeText={v => setFilters(f => ({ ...f, customEnd: v }))}
+                      />
+                    </View>
+                  </View>
+                )}
+
+                {/* Amount range */}
+                <SectionLabel label={`Amount Range (${currency})`} />
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <View style={{ flex: 1 }}>
+                    <ThemedText type="secondary" style={{ fontSize: 10, fontWeight: 'bold', marginBottom: 4 }}>MIN AMOUNT</ThemedText>
+                    <TextInput
+                      style={[themedStyles.dateInput, { color: colors.primary, borderColor: colors.border, backgroundColor: colors.translucent }]}
+                      placeholder="e.g. 100"
+                      placeholderTextColor={colors.muted}
+                      keyboardType="numeric"
+                      value={filters.minAmount}
+                      onChangeText={v => setFilters(f => ({ ...f, minAmount: v }))}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <ThemedText type="secondary" style={{ fontSize: 10, fontWeight: 'bold', marginBottom: 4 }}>MAX AMOUNT</ThemedText>
+                    <TextInput
+                      style={[themedStyles.dateInput, { color: colors.primary, borderColor: colors.border, backgroundColor: colors.translucent }]}
+                      placeholder="e.g. 5000"
+                      placeholderTextColor={colors.muted}
+                      keyboardType="numeric"
+                      value={filters.maxAmount}
+                      onChangeText={v => setFilters(f => ({ ...f, maxAmount: v }))}
+                    />
+                  </View>
+                </View>
+
+                {/* Account */}
+                <SectionLabel label="Account" />
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                  <TouchableOpacity
+                    onPress={() => setFilters(f => ({ ...f, accountId: null }))}
+                    style={[
+                      themedStyles.horizontalChip,
+                      {
+                        backgroundColor: filters.accountId === null ? `${colors.accent}15` : colors.translucent,
+                        borderColor: filters.accountId === null ? colors.accent : 'transparent',
+                      }
+                    ]}
+                  >
+                    <ThemedText className="font-bold text-xs" style={{ color: filters.accountId === null ? colors.accent : colors.secondary }}>All Accounts</ThemedText>
+                  </TouchableOpacity>
+                  {accounts.map(a => {
+                    const active = filters.accountId === a.id;
+                    const emoji = a.accountType === 'credit_card' ? '💳' : a.accountType === 'cash' ? '💵' : a.accountType === 'wallet' ? '👛' : '🏦';
+                    return (
+                      <TouchableOpacity
+                        key={a.id}
+                        onPress={() => setFilters(f => ({ ...f, accountId: f.accountId === a.id ? null : a.id }))}
+                        style={[
+                          themedStyles.horizontalChip,
+                          {
+                            backgroundColor: active ? `${colors.accent}15` : colors.translucent,
+                            borderColor: active ? colors.accent : 'transparent',
+                          }
+                        ]}
+                      >
+                        <ThemedText style={{ fontSize: 12, marginRight: 4 }}>{emoji}</ThemedText>
+                        <ThemedText className="font-bold text-xs" style={{ color: active ? colors.accent : colors.secondary }}>{a.name}</ThemedText>
+                      </TouchableOpacity>
+                    );
+                  })}
                 </ScrollView>
-              </>
-            )}
 
-            {/* Account */}
-            <SectionLabel label="Account" />
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              <FilterChip
-                label="All"
-                active={filters.accountId === null}
-                onPress={() => setFilters(f => ({ ...f, accountId: null }))}
-              />
-              {accounts.map(a => (
-                <FilterChip
-                  key={a.id}
-                  label={a.name}
-                  active={filters.accountId === a.id}
-                  onPress={() =>
-                    setFilters(f => ({
-                      ...f,
-                      accountId: f.accountId === a.id ? null : a.id,
-                    }))
-                  }
-                />
-              ))}
-            </ScrollView>
+                {/* Category */}
+                <SectionLabel label="Category" />
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                  <TouchableOpacity
+                    onPress={() => setFilters(f => ({ ...f, categoryName: null }))}
+                    style={[
+                      themedStyles.horizontalChip,
+                      {
+                        backgroundColor: filters.categoryName === null ? `${colors.accent}15` : colors.translucent,
+                        borderColor: filters.categoryName === null ? colors.accent : 'transparent',
+                      }
+                    ]}
+                  >
+                    <ThemedText className="font-bold text-xs" style={{ color: filters.categoryName === null ? colors.accent : colors.secondary }}>All Categories</ThemedText>
+                  </TouchableOpacity>
+                  {categories.map(c => {
+                    const active = filters.categoryName === c.name;
+                    return (
+                      <TouchableOpacity
+                        key={c.id}
+                        onPress={() => setFilters(f => ({ ...f, categoryName: f.categoryName === c.name ? null : c.name }))}
+                        style={[
+                          themedStyles.horizontalChip,
+                          {
+                            backgroundColor: active ? `${c.color}20` : colors.translucent,
+                            borderColor: active ? c.color : 'transparent',
+                          }
+                        ]}
+                      >
+                        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: c.color, marginRight: 6 }} />
+                        <ThemedText className="font-bold text-xs" style={{ color: active ? colors.primary : colors.secondary }}>{c.name}</ThemedText>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
 
-            {/* Amount Range */}
-            <SectionLabel label={`Amount Range (${currency})`} />
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              <TextInput
-                style={[themedStyles.dateInput, { color: colors.primary, borderColor: colors.border, flex: 1 }]}
-                placeholder="Min amount"
-                placeholderTextColor={colors.muted}
-                keyboardType="numeric"
-                value={filters.minAmount}
-                onChangeText={v => setFilters(f => ({ ...f, minAmount: v }))}
-              />
-              <TextInput
-                style={[themedStyles.dateInput, { color: colors.primary, borderColor: colors.border, flex: 1 }]}
-                placeholder="Max amount"
-                placeholderTextColor={colors.muted}
-                keyboardType="numeric"
-                value={filters.maxAmount}
-                onChangeText={v => setFilters(f => ({ ...f, maxAmount: v }))}
-              />
-            </View>
+                {/* Source */}
+                <SectionLabel label="Source" />
+                <View style={themedStyles.sourceGrid}>
+                  {(
+                    [
+                      { id: 'all', label: 'All Sources' },
+                      { id: 'sms', label: 'SMS' },
+                      { id: 'manual', label: 'Manual' },
+                      { id: 'auto', label: 'Auto' },
+                    ] as { id: SourceFilter; label: string }[]
+                  ).map(item => (
+                    <TouchableOpacity
+                      key={item.id}
+                      onPress={() => setFilters(f => ({ ...f, source: item.id }))}
+                      style={[
+                        themedStyles.gridChip,
+                        {
+                          backgroundColor: filters.source === item.id ? `${colors.accent}15` : colors.translucent,
+                          borderColor: filters.source === item.id ? colors.accent : 'transparent',
+                        }
+                      ]}
+                    >
+                      <ThemedText 
+                        className="font-bold text-xs" 
+                        style={{ color: filters.source === item.id ? colors.accent : colors.secondary }}
+                      >
+                        {item.label}
+                      </ThemedText>
+                    </TouchableOpacity>
+                  ))}
+                </View>
 
-            {/* Source */}
-            <SectionLabel label="Source" />
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              {(
-                [
-                  { id: 'all', label: 'All' },
-                  { id: 'sms', label: 'SMS' },
-                  { id: 'manual', label: 'Manual' },
-                  { id: 'auto', label: 'Auto' },
-                ] as { id: SourceFilter; label: string }[]
-              ).map(item => (
-                <FilterChip
-                  key={item.id}
-                  label={item.label}
-                  active={filters.source === item.id}
-                  onPress={() => setFilters(f => ({ ...f, source: item.id }))}
-                />
-              ))}
-            </ScrollView>
+                {/* Sort order */}
+                <SectionLabel label="Sort By" />
+                <View style={themedStyles.presetGrid}>
+                  {(
+                    [
+                      { id: 'newest', label: 'Newest First' },
+                      { id: 'oldest', label: 'Oldest First' },
+                      { id: 'highest', label: 'Highest Amount' },
+                      { id: 'lowest', label: 'Lowest Amount' },
+                    ] as { id: SortOption; label: string }[]
+                  ).map(item => (
+                    <TouchableOpacity
+                      key={item.id}
+                      onPress={() => setFilters(f => ({ ...f, sort: item.id }))}
+                      style={[
+                        themedStyles.gridChip,
+                        {
+                          backgroundColor: filters.sort === item.id ? `${colors.accent}15` : colors.translucent,
+                          borderColor: filters.sort === item.id ? colors.accent : 'transparent',
+                        }
+                      ]}
+                    >
+                      <ThemedText 
+                        className="font-bold text-xs" 
+                        style={{ color: filters.sort === item.id ? colors.accent : colors.secondary }}
+                      >
+                        {item.label}
+                      </ThemedText>
+                    </TouchableOpacity>
+                  ))}
+                </View>
 
-            {/* Sort */}
-            <SectionLabel label="Sort By" />
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              {(
-                [
-                  { id: 'newest', label: 'Newest First' },
-                  { id: 'oldest', label: 'Oldest First' },
-                  { id: 'highest', label: 'Highest Amount' },
-                  { id: 'lowest', label: 'Lowest Amount' },
-                ] as { id: SortOption; label: string }[]
-              ).map(item => (
-                <FilterChip
-                  key={item.id}
-                  label={item.label}
-                  active={filters.sort === item.id}
-                  onPress={() => setFilters(f => ({ ...f, sort: item.id }))}
-                />
-              ))}
-            </ScrollView>
+                {/* Toggles (Recurring) */}
+                <SectionLabel label="Special" />
+                <TouchableOpacity
+                  onPress={() => setFilters(f => ({ ...f, recurring: !f.recurring }))}
+                  style={[
+                    themedStyles.toggleRow,
+                    {
+                      backgroundColor: filters.recurring ? `${colors.accent}15` : colors.translucent,
+                      borderColor: filters.recurring ? colors.accent : 'transparent',
+                      marginBottom: 20,
+                    }
+                  ]}
+                >
+                  <LucideRepeat color={filters.recurring ? colors.accent : colors.secondary} size={16} />
+                  <ThemedText 
+                    className="font-bold text-xs ml-2" 
+                    style={{ color: filters.recurring ? colors.accent : colors.secondary }}
+                  >
+                    Recurring Transactions Only
+                  </ThemedText>
+                </TouchableOpacity>
 
-            {/* Toggles row */}
-            <View style={{ flexDirection: 'row', gap: 8, marginTop: 16 }}>
-              {/* Recurring */}
-              <TouchableOpacity
-                onPress={() => setFilters(f => ({ ...f, recurring: !f.recurring }))}
+                {/* Spacer */}
+                <View style={{ height: 40 }} />
+              </ScrollView>
+
+              {/* Floating bottom Apply area */}
+              <View 
                 style={[
-                  themedStyles.toggleChip,
-                  {
-                    backgroundColor: filters.recurring ? colors.accent + '20' : colors.translucent,
-                    borderColor: filters.recurring ? colors.accent : colors.border,
-                  },
+                  themedStyles.modalFooter, 
+                  { 
+                    backgroundColor: colors.surface, 
+                    borderTopColor: colors.border,
+                  }
                 ]}
               >
-                <LucideRepeat color={filters.recurring ? colors.accent : colors.secondary} size={14} />
-                <ThemedText
-                  className="ml-1.5 text-xs font-bold"
-                  style={{ color: filters.recurring ? colors.accent : colors.secondary }}
+                <TouchableOpacity
+                  onPress={() => {
+                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                    setShowFilters(false);
+                  }}
+                  style={[themedStyles.applyBtn, { backgroundColor: colors.accent }]}
                 >
-                  Recurring Only
-                </ThemedText>
-              </TouchableOpacity>
-            </View>
-
-            {/* Reset */}
-            {activeFilterCount > 0 && (
-              <TouchableOpacity
-                onPress={() => setFilters(DEFAULT_FILTERS)}
-                style={[themedStyles.resetBtn, { borderColor: colors.danger + '50' }]}
-              >
-                <LucideX color={colors.danger} size={14} />
-                <ThemedText style={{ color: colors.danger, fontWeight: 'bold', fontSize: 13, marginLeft: 6 }}>
-                  Reset All Filters
-                </ThemedText>
-              </TouchableOpacity>
-            )}
-          </ScrollView>
-        </View>
-      )}
+                  <LucideCheck color="#FFF" size={18} style={{ marginRight: 6 }} />
+                  <ThemedText className="font-bold" style={{ color: '#FFF' }}>
+                    Apply Filters {activeFilterCount > 0 ? `(${activeFilterCount})` : ''}
+                  </ThemedText>
+                </TouchableOpacity>
+              </View>
+            </Pressable>
+          </KeyboardAvoidingView>
+        </Pressable>
+      </Modal>
 
       {/* ── Stats bar ── */}
       <View style={[themedStyles.statsBar, { borderBottomColor: colors.border }]}>
@@ -845,7 +1051,7 @@ const createThemedStyles = (colors: any) =>
       flexDirection: 'row',
       alignItems: 'center',
       marginHorizontal: 20,
-      marginBottom: 8,
+      marginBottom: 12,
       paddingHorizontal: 14,
       paddingVertical: 10,
       borderRadius: 14,
@@ -859,48 +1065,104 @@ const createThemedStyles = (colors: any) =>
       fontSize: 15,
       padding: 0,
     },
-    filterPanel: {
-      marginHorizontal: 20,
-      marginBottom: 8,
-      padding: 16,
-      borderRadius: 16,
-      borderWidth: 1,
-      maxHeight: 380,
+    quickFilterScroll: {
+      paddingHorizontal: 20,
+      paddingBottom: 16,
+      gap: 8,
+      flexDirection: 'row',
     },
-    chip: {
+    quickFilterBtn: {
       flexDirection: 'row',
       alignItems: 'center',
-      paddingHorizontal: 12,
-      paddingVertical: 7,
-      borderRadius: 20,
-      borderWidth: 1,
-      marginRight: 8,
-      marginBottom: 2,
-    },
-    toggleChip: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 12,
+      paddingHorizontal: 14,
       paddingVertical: 8,
-      borderRadius: 20,
+      borderRadius: 99,
       borderWidth: 1,
-      flex: 1,
+    },
+    modalSheet: {
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+      borderWidth: 1,
+      maxHeight: '100%',
+    },
+    modalHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 20,
+      paddingVertical: 18,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+    },
+    closeBtn: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      alignItems: 'center',
       justifyContent: 'center',
+    },
+    typeGrid: {
+      flexDirection: 'row',
+      gap: 8,
+    },
+    typeSegment: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 12,
+      borderRadius: 12,
+      borderWidth: 1,
+    },
+    presetGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    sourceGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    gridChip: {
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      borderRadius: 12,
+      borderWidth: 1,
+      minWidth: '28%',
+      flexGrow: 1,
+      alignItems: 'center',
+    },
+    horizontalChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      borderRadius: 12,
+      borderWidth: 1,
+    },
+    toggleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      padding: 14,
+      borderRadius: 12,
+      borderWidth: 1,
+    },
+    modalFooter: {
+      paddingHorizontal: 20,
+      paddingTop: 12,
+      paddingBottom: Platform.OS === 'ios' ? 28 : 16,
+      borderTopWidth: StyleSheet.hairlineWidth,
+    },
+    applyBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 14,
+      borderRadius: 14,
     },
     dateInput: {
       fontSize: 13,
       paddingHorizontal: 10,
-      paddingVertical: 8,
-      borderRadius: 10,
-      borderWidth: 1,
-    },
-    resetBtn: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginTop: 16,
       paddingVertical: 10,
-      borderRadius: 12,
+      borderRadius: 10,
       borderWidth: 1,
     },
     statsBar: {
