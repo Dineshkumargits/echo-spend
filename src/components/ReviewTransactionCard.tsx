@@ -14,6 +14,8 @@ import {
   LucideZap,
   LucideAlertTriangle,
   LucidePlus,
+  LucideX,
+  LucideSearch,
 } from 'lucide-react-native';
 import { renderCategoryIcon } from './CategoryManager';
 import { ThemedText } from './ThemedSafeAreaView';
@@ -55,6 +57,7 @@ export const ReviewTransactionCard = ({
   const currency = preferences?.currency ?? '₹';
   const [isExpanded, setIsExpanded] = useState(false);
   const [showCatPicker, setShowCatPicker] = useState(false);
+  const [catSearch, setCatSearch] = useState('');
   const [catTab, setCatTab] = useState<'expense' | 'income' | 'transfer'>(
     tx.type === 'credit' ? 'income' : tx.type === 'transfer' ? 'transfer' : 'expense'
   );
@@ -112,6 +115,7 @@ export const ReviewTransactionCard = ({
     await updateTransaction(tx.id, { category: catName });
     onTransactionUpdated({ ...tx, category: catName });
     setShowCatPicker(false);
+    setCatSearch('');
   };
 
   const changeTags = async (newTags: string[]) => {
@@ -281,9 +285,13 @@ export const ReviewTransactionCard = ({
         <View className="flex-row flex-wrap mt-2">
           <TouchableOpacity
             onPress={() => {
-              setShowCatPicker(!showCatPicker);
+              const nextVal = !showCatPicker;
+              setShowCatPicker(nextVal);
               setShowAccPicker(false);
               setShowTagPicker(false);
+              if (!nextVal) {
+                setCatSearch('');
+              }
             }}
             className="flex-row items-center px-3 py-1.5 rounded-full mr-2 mb-2"
             style={{ backgroundColor: `${colors.accent}15` }}
@@ -299,6 +307,7 @@ export const ReviewTransactionCard = ({
               setShowAccPicker(!showAccPicker);
               setShowCatPicker(false);
               setShowTagPicker(false);
+              setCatSearch('');
             }}
             className="flex-row items-center px-3 py-1.5 rounded-full mr-2 mb-2"
             style={{ backgroundColor: colors.translucent }}
@@ -316,6 +325,7 @@ export const ReviewTransactionCard = ({
                 setShowCatPicker(false);
                 setShowAccPicker(false);
                 setShowTagPicker(false);
+                setCatSearch('');
               }}
               className="flex-row items-center px-3 py-1.5 rounded-full mr-2 mb-2"
               style={{ backgroundColor: `${colors.success}15` }}
@@ -338,6 +348,7 @@ export const ReviewTransactionCard = ({
               setShowTagPicker(!showTagPicker);
               setShowCatPicker(false);
               setShowAccPicker(false);
+              setCatSearch('');
             }}
             className="flex-row items-center px-3 py-1.5 rounded-full mb-2"
             style={{ backgroundColor: colors.translucent, borderStyle: 'dashed', borderWidth: 1, borderColor: colors.border }}
@@ -405,9 +416,81 @@ export const ReviewTransactionCard = ({
               ))}
             </View>
 
+            {/* Category Search Input */}
+            <View className="flex-row items-center mb-3 rounded-lg px-3 py-1.5 border" style={{ borderColor: colors.border, backgroundColor: colors.translucent }}>
+              <LucideSearch color={colors.secondary} size={14} style={{ marginRight: 6 }} />
+              <TextInput
+                value={catSearch}
+                onChangeText={setCatSearch}
+                placeholder="Search categories..."
+                placeholderTextColor={colors.muted}
+                autoCapitalize="none"
+                autoCorrect={false}
+                style={{
+                  flex: 1,
+                  color: colors.primary,
+                  fontSize: 12,
+                  padding: 0,
+                  margin: 0,
+                }}
+              />
+              {catSearch.length > 0 && (
+                <TouchableOpacity onPress={() => setCatSearch('')}>
+                  <LucideX color={colors.secondary} size={14} />
+                </TouchableOpacity>
+              )}
+            </View>
+
             <View className="flex-col">
               {(() => {
                 const currentCats = categories.filter(c => c.type === catTab);
+
+                if (catSearch.trim() !== '') {
+                  const query = catSearch.trim().toLowerCase();
+                  const filteredCats = currentCats.filter(c =>
+                    c.name.toLowerCase().includes(query)
+                  );
+
+                  if (filteredCats.length === 0) {
+                    return (
+                      <ThemedText type="secondary" className="text-xs italic py-2">
+                        No categories found matching "{catSearch}"
+                      </ThemedText>
+                    );
+                  }
+
+                  return (
+                    <View className="flex-row flex-wrap">
+                      {filteredCats.map(cat => {
+                        const isSelected = tx.category === cat.name;
+                        const parent = cat.parentId ? categories.find(p => p.id === cat.parentId) : null;
+                        const displayName = parent ? `${parent.name} › ${cat.name}` : cat.name;
+
+                        return (
+                          <TouchableOpacity
+                            key={cat.id}
+                            onPress={() => changeCategory(cat.name)}
+                            className="mr-2 mb-2 px-3 py-1.5 rounded-full flex-row items-center"
+                            style={{
+                              backgroundColor: isSelected ? colors.accent : colors.translucent,
+                              borderWidth: 1,
+                              borderColor: isSelected ? colors.accent : colors.border,
+                            }}
+                          >
+                            {renderCategoryIcon(cat.icon, isSelected ? '#FFF' : cat.color, 10)}
+                            <ThemedText
+                              className="text-[10px] font-medium ml-1.5"
+                              style={{ color: isSelected ? '#FFF' : colors.secondary }}
+                            >
+                              {displayName}
+                            </ThemedText>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  );
+                }
+
                 const parents = currentCats.filter(c => !c.parentId);
                 const childrenMap = currentCats.reduce((acc, cat) => {
                   if (cat.parentId) {
