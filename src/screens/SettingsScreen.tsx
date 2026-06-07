@@ -757,7 +757,7 @@ const SettingsScreen = ({ navigation }: any) => {
               >
                 <LucideDownload color="#fff" size={16} />
                 <ThemedText style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>
-                  Download AI Model (~770 MB)
+                  Download AI Model (~980 MB)
                 </ThemedText>
               </TouchableOpacity>
             </>
@@ -770,8 +770,12 @@ const SettingsScreen = ({ navigation }: any) => {
                 sub={`${aiModelProgress}% complete`}
               />
               <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
-                <View style={{ height: 4, borderRadius: 2, backgroundColor: colors.translucent, overflow: 'hidden' }}>
-                  <View style={{ height: '100%', borderRadius: 2, backgroundColor: colors.accent, width: `${aiModelProgress}%` }} />
+                <View style={{ width: '100%', height: 4, borderRadius: 2, backgroundColor: colors.translucent, overflow: 'hidden' }}>
+                  <MotiView
+                    animate={{ width: `${aiModelProgress}%` }}
+                    transition={{ type: 'timing', duration: 300 }}
+                    style={{ height: '100%', borderRadius: 2, backgroundColor: colors.accent }}
+                  />
                 </View>
               </View>
               <View style={{ flexDirection: 'row', gap: 12, marginHorizontal: 12, marginBottom: 12 }}>
@@ -814,8 +818,12 @@ const SettingsScreen = ({ navigation }: any) => {
                 sub={`Progress: ${aiModelProgress}%`}
               />
               <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
-                <View style={{ height: 4, borderRadius: 2, backgroundColor: colors.translucent, overflow: 'hidden' }}>
-                  <View style={{ height: '100%', borderRadius: 2, backgroundColor: colors.secondary, width: `${aiModelProgress}%` }} />
+                <View style={{ width: '100%', height: 4, borderRadius: 2, backgroundColor: colors.translucent, overflow: 'hidden' }}>
+                  <MotiView
+                    animate={{ width: `${aiModelProgress}%` }}
+                    transition={{ type: 'timing', duration: 300 }}
+                    style={{ height: '100%', borderRadius: 2, backgroundColor: colors.secondary }}
+                  />
                 </View>
               </View>
               <View style={{ flexDirection: 'row', gap: 12, marginHorizontal: 12, marginBottom: 12 }}>
@@ -902,7 +910,7 @@ const SettingsScreen = ({ navigation }: any) => {
               <Row
                 icon={<LucideCpu color={colors.success} size={20} />}
                 label="On-Device AI"
-                sub={`Llama 3.2 1B • ${aiModelSize || '~770 MB'} • ${aiModelStatus === 'ready' ? 'Active' : 'Downloaded'}`}
+                sub={`Llama 3.2 1B • ${aiModelSize || '~980 MB'} • ${aiModelStatus === 'ready' ? 'Active' : 'Downloaded'}`}
                 right={
                   <View style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: `${colors.success}20` }}>
                     <ThemedText style={{ fontSize: 10, fontWeight: '700', color: colors.success }}>
@@ -914,11 +922,11 @@ const SettingsScreen = ({ navigation }: any) => {
               <Row
                 icon={<LucideTrash2 color={colors.danger} size={18} />}
                 label="Delete AI Model"
-                sub={`Free up ${aiModelSize || '~770 MB'} of storage`}
+                sub={`Free up ${aiModelSize || '~980 MB'} of storage`}
                 onPress={() => {
                   Alert.alert(
                     'Delete AI Model?',
-                    'Without the AI model, SMS analysis will use basic pattern matching which is less accurate for unusual transactions.\n\nYou\'ll need to re-download ~770 MB later to restore AI features.',
+                    'Without the AI model, SMS analysis will use basic pattern matching which is less accurate for unusual transactions.\n\nYou\'ll need to re-download ~980 MB later to restore AI features.',
                     [
                       { text: 'Keep Model', style: 'cancel' },
                       {

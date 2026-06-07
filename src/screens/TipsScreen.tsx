@@ -262,7 +262,7 @@ export const TipsScreen = () => {
                     ? "Qwen AI model is downloaded and ready to initialize."
                     : aiModelStatus === 'loading'
                     ? "Qwen AI model is initializing in the background..."
-                    : "Smart categorization without internet. Tap to view how to install the model (~770MB)."
+                    : "Smart categorization without internet. Tap to view how to install the model (~980MB)."
                 }
                 right={
                   <View style={[styles.badge, { backgroundColor: isAiActive ? `${colors.success}20` : `${colors.warning}20` }]}>

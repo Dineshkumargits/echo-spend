@@ -357,8 +357,12 @@ const DashboardScreen = ({ navigation }: any) => {
                 <>
                   <ThemedText className="font-bold text-sm">Downloading local AI Engine...</ThemedText>
                   <View className="mt-3">
-                    <View style={{ height: 6, borderRadius: 3, backgroundColor: colors.border, overflow: 'hidden' }}>
-                      <View style={{ height: '100%', borderRadius: 3, backgroundColor: colors.accent, width: `${aiModelProgress}%` }} />
+                    <View style={{ width: '100%', height: 6, borderRadius: 3, backgroundColor: colors.border, overflow: 'hidden' }}>
+                      <MotiView
+                        animate={{ width: `${aiModelProgress}%` }}
+                        transition={{ type: 'timing', duration: 300 }}
+                        style={{ height: '100%', borderRadius: 3, backgroundColor: colors.accent }}
+                      />
                     </View>
                     <View className="flex-row justify-between mt-1.5">
                       <ThemedText type="secondary" className="text-[10px]">Downloading...</ThemedText>
@@ -398,8 +402,12 @@ const DashboardScreen = ({ navigation }: any) => {
                     Progress: {aiModelProgress}%
                   </ThemedText>
                   <View className="mt-3">
-                    <View style={{ height: 6, borderRadius: 3, backgroundColor: colors.border, overflow: 'hidden' }}>
-                      <View style={{ height: '100%', borderRadius: 3, backgroundColor: colors.secondary, width: `${aiModelProgress}%` }} />
+                    <View style={{ width: '100%', height: 6, borderRadius: 3, backgroundColor: colors.border, overflow: 'hidden' }}>
+                      <MotiView
+                        animate={{ width: `${aiModelProgress}%` }}
+                        transition={{ type: 'timing', duration: 300 }}
+                        style={{ height: '100%', borderRadius: 3, backgroundColor: colors.secondary }}
+                      />
                     </View>
                   </View>
                   <View className="flex-row gap-4 mt-4">

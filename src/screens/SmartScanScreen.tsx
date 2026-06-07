@@ -92,7 +92,7 @@ const SmartScanScreen = ({ navigation }: any) => {
   const [scanTotal, setScanTotal] = useState(0);
   const [scanCurrent, setScanCurrent] = useState(0);
   const [newFoundCount, setNewFoundCount] = useState(0);
-  const progressAnim = useRef(new Animated.Value(0)).current;
+
 
   // Review state
   const [queue, setQueue] = useState<Transaction[]>([]);
@@ -133,14 +133,7 @@ const SmartScanScreen = ({ navigation }: any) => {
     }, [phase])
   );
 
-  const animateProgress = useCallback((current: number, total: number) => {
-    if (total === 0) return;
-    Animated.timing(progressAnim, {
-      toValue: current / total,
-      duration: 300,
-      useNativeDriver: false,
-    }).start();
-  }, [progressAnim]);
+
 
   const startScan = useCallback(async (
     ranges: AccountScanRange[],
@@ -156,7 +149,6 @@ const SmartScanScreen = ({ navigation }: any) => {
     setScanCurrent(0);
     setScanTotal(0);
     setNewFoundCount(0);
-    progressAnim.setValue(0);
     setAiModelDown(false);
     setOfflineTxIds(new Set());
 
@@ -339,7 +331,6 @@ const SmartScanScreen = ({ navigation }: any) => {
     for (let i = 0; i < capped.length; i++) {
       const sms = capped[i];
       setScanCurrent(i + 1);
-      animateProgress(i + 1, capped.length);
       if (sms.matchedAccount) scannedAccountIds.add(sms.matchedAccount.id);
 
       try {
@@ -448,12 +439,11 @@ const SmartScanScreen = ({ navigation }: any) => {
     setNewTxIds(newIds);
     setOfflineTxIds(new Set(offlineSavedIds));
 
-    animateProgress(filtered.length, filtered.length);
     setPhase('review');
     } finally {
       setForegroundScanActive(false);
     }
-  }, [accounts, categories, parseSms, preferences, animateProgress, navigation]);
+  }, [accounts, categories, parseSms, preferences, navigation]);
 
   // ── Review actions ──────────────────────────────────────────────────────────
 
@@ -632,14 +622,14 @@ const SmartScanScreen = ({ navigation }: any) => {
               Session started {scanStartedAt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}
             </ThemedText>
 
-            {/* Progress bar */}
             {scanTotal > 0 && (
               <View className="w-full rounded-full overflow-hidden mb-6" style={{ height: 6, backgroundColor: colors.border }}>
-                <Animated.View
+                <MotiView
+                  animate={{ width: `${scanTotal > 0 ? (scanCurrent / scanTotal) * 100 : 0}%` }}
+                  transition={{ type: 'timing', duration: 300 }}
                   style={{
                     height: 6,
                     backgroundColor: colors.accent,
-                    width: progressAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }),
                     borderRadius: 3,
                   }}
                 />

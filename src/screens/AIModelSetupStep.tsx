@@ -41,16 +41,7 @@ const AIModelSetupStep = ({ onComplete, showClose = false }: AIModelSetupStepPro
   const sparkleScale = sparkleAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.15] });
   const sparkleOpacity = sparkleAnim.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.7, 1, 0.7] });
 
-  // Progress bar animation
-  const progressAnim = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.timing(progressAnim, {
-      toValue: aiModelProgress / 100,
-      duration: 300,
-      easing: Easing.out(Easing.ease),
-      useNativeDriver: false,
-    }).start();
-  }, [aiModelProgress]);
+
 
   // Auto-proceed after download completes
   useEffect(() => {
@@ -137,7 +128,7 @@ const AIModelSetupStep = ({ onComplete, showClose = false }: AIModelSetupStepPro
               style={[styles.sizeBadge, { backgroundColor: colors.surface, borderColor: colors.border }]}
             >
               <LucideDownload color={colors.accent} size={14} />
-              <ThemedText style={[styles.sizeText, { color: colors.primary }]}>~770 MB</ThemedText>
+              <ThemedText style={[styles.sizeText, { color: colors.primary }]}>~980 MB</ThemedText>
               <View style={[styles.dot, { backgroundColor: colors.muted }]} />
               <ThemedText style={[styles.sizeText, { color: colors.secondary }]}>One-time download</ThemedText>
             </MotiView>
@@ -167,15 +158,13 @@ const AIModelSetupStep = ({ onComplete, showClose = false }: AIModelSetupStepPro
               style={{ width: '100%', marginTop: 32 }}
             >
               <View style={[styles.progressTrack, { backgroundColor: colors.translucent }]}>
-                <Animated.View
+                <MotiView
+                  animate={{ width: `${aiModelProgress}%` }}
+                  transition={{ type: 'timing', duration: 300 }}
                   style={[
                     styles.progressBar,
                     {
                       backgroundColor: colors.accent,
-                      width: progressAnim.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: ['0%', '100%'],
-                      }),
                     },
                   ]}
                 />
@@ -320,6 +309,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
   progressTrack: {
+    width: '100%',
     height: 8,
     borderRadius: 4,
     overflow: 'hidden',
