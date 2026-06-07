@@ -779,39 +779,68 @@ export function matchSmsToAccount(smsBody: string, accounts: Account[]): SmsAcco
 
   const lower = smsBody.toLowerCase();
 
-  // ── 0. High-Priority: Absolute Last-4 match ──────────────────────────────
-  // If any 4-digit sequence in the SMS exactly matches a registered account's 
-  // last4Digits, we prioritize that above all else. This handles non-standard 
-  // bank formats that might skip "ending" or "a/c" keywords.
-  const accountsWith4 = trackable.filter(a => a.last4Digits);
-  if (accountsWith4.length > 0) {
-    const all4DigitGroups = smsBody.match(/\b\d{4}\b/g) ?? [];
-    for (const d of all4DigitGroups) {
-      const hit = accountsWith4.find(a => a.last4Digits === d);
+  // ── 0. Gather Candidates from SMS for 2 to 4 digits ───────────────────────
+  const candidates: string[] = [];
+
+  // Pass A: Extract from masked runs like xx29, *169, xxxx6169, etc.
+  // We look for any word containing at least one mask character (*, x, X) and ending with 2-4 digits.
+  const maskedPattern = /\b[*xX]+\d{2,4}\b/gi;
+  let m: RegExpExecArray | null;
+  while ((m = maskedPattern.exec(smsBody)) !== null) {
+    const digits = m[0].replace(/[^0-9]/g, '');
+    if (digits.length >= 2) {
+      candidates.push(digits);
+    }
+  }
+
+  // Pass B: Keyword-anchored digits (e.g. "a/c xx29", "card ending 169", "account 4321")
+  // Exclude general prepositions like "on" and "thru" when matching shorter 2-3 digit sequences to avoid matching dates or transaction IDs.
+  const anchorPattern = /(?:a\/c|acct?|account|card|ending|ending\s+with|ending\s+in|no\.?|xx+|x+)(?:\s+with|\s+number)?\s*[*xX\d]*?(\d{2,4})\b/gi;
+  while ((m = anchorPattern.exec(smsBody)) !== null) {
+    const digits = m[1];
+    if (digits.length >= 2) {
+      candidates.push(digits);
+    }
+  }
+
+  // Pass C: General 4-digit groups (fallback for non-anchored standard 4-digit formatting)
+  const general4DigitPattern = /\b\d{4}\b/g;
+  while ((m = general4DigitPattern.exec(smsBody)) !== null) {
+    candidates.push(m[0]);
+  }
+
+  // Also check last digits of any other long numeric/masked runs (e.g. "xxxxxx1769")
+  const longRunsPattern = /[*xX\d]{5,}/g;
+  while ((m = longRunsPattern.exec(smsBody)) !== null) {
+    const digits = m[0].replace(/[^0-9]/g, '');
+    if (digits.length >= 2) {
+      candidates.push(digits);
+    }
+  }
+
+  const uniqueCandidates = Array.from(new Set(candidates));
+
+  const accountsWithDigits = trackable.filter(a => a.last4Digits);
+  if (accountsWithDigits.length > 0 && uniqueCandidates.length > 0) {
+    // 1. First priority: Exact match
+    for (const cand of uniqueCandidates) {
+      const hit = accountsWithDigits.find(a => a.last4Digits === cand);
       if (hit) return { ...hit, matchType: 'last4' };
     }
-    // Also check last 4 of masked runs (e.g. "X6060", "*6060", "xxxx6060")
-    const maskedRuns = smsBody.match(/[*xX\d]{5,}/g) ?? [];
-    for (const run of maskedRuns) {
-      const digits = run.replace(/[^0-9]/g, '');
-      const suffix = digits.slice(-4);
-      if (suffix.length === 4) {
-        const hit = accountsWith4.find(a => a.last4Digits === suffix);
-        if (hit) return { ...hit, matchType: 'last4' };
-      }
+
+    // 2. Second priority: Suffix-based partial match (if one is a suffix of the other)
+    for (const cand of uniqueCandidates) {
+      const hit = accountsWithDigits.find(a => {
+        if (!a.last4Digits) return false;
+        const minLen = Math.min(cand.length, a.last4Digits.length);
+        if (minLen < 2) return false;
+        return cand.slice(-minLen) === a.last4Digits.slice(-minLen);
+      });
+      if (hit) return { ...hit, matchType: 'last4' };
     }
   }
 
-  // ── 1. Keyword-anchored Last-4-digits match ──────────────────────────────
-  const last4Pattern = /(?:a\/c|acct?|account|card|ending|ending\s+with|ending\s+in|no\.?|xx+|x+|thru|on)(?:\s+with|\s+number)?\s*[*xX\d]*?(\d{4})\b/gi;
-  let m: RegExpExecArray | null;
-  while ((m = last4Pattern.exec(smsBody)) !== null) {
-    const digits = m[1];
-    const hit = trackable.find(a => a.last4Digits && a.last4Digits === digits);
-    if (hit) return { ...hit, matchType: 'last4' };
-  }
-
-  // ── 2. UPI VPA / handle → bank name keyword ────────────────────────────────
+  // ── 1. UPI VPA / handle → bank name keyword ────────────────────────────────
   const vpaMatch = lower.match(/@([a-z]+)/);
   if (vpaMatch) {
     const handle = vpaMatch[1];
@@ -822,7 +851,7 @@ export function matchSmsToAccount(smsBody: string, accounts: Account[]): SmsAcco
     if (hit) return { ...hit, matchType: 'upi' };
   }
 
-  // ── 3. Bank name keyword in SMS body ──────────────────────────────────────
+  // ── 2. Bank name keyword in SMS body ──────────────────────────────────────
   const hit = trackable.find(a => {
     const nameLower = a.name.toLowerCase();
     const keyword = nameLower.split(' ')[0];

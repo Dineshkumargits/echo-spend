@@ -215,7 +215,7 @@ const _doSmsScan = async (silent = false): Promise<BackgroundFetch.BackgroundFet
     // 1. If it didn't match any account in Echo Spend, ignore it
     if (!matched) continue;
 
-    // 2. If the matched account has a registered last 4 digits, we require a strict last-4 match.
+    // 2. If the matched account has a registered last 2-4 digits, we require a strict last-digits match.
     // This prevents transactions from other accounts at the same bank from leaking in.
     if (matched.last4Digits && matched.matchType !== 'last4') continue;
 

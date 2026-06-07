@@ -6,7 +6,7 @@ import { useStore } from '../store/useStore';
 
 const extra = Constants.expoConfig?.extra ?? {};
 const AI_MODEL_URL: string =
-  extra.aiModelUrl || 'https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf';
+  extra.aiModelUrl || 'https://huggingface.co/ADKDinesh/Qwen2.5-1.5B-SMS-Finance-Parser-GGUF/resolve/main/qwen2.5-1.5b-sms-finance-parser-q4_k_m.gguf';
 
 const MODEL_DIR = `${FileSystem.documentDirectory}models/`;
 const getModelFilename = (): string => {
@@ -145,7 +145,7 @@ export const AIModelManager = {
           const pct = Math.round(
             (downloadProgress.totalBytesWritten /
               downloadProgress.totalBytesExpectedToWrite) *
-              100,
+            100,
           );
           store.setAiModelProgress(pct);
           onProgress?.(pct);
