@@ -41,6 +41,7 @@ import {
   LucidePlay,
   LucidePause,
   LucideX,
+  LucideSparkles,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
@@ -54,6 +55,7 @@ import { useTheme } from '../theme/ThemeProvider';
 import { registerBackgroundTasks } from '../services/backgroundTasks';
 import { NotificationService } from '../services/notifications';
 import { AIModelManager } from '../services/aiModelManager';
+import { TourGuideModal } from '../components/TourGuideModal';
 
 const extra = Constants.expoConfig?.extra ?? {};
 
@@ -196,6 +198,7 @@ const SettingsScreen = ({ navigation }: any) => {
   const [autoLockInput, setAutoLockInput] = useState((preferences?.autoLockMinutes ?? 5).toString());
 
   const { checkSupport, authenticate, isSupported } = useBiometric();
+  const [showTour, setShowTour] = useState(false);
 
   useEffect(() => {
     checkSupport();
@@ -580,6 +583,12 @@ const SettingsScreen = ({ navigation }: any) => {
               </TouchableOpacity>
             ))}
           </View>
+          <Row
+            icon={<LucideSparkles color={colors.accent} size={18} />}
+            label="Echo Spend Tour Guide"
+            sub="Explore all features and power-user tips"
+            onPress={() => { triggerHaptic(); setShowTour(true); }}
+          />
         </View>
 
         {/* ── Financial Cycle ── */}
@@ -1010,6 +1019,7 @@ const SettingsScreen = ({ navigation }: any) => {
           </>
         )}
       </ScrollView>
+      <TourGuideModal visible={showTour} onClose={() => setShowTour(false)} />
       </KeyboardAvoidingView>
     </ThemedSafeAreaView>
   );

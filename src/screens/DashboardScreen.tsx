@@ -6,6 +6,7 @@ import {
   LucidePlus, LucideTrendingUp, LucideWallet, LucideSearch,
   LucidePieChart, LucideTarget, LucideLandmark, LucideRepeat,
   LucideBrain, LucidePlay, LucidePause, LucideX, LucideRefreshCcw,
+  LucideSparkles,
 } from 'lucide-react-native';
 import { renderCategoryIcon } from '../components/CategoryManager';
 import { FlashList } from '@shopify/flash-list';
@@ -15,6 +16,7 @@ import { useIsFocused } from '@react-navigation/native';
 import { useTheme } from '../theme/ThemeProvider';
 import { AIModelManager } from '../services/aiModelManager';
 import AIModelSetupStep from './AIModelSetupStep';
+import { TourGuideModal } from '../components/TourGuideModal';
 
 import {
   getTransactions,
@@ -50,6 +52,7 @@ const DashboardScreen = ({ navigation }: any) => {
   const [monthlySpend, setMonthlySpend] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [showSetupModal, setShowSetupModal] = useState(false);
+  const [showTour, setShowTour] = useState(false);
   const isFocused = useIsFocused();
 
   // CC outstanding is a liability — subtract it from net worth
@@ -195,6 +198,16 @@ const DashboardScreen = ({ navigation }: any) => {
             <ThemedText className="text-3xl font-bold">Summary</ThemedText>
           </MotiView>
           <View style={{ flexDirection: 'row', gap: 8 }}>
+            <TouchableOpacity
+              onPress={() => {
+                triggerHaptic();
+                setShowTour(true);
+              }}
+              className="w-10 h-10 rounded-full items-center justify-center border"
+              style={{ backgroundColor: colors.translucent, borderColor: colors.border }}
+            >
+              <LucideSparkles color={colors.accent} size={18} />
+            </TouchableOpacity>
             <TouchableOpacity
               onPress={() => {
                 triggerHaptic();
@@ -617,6 +630,12 @@ const DashboardScreen = ({ navigation }: any) => {
           />
         </View>
       </Modal>
+
+      {/* Tour Guide Modal */}
+      <TourGuideModal
+        visible={showTour}
+        onClose={() => setShowTour(false)}
+      />
 
     </ThemedSafeAreaView>
   );
