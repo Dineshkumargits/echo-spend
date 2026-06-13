@@ -325,6 +325,26 @@ export const useStore = create<AppState>()(
         return (state, error) => {
           if (!error && state) {
             state.setHasHydrated(true);
+
+            // Clean up stale AI model status and delete partial downloads on startup
+            if (state.aiModelStatus === 'downloading' || state.aiModelStatus === 'paused') {
+              state.setAiModelStatus('not_downloaded');
+              state.setAiModelProgress(0);
+              state.setAiModelResumeData(null);
+              // Asynchronously delete any partial/stale model files
+              setTimeout(async () => {
+                try {
+                  const { AIModelManager } = require('../services/aiModelManager');
+                  await AIModelManager.deleteModelFiles();
+                  console.log('[useStore] Stale AI model and directory cleaned up on app start.');
+                } catch (err) {
+                  console.error('[useStore] Failed to clean up stale model files on startup:', err);
+                }
+              }, 0);
+            } else if (state.aiModelStatus === 'loading' || state.aiModelStatus === 'ready') {
+              // Context is freed on app close, reset to downloaded
+              state.setAiModelStatus('downloaded');
+            }
           }
         };
       },

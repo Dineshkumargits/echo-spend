@@ -115,6 +115,13 @@ export const AIModelManager = {
     if (!AIModelManager.isDeviceCompatible()) {
       throw new Error('Device is not compatible: at least 2GB of total RAM is required.');
     }
+
+    // Guard: Prevent concurrent downloads
+    if (_downloadResumable) {
+      console.warn('[AIModelManager] Download already in progress.');
+      return false;
+    }
+
     const store = useStore.getState();
 
     // Ensure directory exists
@@ -123,16 +130,12 @@ export const AIModelManager = {
       await FileSystem.makeDirectoryAsync(MODEL_DIR, { intermediates: true });
     }
 
-    // Delete partial download if any, unless we are resuming
-    const resumeData = store.aiModelResumeData;
-    if (!resumeData) {
-      const existing = await FileSystem.getInfoAsync(MODEL_PATH);
-      if (existing.exists) {
-        await FileSystem.deleteAsync(MODEL_PATH, { idempotent: true });
-      }
-      store.setAiModelProgress(0);
-    }
+    // Always start a clean download - delete any existing files/directories first to clear cache
+    await AIModelManager.deleteModelFiles();
+    // Recreate directory after deleteModelFiles wipes it
+    await FileSystem.makeDirectoryAsync(MODEL_DIR, { intermediates: true });
 
+    store.setAiModelProgress(0);
     store.setAiModelStatus('downloading');
     store.setAiModelError(null);
 
@@ -149,8 +152,7 @@ export const AIModelManager = {
           );
           store.setAiModelProgress(pct);
           onProgress?.(pct);
-        },
-        resumeData || undefined
+        }
       );
 
       const result = await _downloadResumable.downloadAsync();
@@ -165,60 +167,71 @@ export const AIModelManager = {
       store.setAiModelResumeData(null);
       return true;
     } catch (error: any) {
-      // Capture resume data on download failure/interruption if resumable exists
-      if (_downloadResumable) {
-        try {
-          const pauseState = await _downloadResumable.pauseAsync();
-          if (pauseState.resumeData) {
-            store.setAiModelResumeData(pauseState.resumeData);
-          }
-        } catch { /* ignore */ }
-      }
       _downloadResumable = null;
+
+      const currentStatus = useStore.getState().aiModelStatus;
+      if (currentStatus === 'not_downloaded') {
+        // This was a user-initiated cancel, so don't treat it as an error
+        return false;
+      }
+
+      // Clean up partial downloads and cache on actual failures
+      await AIModelManager.deleteModelFiles();
+
       store.setAiModelStatus('error');
       store.setAiModelError(error?.message || 'Download failed');
       throw error;
     }
   },
 
-  /** Pause an in-progress download and save resume data */
+  /** Pause download (deprecated) */
   async pauseDownload(): Promise<void> {
-    if (_downloadResumable) {
-      try {
-        const pauseState = await _downloadResumable.pauseAsync();
-        const store = useStore.getState();
-        if (pauseState.resumeData) {
-          store.setAiModelResumeData(pauseState.resumeData);
-          store.setAiModelStatus('paused');
-          console.log('[AIModelManager] Download paused. Resume data stored.');
-        }
-      } catch (error) {
-        console.error('[AIModelManager] Failed to pause download:', error);
+    console.warn('[AIModelManager] pauseDownload is deprecated.');
+  },
+
+  /** Delete model files and directory cache */
+  async deleteModelFiles(): Promise<void> {
+    try {
+      await AIModelManager.releaseModel();
+      await FileSystem.deleteAsync(MODEL_PATH, { idempotent: true });
+      const dirInfo = await FileSystem.getInfoAsync(MODEL_DIR);
+      if (dirInfo.exists) {
+        await FileSystem.deleteAsync(MODEL_DIR, { idempotent: true });
       }
-      _downloadResumable = null;
+    } catch (error) {
+      console.error('[AIModelManager] Error deleting model files:', error);
     }
   },
 
   /** Cancel an in-progress download */
   async cancelDownload(): Promise<void> {
-    if (_downloadResumable) {
-      try {
-        await _downloadResumable.pauseAsync();
-      } catch { /* ignore */ }
-      _downloadResumable = null;
-    }
-    // Clean up partial file
-    await FileSystem.deleteAsync(MODEL_PATH, { idempotent: true });
     const store = useStore.getState();
     store.setAiModelStatus('not_downloaded');
     store.setAiModelProgress(0);
     store.setAiModelResumeData(null);
+
+    if (_downloadResumable) {
+      try {
+        if (typeof (_downloadResumable as any).cancelAsync === 'function') {
+          await (_downloadResumable as any).cancelAsync();
+        } else {
+          await _downloadResumable.pauseAsync();
+        }
+      } catch {
+        try {
+          await _downloadResumable.pauseAsync();
+        } catch { /* ignore */ }
+      }
+      _downloadResumable = null;
+    }
+
+    // Clean up partial files and directory cache
+    await AIModelManager.deleteModelFiles();
   },
 
   /** Delete the model file from disk and release from memory */
   async deleteModel(): Promise<void> {
-    await AIModelManager.releaseModel();
-    await FileSystem.deleteAsync(MODEL_PATH, { idempotent: true });
+    await AIModelManager.deleteModelFiles();
     const store = useStore.getState();
     store.setAiModelStatus('not_downloaded');
     store.setAiModelProgress(0);

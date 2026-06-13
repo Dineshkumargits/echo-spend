@@ -738,16 +738,9 @@ const SettingsScreen = ({ navigation }: any) => {
                 sub="Smart SMS parsing is using basic mode"
               />
               <TouchableOpacity
-                onPress={async () => {
+                onPress={() => {
                   triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
-                  try {
-                    await AIModelManager.downloadModel();
-                    const size = await AIModelManager.getModelSizeOnDisk();
-                    if (size > 0) setAiModelSize(`${(size / (1024 * 1024)).toFixed(0)} MB`);
-                    notify.success('AI model downloaded!');
-                  } catch (err: any) {
-                    notify.error('Download failed', err?.message);
-                  }
+                  navigation.navigate('AIModelSetup');
                 }}
                 style={{
                   flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
@@ -764,145 +757,34 @@ const SettingsScreen = ({ navigation }: any) => {
           ) : aiModelStatus === 'downloading' ? (
             /* Downloading */
             <>
-              <Row
-                icon={<LucideDownload color={colors.accent} size={20} />}
-                label="Downloading AI Model..."
-                sub={`${aiModelProgress}% complete`}
-              />
-              <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
-                <View style={{ width: '100%', height: 4, borderRadius: 2, backgroundColor: colors.translucent, overflow: 'hidden' }}>
-                  <MotiView
-                    animate={{ width: `${aiModelProgress}%` }}
-                    transition={{ type: 'timing', duration: 300 }}
-                    style={{ height: '100%', borderRadius: 2, backgroundColor: colors.accent }}
-                  />
-                </View>
-              </View>
-              <View style={{ flexDirection: 'row', gap: 12, marginHorizontal: 12, marginBottom: 12 }}>
-                <TouchableOpacity
-                  onPress={() => {
-                    triggerHaptic();
-                    AIModelManager.pauseDownload();
-                  }}
-                  style={{
-                    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-                    gap: 6, paddingVertical: 10, borderRadius: 8,
-                    backgroundColor: colors.accent,
-                  }}
-                >
-                  <LucidePause color="#fff" size={14} />
-                  <ThemedText style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>Pause</ThemedText>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => {
-                    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
-                    AIModelManager.cancelDownload();
-                  }}
-                  style={{
-                    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-                    gap: 6, paddingVertical: 10, borderRadius: 8,
-                    borderWidth: 1, borderColor: colors.border,
-                  }}
-                >
-                  <LucideX color={colors.secondary} size={14} />
-                  <ThemedText style={{ color: colors.secondary, fontWeight: '700', fontSize: 12 }}>Cancel</ThemedText>
-                </TouchableOpacity>
-              </View>
-            </>
-          ) : aiModelStatus === 'paused' ? (
-            /* Paused */
-            <>
-              <Row
-                icon={<LucideDownload color={colors.secondary} size={20} />}
-                label="AI Model Download Paused"
-                sub={`Progress: ${aiModelProgress}%`}
-              />
-              <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
-                <View style={{ width: '100%', height: 4, borderRadius: 2, backgroundColor: colors.translucent, overflow: 'hidden' }}>
-                  <MotiView
-                    animate={{ width: `${aiModelProgress}%` }}
-                    transition={{ type: 'timing', duration: 300 }}
-                    style={{ height: '100%', borderRadius: 2, backgroundColor: colors.secondary }}
-                  />
-                </View>
-              </View>
-              <View style={{ flexDirection: 'row', gap: 12, marginHorizontal: 12, marginBottom: 12 }}>
-                <TouchableOpacity
-                  onPress={async () => {
-                    triggerHaptic();
-                    try {
-                      await AIModelManager.downloadModel();
-                    } catch (err) {
-                      console.error('Resume download failed:', err);
-                    }
-                  }}
-                  style={{
-                    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-                    gap: 6, paddingVertical: 10, borderRadius: 8,
-                    backgroundColor: colors.accent,
-                  }}
-                >
-                  <LucidePlay color="#fff" size={14} />
-                  <ThemedText style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>Resume</ThemedText>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => {
-                    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
-                    AIModelManager.cancelDownload();
-                  }}
-                  style={{
-                    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-                    gap: 6, paddingVertical: 10, borderRadius: 8,
-                    borderWidth: 1, borderColor: colors.border,
-                  }}
-                >
-                  <LucideX color={colors.secondary} size={14} />
-                  <ThemedText style={{ color: colors.secondary, fontWeight: '700', fontSize: 12 }}>Cancel</ThemedText>
-                </TouchableOpacity>
-              </View>
+              <TouchableOpacity
+                onPress={() => {
+                  triggerHaptic();
+                  navigation.navigate('AIModelSetup');
+                }}
+              >
+                <Row
+                  icon={<LucideDownload color={colors.accent} size={20} />}
+                  label="Downloading AI Model..."
+                  sub={`${aiModelProgress}% complete • Tap to view progress`}
+                />
+              </TouchableOpacity>
             </>
           ) : aiModelStatus === 'error' ? (
             /* Error */
             <>
-              <Row
-                icon={<LucideAlertTriangle color={colors.danger} size={20} />}
-                label="AI Model Download Failed"
-                sub={aiModelProgress > 0 ? `Failed at ${aiModelProgress}%. Check connection.` : (aiModelError || 'Check connection')}
-              />
-              <View style={{ flexDirection: 'row', gap: 12, marginHorizontal: 12, marginBottom: 12 }}>
-                <TouchableOpacity
-                  onPress={async () => {
-                    triggerHaptic();
-                    try {
-                      await AIModelManager.downloadModel();
-                    } catch (err) {
-                      console.error('Retry download failed:', err);
-                    }
-                  }}
-                  style={{
-                    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-                    gap: 6, paddingVertical: 10, borderRadius: 8,
-                    backgroundColor: colors.accent,
-                  }}
-                >
-                  <LucideRefreshCcw color="#fff" size={14} />
-                  <ThemedText style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>Retry</ThemedText>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => {
-                    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
-                    AIModelManager.cancelDownload();
-                  }}
-                  style={{
-                    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-                    gap: 6, paddingVertical: 10, borderRadius: 8,
-                    borderWidth: 1, borderColor: colors.border,
-                  }}
-                >
-                  <LucideX color={colors.secondary} size={14} />
-                  <ThemedText style={{ color: colors.secondary, fontWeight: '700', fontSize: 12 }}>Cancel</ThemedText>
-                </TouchableOpacity>
-              </View>
+              <TouchableOpacity
+                onPress={() => {
+                  triggerHaptic();
+                  navigation.navigate('AIModelSetup');
+                }}
+              >
+                <Row
+                  icon={<LucideAlertTriangle color={colors.danger} size={20} />}
+                  label="AI Model Download Failed"
+                  sub="Tap to retry or cancel setup"
+                />
+              </TouchableOpacity>
             </>
           ) : (
             /* Model is downloaded/ready */

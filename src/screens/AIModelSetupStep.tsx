@@ -9,22 +9,24 @@ import {
   LucideBrain, LucideDownload, LucideCheck, LucideRefreshCcw,
   LucideWifi, LucideAlertTriangle, LucideX,
 } from 'lucide-react-native';
+import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '../theme/ThemeProvider';
 import { AIModelManager } from '../services/aiModelManager';
 import { useStore } from '../store/useStore';
 
 interface AIModelSetupStepProps {
-  onComplete: () => void;
+  onComplete?: () => void;
   showClose?: boolean;
 }
 
 /**
- * AI Model download step — used in both onboarding and as a standalone gate.
+ * AI Model download step — used in both onboarding and as a standalone screen.
  * Shows download progress and handles the full lifecycle.
  */
 const AIModelSetupStep = ({ onComplete, showClose = false }: AIModelSetupStepProps) => {
   const { colors } = useTheme();
-  const { aiModelStatus, aiModelProgress } = useStore();
+  const navigation = useNavigation<any>();
+  const { aiModelStatus, aiModelProgress, aiModelError } = useStore();
   const [error, setError] = useState<string | null>(null);
 
   // Sparkle animation
@@ -41,16 +43,43 @@ const AIModelSetupStep = ({ onComplete, showClose = false }: AIModelSetupStepPro
   const sparkleScale = sparkleAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.15] });
   const sparkleOpacity = sparkleAnim.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.7, 1, 0.7] });
 
+  // Close or complete setup helper
+  const handleComplete = () => {
+    if (onComplete) {
+      onComplete();
+    } else if (navigation.canGoBack()) {
+      navigation.goBack();
+    }
+  };
 
+  // Sync error with store
+  useEffect(() => {
+    if (aiModelStatus === 'error') {
+      setError(aiModelError || 'Download failed. Please check your connection.');
+    } else {
+      setError(null);
+    }
+  }, [aiModelStatus, aiModelError]);
 
   // Auto-proceed after download completes
   useEffect(() => {
     if (aiModelStatus === 'downloaded' || aiModelStatus === 'ready') {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      const timer = setTimeout(onComplete, 1200);
+      const timer = setTimeout(handleComplete, 1200);
       return () => clearTimeout(timer);
     }
-  }, [aiModelStatus, onComplete]);
+  }, [aiModelStatus]);
+
+  // Cleanup download on unmount if it's still downloading
+  useEffect(() => {
+    return () => {
+      const store = useStore.getState();
+      if (store.aiModelStatus === 'downloading') {
+        console.log('[AIModelSetupStep] Component unmounted during download. Cancelling...');
+        AIModelManager.cancelDownload();
+      }
+    };
+  }, []);
 
   const handleDownload = async () => {
     setError(null);
@@ -62,9 +91,15 @@ const AIModelSetupStep = ({ onComplete, showClose = false }: AIModelSetupStepPro
     }
   };
 
+  const handleCancel = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    await AIModelManager.cancelDownload();
+    handleComplete();
+  };
+
   const handleSkip = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    onComplete();
+    handleComplete();
   };
 
   const isCompatible = AIModelManager.isDeviceCompatible();
@@ -73,7 +108,7 @@ const AIModelSetupStep = ({ onComplete, showClose = false }: AIModelSetupStepPro
 
   return (
     <View style={{ flex: 1 }}>
-      {showClose && (
+      {(showClose || navigation.canGoBack()) && !isDownloading && (
         <TouchableOpacity
           onPress={handleSkip}
           style={[styles.closeButton, { top: Platform.OS === 'ios' ? 50 : 16, right: 16 }]}
@@ -184,7 +219,7 @@ const AIModelSetupStep = ({ onComplete, showClose = false }: AIModelSetupStepPro
           )}
 
           {/* Error State */}
-          {error && (
+          {error && !isDownloading && (
             <MotiView
               from={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -206,37 +241,74 @@ const AIModelSetupStep = ({ onComplete, showClose = false }: AIModelSetupStepPro
         transition={{ delay: 300, type: 'spring', damping: 18 }}
         style={{ paddingHorizontal: 24, paddingBottom: 24, gap: 12 }}
       >
+        {isDownloading && (
+          <TouchableOpacity
+            onPress={handleCancel}
+            style={[styles.secondaryButton, { borderColor: colors.border }]}
+            activeOpacity={0.7}
+          >
+            <LucideX color={colors.secondary} size={20} />
+            <ThemedText style={[styles.secondaryButtonText, { color: colors.secondary }]}>
+              Cancel Download
+            </ThemedText>
+          </TouchableOpacity>
+        )}
+
         {!isDownloading && !isComplete && (
           isCompatible ? (
-            <>
-              <TouchableOpacity
-                onPress={handleDownload}
-                style={[styles.primaryButton, { backgroundColor: colors.accent }]}
-                activeOpacity={0.8}
-              >
-                {error ? (
+            error ? (
+              // Error options: retry or cancel completely
+              <View style={{ gap: 12 }}>
+                <TouchableOpacity
+                  onPress={handleDownload}
+                  style={[styles.primaryButton, { backgroundColor: colors.accent }]}
+                  activeOpacity={0.8}
+                >
                   <LucideRefreshCcw color="#fff" size={20} />
-                ) : (
-                  <LucideDownload color="#fff" size={20} />
-                )}
-                <ThemedText style={styles.primaryButtonText}>
-                  {error ? 'Retry Download' : 'Download & Continue'}
-                </ThemedText>
-              </TouchableOpacity>
+                  <ThemedText style={styles.primaryButtonText}>
+                    Retry Download
+                  </ThemedText>
+                </TouchableOpacity>
 
-              <TouchableOpacity
-                onPress={handleSkip}
-                style={styles.skipButton}
-                activeOpacity={0.7}
-              >
-                <ThemedText style={[styles.skipText, { color: colors.secondary }]}>
-                  Skip for now
+                <TouchableOpacity
+                  onPress={handleCancel}
+                  style={[styles.secondaryButton, { borderColor: colors.border }]}
+                  activeOpacity={0.7}
+                >
+                  <LucideX color={colors.secondary} size={20} />
+                  <ThemedText style={[styles.secondaryButtonText, { color: colors.secondary }]}>
+                    Cancel
+                  </ThemedText>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              // Normal state: start download or skip
+              <>
+                <TouchableOpacity
+                  onPress={handleDownload}
+                  style={[styles.primaryButton, { backgroundColor: colors.accent }]}
+                  activeOpacity={0.8}
+                >
+                  <LucideDownload color="#fff" size={20} />
+                  <ThemedText style={styles.primaryButtonText}>
+                    Download & Continue
+                  </ThemedText>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={handleSkip}
+                  style={styles.skipButton}
+                  activeOpacity={0.7}
+                >
+                  <ThemedText style={[styles.skipText, { color: colors.secondary }]}>
+                    Skip for now
+                  </ThemedText>
+                </TouchableOpacity>
+                <ThemedText style={[styles.skipNote, { color: colors.muted }]}>
+                  You can download later in Settings. SMS parsing will use basic mode.
                 </ThemedText>
-              </TouchableOpacity>
-              <ThemedText style={[styles.skipNote, { color: colors.muted }]}>
-                You can download later in Settings. SMS parsing will use basic mode.
-              </ThemedText>
-            </>
+              </>
+            )
           ) : (
             <>
               <TouchableOpacity
@@ -361,6 +433,19 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: '#fff',
+  },
+  secondaryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingVertical: 16,
+    borderRadius: 99,
+    borderWidth: 1,
+  },
+  secondaryButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
   },
   skipButton: {
     alignItems: 'center',
