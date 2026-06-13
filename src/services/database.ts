@@ -774,16 +774,17 @@ const applyTransactionImpact = async (tx: Omit<Transaction, 'id'> | Transaction,
     if (loan) {
       let newRemaining = loan.remainingAmount;
       if (loan.type === 'lent') {
-        // Lending: spending (debit) increases debt owed to me, receiving (credit) decreases it
+        // Lending: spending (debit) increases debt owed to me, receiving (credit/transfer) decreases it
         newRemaining = type === 'debit' ? loan.remainingAmount + amount : loan.remainingAmount - amount;
       } else {
-        // Borrowing: paying (debit) decreases my debt, receiving (credit) increases it
-        newRemaining = type === 'debit' ? loan.remainingAmount - amount : loan.remainingAmount + amount;
+        // Borrowing: paying (debit/transfer) decreases my debt, receiving (credit) increases it
+        newRemaining = (type === 'debit' || type === 'transfer') ? loan.remainingAmount - amount : loan.remainingAmount + amount;
       }
       await db.runAsync('UPDATE loans SET remainingAmount = ? WHERE id = ?', Math.max(0, newRemaining), tx.loanId);
 
-      // Advance loan nextDueDate if this transaction is a debt reduction payment (credit for lent, debit for borrowed)
-      const isRepayment = (loan.type === 'lent' && type === 'credit') || (loan.type !== 'lent' && type === 'debit');
+      // Advance loan nextDueDate if this transaction is a debt reduction payment (credit/transfer for lent, debit/transfer for borrowed)
+      const isRepayment = (loan.type === 'lent' && (type === 'credit' || type === 'transfer')) || 
+                          (loan.type !== 'lent' && (type === 'debit' || type === 'transfer'));
       if (isRepayment && loan.nextDueDate) {
         const next = new Date(loan.nextDueDate);
         next.setMonth(next.getMonth() + 1);
@@ -905,12 +906,13 @@ const revertTransactionImpact = async (tx: Transaction) => {
       if (loan.type === 'lent') {
         newRemaining = type === 'debit' ? loan.remainingAmount - amount : loan.remainingAmount + amount;
       } else {
-        newRemaining = type === 'debit' ? loan.remainingAmount + amount : loan.remainingAmount - amount;
+        newRemaining = (type === 'debit' || type === 'transfer') ? loan.remainingAmount + amount : loan.remainingAmount - amount;
       }
       await db.runAsync('UPDATE loans SET remainingAmount = ? WHERE id = ?', Math.max(0, newRemaining), tx.loanId);
 
       // Revert the next due date by 1 month
-      const isRepayment = (loan.type === 'lent' && type === 'credit') || (loan.type !== 'lent' && type === 'debit');
+      const isRepayment = (loan.type === 'lent' && (type === 'credit' || type === 'transfer')) || 
+                          (loan.type !== 'lent' && (type === 'debit' || type === 'transfer'));
       if (isRepayment && loan.nextDueDate) {
         const prev = new Date(loan.nextDueDate);
         prev.setMonth(prev.getMonth() - 1);
@@ -2019,12 +2021,12 @@ export const deleteGoal = async (id: number) => {
 // ─── Loans ───────────────────────────────────────────────────────────────────
 
 export const getLoans = async (activeOnly = false): Promise<Loan[]> => {
-  const where = activeOnly ? 'WHERE isActive = 1' : '';
+  const where = activeOnly ? 'WHERE isActive = 1 AND remainingAmount > 0' : '';
   return await db.getAllAsync<Loan>(`SELECT * FROM loans ${where} ORDER BY nextDueDate ASC`);
 };
 
 export const addLoan = async (loan: Omit<Loan, 'id'>) => {
-  await db.runAsync(
+  const result = await db.runAsync(
     `INSERT INTO loans
        (lender, totalAmount, remainingAmount, emiAmount, nextDueDate, interestRate, isActive, type,
         linkedAccountId, tenure, notes)
@@ -2035,6 +2037,7 @@ export const addLoan = async (loan: Omit<Loan, 'id'>) => {
     loan.tenure ?? null,
     loan.notes ?? null,
   );
+  return result.lastInsertRowId;
 };
 
 /**

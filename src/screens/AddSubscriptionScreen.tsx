@@ -33,12 +33,24 @@ export const AddSubscriptionScreen = () => {
   const { preferences } = useStore();
   const navigation = useNavigation();
   const route = useRoute();
-  const { subscriptionToEdit } = (route.params as { subscriptionToEdit?: Subscription }) ?? {};
+  const { 
+    subscriptionToEdit, 
+    prefillName, 
+    prefillAmount, 
+    prefillCategory, 
+    prefillAccountId 
+  } = (route.params as { 
+    subscriptionToEdit?: Subscription;
+    prefillName?: string;
+    prefillAmount?: string;
+    prefillCategory?: string;
+    prefillAccountId?: number;
+  }) ?? {};
   const isEditing = !!subscriptionToEdit;
 
-  const [name, setName] = useState(subscriptionToEdit?.name ?? '');
-  const [amount, setAmount] = useState(subscriptionToEdit?.amount ? String(subscriptionToEdit.amount) : '');
-  const [category, setCategory] = useState(subscriptionToEdit?.category ?? '');
+  const [name, setName] = useState(subscriptionToEdit?.name ?? prefillName ?? '');
+  const [amount, setAmount] = useState(subscriptionToEdit?.amount ? String(subscriptionToEdit.amount) : (prefillAmount ?? ''));
+  const [category, setCategory] = useState(subscriptionToEdit?.category ?? prefillCategory ?? '');
   const [frequency, setFrequency] = useState<'weekly' | 'monthly' | 'yearly'>(subscriptionToEdit?.frequency ?? 'monthly');
   const [nextDueDate, setNextDueDate] = useState<Date>(
     subscriptionToEdit?.nextDueDate ? new Date(subscriptionToEdit.nextDueDate) : new Date(new Date().setMonth(new Date().getMonth() + 1))
@@ -48,7 +60,7 @@ export const AddSubscriptionScreen = () => {
 
   // Linked account
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [debitAccountId, setDebitAccountId] = useState<number | undefined>(subscriptionToEdit?.debitAccountId);
+  const [debitAccountId, setDebitAccountId] = useState<number | undefined>(subscriptionToEdit?.debitAccountId ?? prefillAccountId);
   const [showAccountPicker, setShowAccountPicker] = useState(false);
 
   // Categories from DB

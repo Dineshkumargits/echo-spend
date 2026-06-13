@@ -27,14 +27,26 @@ export const AddGoalScreen = () => {
   const { preferences } = useStore();
   const navigation = useNavigation();
   const route = useRoute();
-  const { goalToEdit } = (route.params as { goalToEdit?: Goal }) ?? {};
+  const { 
+    goalToEdit, 
+    prefillName, 
+    prefillAmount, 
+    prefillCategory, 
+    prefillAccountId 
+  } = (route.params as { 
+    goalToEdit?: Goal;
+    prefillName?: string;
+    prefillAmount?: string;
+    prefillCategory?: string;
+    prefillAccountId?: number;
+  }) ?? {};
   const isEditing = !!goalToEdit;
 
-  const [name, setName] = useState(goalToEdit?.name ?? '');
-  const [targetAmount, setTargetAmount] = useState(goalToEdit?.targetAmount ? String(goalToEdit.targetAmount) : '');
+  const [name, setName] = useState(goalToEdit?.name ?? prefillName ?? '');
+  const [targetAmount, setTargetAmount] = useState(goalToEdit?.targetAmount ? String(goalToEdit.targetAmount) : (prefillAmount ?? ''));
   const [currentAmount, setCurrentAmount] = useState(goalToEdit?.currentAmount ? String(goalToEdit.currentAmount) : '0');
   const [monthlyContribution, setMonthlyContribution] = useState(goalToEdit?.monthlyContribution ? String(goalToEdit.monthlyContribution) : '');
-  const [category, setCategory] = useState(goalToEdit?.category ?? '');
+  const [category, setCategory] = useState(goalToEdit?.category ?? prefillCategory ?? '');
   const [date, setDate] = useState<Date>(
     goalToEdit?.deadline ? new Date(goalToEdit.deadline) : new Date(new Date().setFullYear(new Date().getFullYear() + 1))
   );
@@ -43,7 +55,7 @@ export const AddGoalScreen = () => {
 
   // Linked account
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [linkedAccountId, setLinkedAccountId] = useState<number | undefined>(goalToEdit?.linkedAccountId);
+  const [linkedAccountId, setLinkedAccountId] = useState<number | undefined>(goalToEdit?.linkedAccountId ?? prefillAccountId);
   const [showAccountPicker, setShowAccountPicker] = useState(false);
 
   // Categories from DB

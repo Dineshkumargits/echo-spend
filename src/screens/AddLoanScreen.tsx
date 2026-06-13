@@ -24,10 +24,10 @@ export const AddLoanScreen = () => {
   const { preferences } = useStore();
   const navigation = useNavigation();
   const route = useRoute();
-  const { loanToEdit } = (route.params as { loanToEdit?: Loan }) ?? {};
+  const { loanToEdit, prefillType } = (route.params as { loanToEdit?: Loan; prefillType?: 'borrowed' | 'lent' }) ?? {};
   const isEditing = !!loanToEdit;
 
-  const [type, setType] = useState<'borrowed' | 'lent'>(loanToEdit?.type ?? 'borrowed');
+  const [type, setType] = useState<'borrowed' | 'lent'>(loanToEdit?.type ?? prefillType ?? 'borrowed');
   const [lender, setLender] = useState(loanToEdit?.lender ?? '');
   const [totalAmount, setTotalAmount] = useState(loanToEdit?.totalAmount ? String(loanToEdit.totalAmount) : '');
   const [remainingAmount, setRemainingAmount] = useState(loanToEdit?.remainingAmount ? String(loanToEdit.remainingAmount) : '');

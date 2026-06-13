@@ -10,6 +10,7 @@ import { notify } from '../utils/notify';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import {
   updateTransaction,
+  addLoan,
   getCategories,
   Category,
   Transaction,
@@ -64,6 +65,7 @@ export const EditTransactionScreen = () => {
   const [selectedToAccount, setSelectedToAccount] = useState<number | null>(transaction.toAccountId || null);
   const [selectedGoal, setSelectedGoal] = useState<number | null>(transaction.goalId || null);
   const [selectedLoan, setSelectedLoan] = useState<number | null>(transaction.loanId || null);
+  const [loanPersonName, setLoanPersonName] = useState('');
   const [selectedSub, setSelectedSub] = useState<number | null>(transaction.subscriptionId || null);
   const [isBorrowed, setIsBorrowed] = useState(transaction.category === 'Debt'); // Simple heuristic
   const [pendingSplitMembers, setPendingSplitMembers] = useState<PendingSplitMember[]>([]);
@@ -83,6 +85,17 @@ export const EditTransactionScreen = () => {
   const [receiveToAccountId, setReceiveToAccountId] = useState<number | null>(null);
   const [meDbId, setMeDbId] = useState<number | null>(null);
   const [existingSplitId, setExistingSplitId] = useState<number | null>(null);
+  const isFirstLoadRef = React.useRef(true);
+  const goalsRef = React.useRef<Goal[]>([]);
+  const subsRef = React.useRef<Subscription[]>([]);
+
+  useEffect(() => {
+    goalsRef.current = goals;
+  }, [goals]);
+
+  useEffect(() => {
+    subsRef.current = subscriptions;
+  }, [subscriptions]);
 
   interface MemberRow {
     key: string;
@@ -124,52 +137,76 @@ export const EditTransactionScreen = () => {
   };
 
   useEffect(() => {
-    Promise.all([
-      getCategories(),
-      getAccounts(),
-      getGoals(true),
-      getLoans(true),
-      getSubscriptions(true),
-      getSplitByTransactionId(transaction.id),
-      getPendingSplitMembers(transaction.id),
-    ]).then(([cats, accs, gs, ls, ss, splitData, sms]) => {
-      setCategories(cats);
-      setAccounts(accs);
-      setGoals(gs);
-      setLoans(ls);
-      setSubscriptions(ss);
-      setPendingSplitMembers(sms);
+    const loadData = () => {
+      Promise.all([
+        getCategories(),
+        getAccounts(),
+        getGoals(true),
+        getLoans(true),
+        getSubscriptions(true),
+        getSplitByTransactionId(transaction.id),
+        getPendingSplitMembers(transaction.id),
+      ]).then(([cats, accs, gs, ls, ss, splitData, sms]) => {
+        setCategories(cats);
+        setAccounts(accs);
+        // Auto-select newly created goal
+        if (!isFirstLoadRef.current && gs.length > goalsRef.current.length) {
+          const newGoal = gs.find(g => !goalsRef.current.some(oldG => oldG.id === g.id));
+          if (newGoal) {
+            handleGoalSelect(newGoal.id);
+          }
+        }
+        setGoals(gs);
+        setLoans(ls);
 
-      if (splitData) {
-        setExistingSplitId(splitData.split.id);
-        setSplitEnabled(true);
-        setReceiveToAccountId(splitData.split.receiveToAccountId || (accs[0]?.id ?? null));
-        
-        const meMember = splitData.members.find(m => m.isMe);
-        if (meMember) {
-          setMeDbId(meMember.id);
+        // Auto-select newly created subscription
+        if (!isFirstLoadRef.current && ss.length > subsRef.current.length) {
+          const newSub = ss.find(s => !subsRef.current.some(oldS => oldS.id === s.id));
+          if (newSub) {
+            handleSubSelect(newSub.id);
+          }
         }
-        
-        const others = splitData.members.filter(m => !m.isMe);
-        if (others.length > 0) {
-          setSplitMembers(others.map((m) => ({
-            key: m.id.toString(),
-            id: m.id,
-            name: m.name,
-            share: m.share.toString(),
-          })));
+        setSubscriptions(ss);
+        setPendingSplitMembers(sms);
+
+        if (isFirstLoadRef.current) {
+          isFirstLoadRef.current = false;
+          if (splitData) {
+            setExistingSplitId(splitData.split.id);
+            setSplitEnabled(true);
+            setReceiveToAccountId(splitData.split.receiveToAccountId || (accs[0]?.id ?? null));
+            
+            const meMember = splitData.members.find(m => m.isMe);
+            if (meMember) {
+              setMeDbId(meMember.id);
+            }
+            
+            const others = splitData.members.filter(m => !m.isMe);
+            if (others.length > 0) {
+              setSplitMembers(others.map((m) => ({
+                key: m.id.toString(),
+                id: m.id,
+                name: m.name,
+                share: m.share.toString(),
+              })));
+            }
+            
+            // Determine splitEqually
+            const allSharesEqual = splitData.members.every(m => m.share === splitData.members[0].share);
+            setSplitEqually(allSharesEqual);
+          } else {
+            if (accs.length > 0) {
+              setReceiveToAccountId(accs[0].id);
+            }
+          }
         }
-        
-        // Determine splitEqually
-        const allSharesEqual = splitData.members.every(m => m.share === splitData.members[0].share);
-        setSplitEqually(allSharesEqual);
-      } else {
-        if (accs.length > 0) {
-          setReceiveToAccountId(accs[0].id);
-        }
-      }
-    });
-  }, [transaction.id]);
+      });
+    };
+
+    loadData();
+    const unsubscribe = navigation.addListener('focus', loadData);
+    return unsubscribe;
+  }, [transaction.id, navigation]);
 
   const handleSplitMemberSelect = (id: number | null) => {
     setSelectedSub(null);
@@ -191,6 +228,10 @@ export const EditTransactionScreen = () => {
   useEffect(() => {
     if (type !== 'debit') {
       setSplitEnabled(false);
+      setSelectedSub(null);
+    }
+    if (type !== 'credit') {
+      setSelectedSplitMember(null);
     }
   }, [type]);
 
@@ -266,6 +307,7 @@ export const EditTransactionScreen = () => {
   const handleSubSelect = (id: number | null) => {
     setSelectedGoal(null);
     setSelectedLoan(null);
+    setSelectedSplitMember(null);
     setSelectedSub(id);
     if (!id) return;
     const sub = subscriptions.find(s => s.id === id);
@@ -298,27 +340,98 @@ export const EditTransactionScreen = () => {
   const handleGoalSelect = (id: number | null) => {
     setSelectedSub(null);
     setSelectedLoan(null);
+    setSelectedSplitMember(null);
     setSelectedGoal(id);
     if (!id) return;
     const goal = goals.find(g => g.id === id);
     if (!goal) return;
-    if (!merchant) setMerchant(goal.name);
+    setMerchant(goal.name);
     setCategory(goal.category);
-    if (goal.linkedAccountId) setSelectedAccount(goal.linkedAccountId);
+    setNotes(`Contribution to goal: ${goal.name}`);
+    const remaining = goal.targetAmount - goal.currentAmount;
+    if (goal.monthlyContribution && goal.monthlyContribution > 0) {
+      setAmount(String(goal.monthlyContribution));
+    } else if (remaining > 0) {
+      setAmount(String(remaining));
+    } else {
+      setAmount(String(goal.targetAmount));
+    }
+    if (goal.linkedAccountId) {
+      if (type === 'transfer') {
+        setSelectedToAccount(goal.linkedAccountId);
+      } else {
+        setSelectedAccount(goal.linkedAccountId);
+      }
+    }
   };
 
   const handleLoanSelect = (id: number | null) => {
     setSelectedSub(null);
     setSelectedGoal(null);
+    setSelectedSplitMember(null);
     setSelectedLoan(id);
     if (!id) return;
+    if (id === -1 || id === -2) {
+      setCategory('Debt');
+      const initialName = loanPersonName || merchant || '';
+      if (initialName) {
+        setMerchant(initialName);
+        setNotes(id === -1 ? `New loan lending to ${initialName}` : `New loan borrowed from ${initialName}`);
+      } else {
+        setNotes(id === -1 ? 'New loan lending' : 'New loan borrowed');
+      }
+      return;
+    }
     const loan = loans.find(l => l.id === id);
     if (!loan) return;
-    if (!merchant) setMerchant(loan.lender);
-    if (loan.emiAmount && !amount) setAmount(String(loan.emiAmount));
-    setCategory('Bills');
-    if (loan.linkedAccountId) setSelectedAccount(loan.linkedAccountId);
+    setMerchant(loan.lender);
+    setCategory('Debt');
+
+    const isRepayment = (loan.type === 'lent' && type === 'credit') || (loan.type === 'borrowed' && type === 'debit');
+    if (isRepayment && loan.emiAmount && loan.emiAmount > 0) {
+      setAmount(String(loan.emiAmount));
+    } else if (loan.remainingAmount > 0) {
+      setAmount(String(loan.remainingAmount));
+    } else {
+      setAmount(String(loan.totalAmount));
+    }
+
+    if (loan.type === 'borrowed') {
+      setNotes(type === 'credit' ? `Loan disbursement from ${loan.lender}` : `EMI payment for loan from ${loan.lender}`);
+    } else {
+      setNotes(type === 'credit' ? `Loan repayment from ${loan.lender}` : `Additional loan to ${loan.lender}`);
+    }
+
+    if (loan.linkedAccountId) {
+      setSelectedAccount(loan.linkedAccountId);
+    }
   };
+
+  // Sync merchant with loanPersonName and notes when selectedLoan is new
+  useEffect(() => {
+    if (selectedLoan === -1 || selectedLoan === -2) {
+      if (loanPersonName) {
+        setMerchant(loanPersonName);
+        setNotes(
+          selectedLoan === -1
+            ? `New loan lending to ${loanPersonName}`
+            : `New loan borrowed from ${loanPersonName}`
+        );
+      }
+    }
+  }, [loanPersonName, selectedLoan]);
+
+  useEffect(() => {
+    if ((selectedLoan === -1 || selectedLoan === -2) && !loanPersonName && merchant) {
+      setLoanPersonName(merchant);
+    }
+  }, [merchant, selectedLoan]);
+
+  useEffect(() => {
+    if (selectedLoan !== -1 && selectedLoan !== -2) {
+      setLoanPersonName('');
+    }
+  }, [selectedLoan]);
 
   const validate = (): boolean => {
     const newErrors: typeof errors = {};
@@ -367,6 +480,26 @@ export const EditTransactionScreen = () => {
   const performSave = async (shouldDeleteSplit = false) => {
     setSaving(true);
     try {
+      let finalLoanId: number | undefined = selectedLoan || undefined;
+
+      if (selectedLoan === -1 || selectedLoan === -2) {
+        const newLoanType = selectedLoan === -1 ? 'lent' : 'borrowed';
+        const newLoanId = await addLoan({
+          lender: (loanPersonName || merchant).trim(),
+          totalAmount: parseFloat(amount),
+          remainingAmount: 0,
+          emiAmount: 0,
+          nextDueDate: new Date(new Date().setMonth(new Date().getMonth() + 1)).toISOString(),
+          interestRate: undefined,
+          isActive: true,
+          type: newLoanType,
+          linkedAccountId: selectedAccount || undefined,
+          tenure: undefined,
+          notes: notes.trim() || undefined,
+        });
+        finalLoanId = newLoanId;
+      }
+
       await updateTransaction(transaction.id, {
         amount: parseFloat(amount),
         merchant: merchant.trim(),
@@ -379,7 +512,7 @@ export const EditTransactionScreen = () => {
         accountId: selectedAccount || undefined,
         toAccountId: type === 'transfer' ? (selectedToAccount || undefined) : undefined,
         goalId: selectedGoal || undefined,
-        loanId: selectedLoan || undefined,
+        loanId: finalLoanId,
         subscriptionId: selectedSub || undefined,
         tags: tags.length > 0 ? tags : undefined,
         splitMemberId: selectedSplitMember || undefined,
@@ -681,7 +814,37 @@ export const EditTransactionScreen = () => {
                 colors={colors}
                 currency={preferences.currency}
                 txType={type}
+                prefillName={merchant}
+                prefillAmount={amount}
+                prefillCategory={category}
+                prefillAccountId={selectedAccount}
               />
+              {(selectedLoan === -1 || selectedLoan === -2) && (
+                <View style={{ marginTop: 12 }}>
+                  <ThemedText style={[themedStyles.label, { marginBottom: 6, fontSize: 13 }]}>
+                    {selectedLoan === -1 ? "Borrowing Friend's Name" : "Lender's Name"}
+                  </ThemedText>
+                  <TextInput
+                    style={[
+                      themedStyles.merchantInput,
+                      { color: colors.primary, borderBottomColor: colors.border },
+                    ]}
+                    placeholder="Enter name"
+                    placeholderTextColor={colors.muted}
+                    value={loanPersonName}
+                    onChangeText={(v) => {
+                      setLoanPersonName(v);
+                      setMerchant(v);
+                      setNotes(
+                        selectedLoan === -1
+                          ? `New loan lending to ${v}`
+                          : `New loan borrowed from ${v}`
+                      );
+                    }}
+                    maxLength={100}
+                  />
+                </View>
+              )}
             </View>
 
             {/* Split Expense Inline Section */}
