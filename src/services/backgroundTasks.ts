@@ -72,14 +72,30 @@ TaskManager.defineTask(BACKGROUND_SYNC_TASK, async () => {
     const scheduledTimeToday = new Date(now);
     scheduledTimeToday.setHours(schedHour, schedMin, 0, 0);
 
-    if (now < scheduledTimeToday) {
-      return BackgroundFetch.BackgroundFetchResult.NoData;
+    let lastScheduledTime: Date;
+    if (now.getTime() >= scheduledTimeToday.getTime()) {
+      lastScheduledTime = scheduledTimeToday;
+    } else {
+      lastScheduledTime = new Date(scheduledTimeToday.getTime() - 24 * 60 * 60 * 1000);
     }
 
-    // ── Frequency gate: use shared logic in SyncService ──────────────────
-    const isDue = await SyncService.shouldAutoSync();
-    if (!isDue) {
-      return BackgroundFetch.BackgroundFetchResult.NoData;
+    // Retrieve the last successful sync time from DB
+    const lastSyncIso = await getLastSyncTimeFromDb();
+    if (lastSyncIso) {
+      const lastSyncTime = new Date(lastSyncIso).getTime();
+
+      // If schedule is weekly, check if at least 6 days have passed since last sync
+      if (preferences.syncSchedule === 'weekly') {
+        const sixDaysMs = 6 * 24 * 60 * 60 * 1000;
+        if (now.getTime() - lastSyncTime < sixDaysMs) {
+          return BackgroundFetch.BackgroundFetchResult.NoData;
+        }
+      }
+
+      // Check if we already synced after the most recent scheduled time
+      if (lastSyncTime >= lastScheduledTime.getTime()) {
+        return BackgroundFetch.BackgroundFetchResult.NoData;
+      }
     }
 
     // ── Actually sync ────────────────────────────────────────────────────
@@ -120,8 +136,17 @@ TaskManager.defineTask(BACKGROUND_NOTIFICATION_TASK, async ({ data, error }) => 
     try {
       const { preferences, googleUser } = useStore.getState();
       if (googleUser && preferences.syncSchedule !== 'none') {
-        const due = await SyncService.shouldAutoSync();
-        if (due) {
+        const lastSyncIso = await getLastSyncTimeFromDb();
+        let shouldSync = true;
+        if (lastSyncIso) {
+          const lastSyncTime = new Date(lastSyncIso).getTime();
+          const oneHourAgo = Date.now() - 60 * 60 * 1000;
+          if (lastSyncTime >= oneHourAgo) {
+            shouldSync = false;
+          }
+        }
+
+        if (shouldSync) {
           console.log('[BackgroundNotification] Syncing to Google Drive...');
           await SyncService.syncToGoogleDrive();
           const nowIso = new Date().toISOString();

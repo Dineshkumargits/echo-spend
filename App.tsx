@@ -6,7 +6,7 @@ import { AppState, AppStateStatus, View, TouchableOpacity, Text, StyleSheet, Pla
 import { Notifier } from './src/components/Notifier';
 import { ThemeProvider, useTheme } from './src/theme/ThemeProvider';
 import { AppNavigator } from './src/navigation/AppNavigator';
-import { initDatabase } from './src/services/database';
+import { initDatabase, getLastSyncTimeFromDb } from './src/services/database';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
@@ -153,8 +153,18 @@ function AppContent() {
 
         // Handle Background Sync
         if (data?.triggerSync) {
-          SyncService.shouldAutoSync().then(due => {
-            if (due) SyncService.syncToGoogleDrive().catch(() => {});
+          getLastSyncTimeFromDb().then(lastSyncIso => {
+            let shouldSync = true;
+            if (lastSyncIso) {
+              const lastSyncTime = new Date(lastSyncIso).getTime();
+              const oneHourAgo = Date.now() - 60 * 60 * 1000;
+              if (lastSyncTime >= oneHourAgo) {
+                shouldSync = false;
+              }
+            }
+            if (shouldSync) {
+              SyncService.syncToGoogleDrive().catch(() => {});
+            }
           });
         }
         if (data?.rescheduleSync && data?.syncTime && googleUser && preferences.syncSchedule !== 'none') {
