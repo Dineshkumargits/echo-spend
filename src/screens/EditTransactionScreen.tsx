@@ -67,7 +67,7 @@ export const EditTransactionScreen = () => {
   const [selectedLoan, setSelectedLoan] = useState<number | null>(transaction.loanId || null);
   const [loanPersonName, setLoanPersonName] = useState('');
   const [selectedSub, setSelectedSub] = useState<number | null>(transaction.subscriptionId || null);
-  const [isBorrowed, setIsBorrowed] = useState(transaction.category === 'Debt'); // Simple heuristic
+
   const [pendingSplitMembers, setPendingSplitMembers] = useState<PendingSplitMember[]>([]);
   const [selectedSplitMember, setSelectedSplitMember] = useState<number | null>(transaction.splitMemberId || null);
 
@@ -235,33 +235,6 @@ export const EditTransactionScreen = () => {
       setSelectedSplitMember(null);
     }
   }, [type]);
-
-  // Synchronize category selection and Personal Debt (isBorrowed) toggle
-  useEffect(() => {
-    setIsBorrowed(category === 'Debt');
-  }, [category]);
-
-  const handleToggleBorrowed = (val: boolean) => {
-    setIsBorrowed(val);
-    if (val) {
-      setCategory('Debt');
-    } else {
-      const otherMatch = categories.find(c => c.name === 'Other' && (
-        type === 'transfer' ? c.type === 'transfer' :
-          (type === 'debit' ? c.type === 'expense' : c.type === 'income')
-      ));
-      if (otherMatch) {
-        setCategory(otherMatch.name);
-      } else {
-        const firstMatch = categories.find(c => {
-          if (type === 'transfer') return c.type === 'transfer';
-          return type === 'debit' ? c.type === 'expense' : c.type === 'income';
-        });
-        if (firstMatch) setCategory(firstMatch.name);
-      }
-    }
-    Haptics.selectionAsync();
-  };
 
   // Helper calculations for split
   const total = parseFloat(amount) || 0;
@@ -983,24 +956,6 @@ export const EditTransactionScreen = () => {
                 )}
               </View>
             )}
-
-            {/* 7. Borrowed Toggle */}
-            <View style={[themedStyles.field, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}>
-              <View>
-                <ThemedText type="secondary" style={themedStyles.label}>Personal Debt?</ThemedText>
-                <ThemedText type="secondary" className="text-xs">Borrowed or Lent money</ThemedText>
-              </View>
-              <TouchableOpacity
-                onPress={() => handleToggleBorrowed(!isBorrowed)}
-                style={{
-                  width: 50, height: 30, borderRadius: 15,
-                  backgroundColor: isBorrowed ? colors.warning : colors.muted,
-                  justifyContent: 'center', paddingHorizontal: 2
-                }}
-              >
-                <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: '#FFFFFF', transform: [{ translateX: isBorrowed ? 20 : 0 }] }} />
-              </TouchableOpacity>
-            </View>
 
             {/* 8. Notes */}
             <View style={themedStyles.field}>
