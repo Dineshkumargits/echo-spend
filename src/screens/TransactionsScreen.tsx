@@ -331,6 +331,27 @@ const TransactionsScreen = () => {
   const activeFilterCount = countActiveFilters(filters);
   const themedStyles = useMemo(() => createThemedStyles(colors), [colors]);
 
+  // O(1) account name lookup — accounts are already loaded for the filter UI
+  const accountMap = useMemo(() =>
+    new Map(accounts.map(a => [a.id, a.name])),
+    [accounts]
+  );
+
+  // Returns a formatted account label string (with leading " · ") or empty string
+  const getAccountLabel = (item: Transaction): string => {
+    if (item.type === 'transfer') {
+      const from = item.accountId != null ? accountMap.get(item.accountId) : undefined;
+      const to = item.toAccountId != null ? accountMap.get(item.toAccountId) : undefined;
+      const parts = [from, to].filter((v): v is string => !!v);
+      return parts.length > 0 ? ` · ${parts.join(' → ')}` : '';
+    }
+    if (item.accountId != null) {
+      const name = accountMap.get(item.accountId);
+      return name ? ` · ${name}` : '';
+    }
+    return '';
+  };
+
   // ─── Render helpers ──────────────────────────────────────────────────────
 
   const TypeIcon = ({ item, size = 16 }: { item: Transaction; size?: number }) => {
@@ -399,7 +420,7 @@ const TransactionsScreen = () => {
         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 3, gap: 5 }}>
           {sourceIcon(item.source)}
           <ThemedText type="secondary" className="text-xs flex-1" numberOfLines={1}>
-            {formatDateShort(item.date)} · {item.category}
+            {formatDateShort(item.date)} · {item.category}{getAccountLabel(item)}
             {item.tags && item.tags.length > 0 ? ` · ${item.tags.map((t: string) => '#' + t).join(' ')}` : ''}
           </ThemedText>
         </View>

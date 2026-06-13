@@ -137,10 +137,32 @@ const DashboardScreen = ({ navigation }: any) => {
     [categories]
   );
 
+  // O(1) account name lookup — accounts are already fetched alongside transactions
+  const accountMap = useMemo(() =>
+    new Map(accounts.map(a => [a.id, a.name])),
+    [accounts]
+  );
+
   const styles = useMemo(() => createStyles(), []);
 
   const renderTransaction = useCallback(({ item }: { item: Transaction }) => {
     const cat = categoryMap.get(item.category);
+
+    // Build account label: "AccountName" or "From → To" for transfers
+    const accountLabel = (() => {
+      if (item.type === 'transfer') {
+        const from = item.accountId != null ? accountMap.get(item.accountId) : undefined;
+        const to = item.toAccountId != null ? accountMap.get(item.toAccountId) : undefined;
+        const parts = [from, to].filter((v): v is string => !!v);
+        return parts.length > 0 ? ` · ${parts.join(' → ')}` : '';
+      }
+      if (item.accountId != null) {
+        const name = accountMap.get(item.accountId);
+        return name ? ` · ${name}` : '';
+      }
+      return '';
+    })();
+
     return (
       <TouchableOpacity
         onPress={() => {
@@ -159,7 +181,7 @@ const DashboardScreen = ({ navigation }: any) => {
           <ThemedText type="secondary" className="text-xs mt-0.5" numberOfLines={1}>
             {new Date(item.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
             {' · '}{new Date(item.date).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
-            {' · '}{item.category}
+            {' · '}{item.category}{accountLabel}
             {item.tags && item.tags.length > 0 ? ` · ${item.tags.map((t: string) => '#' + t).join(' ')}` : ''}
           </ThemedText>
         </View>
@@ -171,7 +193,7 @@ const DashboardScreen = ({ navigation }: any) => {
         </ThemedText>
       </TouchableOpacity>
     );
-  }, [categoryMap, colors, navigation, triggerHaptic, formatAmount, styles]);
+  }, [categoryMap, accountMap, colors, navigation, triggerHaptic, formatAmount, styles]);
 
   return (
     <ThemedSafeAreaView>
