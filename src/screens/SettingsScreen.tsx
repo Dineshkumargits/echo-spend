@@ -335,7 +335,7 @@ const SettingsScreen = ({ navigation }: any) => {
 
   const handleSaveSalaryDay = () => {
     const val = parseInt(salaryDayInput);
-    if (!isNaN(val) && val >= 1 && val <= 28) {
+    if (!isNaN(val) && val >= 1 && val <= 31) {
       setSalaryDay(val);
       notify.success('Financial cycle updated');
     } else {
@@ -589,7 +589,7 @@ const SettingsScreen = ({ navigation }: any) => {
           <View className="p-4 border-t" style={{ borderTopColor: colors.border }}>
              <View className="flex-row items-center mb-2">
                 <LucideTimer color={colors.primary} size={20} className="mr-3"/>
-                <ThemedText className="font-medium">Salary Day (1-28)</ThemedText>
+                <ThemedText className="font-medium">Salary Day (1-31)</ThemedText>
              </View>
              <View className="flex-row gap-2">
                 <TextInput 

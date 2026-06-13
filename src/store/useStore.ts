@@ -18,7 +18,7 @@ interface UserPreferences {
   hideAmounts: boolean;               // NEW: Privacy Mode
   hapticsEnabled: boolean;            // NEW: Interaction
   defaultLaunchScreen: 'Dashboard' | 'SmartInbox'; // NEW: Navigation
-  salaryDay: number;                  // NEW: Financial Cycle (1-28)
+  salaryDay: number;                  // NEW: Financial Cycle (1-31)
   autoSmsScan: boolean;               // NEW: Background Automation
   dailyReminder: boolean;             // NEW: Daily 9PM Reminder
   lastWeeklyDigestDate: string | null;

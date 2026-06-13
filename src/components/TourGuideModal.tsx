@@ -77,7 +77,7 @@ const SLIDES = [
     tagline: 'Set Spending Limits',
     description: 'Echo Spend adapts to your actual payday! Set your custom salary day to reset your monthly calculations. Add spending limits for different categories and get notified at 80%, 90%, and 100% of your limits.',
     bullets: [
-      'Choose when your financial month begins (Day 1-28)',
+      'Choose when your financial month begins (Day 1-31)',
       'Friendly warning alerts so you do not overspend',
       'See exactly where most of your money goes'
     ]

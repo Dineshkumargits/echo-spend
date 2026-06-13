@@ -117,7 +117,7 @@ const PreferencesStep = ({
               onChangeText={v => {
                 const n = parseInt(v);
                 if (!v) { setSalaryDay(''); return; }
-                if (!isNaN(n) && n >= 1 && n <= 28) setSalaryDay(v);
+                if (!isNaN(n) && n >= 1 && n <= 31) setSalaryDay(v);
               }}
               keyboardType="number-pad"
               placeholder="1"
