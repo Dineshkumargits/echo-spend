@@ -486,49 +486,30 @@ async function parseWithLLM(
   const otherCats = categories.filter(c => !coreSet.has(c.name.toLowerCase()));
   const limitedCategories = [...coreCats, ...otherCats].slice(0, 25);
 
-  const categoryHint = limitedCategories.length > 0
-    ? limitedCategories.map(c => `"${c.name}"`).join(' | ')
-    : '"Food" | "Transport" | "Shopping" | "Bills" | "Entertainment" | "Health" | "Other"';
+  const categoryNames = limitedCategories.length > 0
+    ? limitedCategories.map(c => c.name)
+    : ['Food & Dining', 'Transport', 'Shopping', 'Bills & Utilities', 'Entertainment', 'Health', 'Other'];
+  
+  const categoryHint = `[${categoryNames.map(name => `'${name}'`).join(', ')}]`;
+  const merchantContext = 'Merchant Context: Clean string resolution for known nodes.';
 
-  const merchantContext = merchantHints.length > 0
-    ? `\nKnown merchant mappings: ${merchantHints.slice(0, 10).map(m => `"${m.raw}" → "${m.clean}" (${m.category})`).join(', ')}`
-    : '';
-
-  // Streamlined prompt optimized for 1B edge models with explicit global rules and examples
-  const prompt = `<|system|>
-You are a banking SMS transaction parser. Analyze the SMS and return a JSON object.
+  // Streamlined prompt optimized for 1B edge models with explicit global rules
+  const prompt = `<|im_start|>system
+You are a strict, deterministic banking SMS data extraction engine. Analyze the provided SMS input text and output a single valid JSON object matching the exact schema keys in sequence.
 
 Rules:
-1. isTransaction is true ONLY for completed bank or wallet transactions (spent, charged, debited, credited, received, paid, deducted, withdrawn, transfer). It is false for payment reminders, due alerts, OTPs, credit limit enhancements, statement notifications.
-2. amount must be a positive float representing the transaction amount (e.g., 1500.00, 45.20, 129631.00). Do NOT strip the decimal point. Extract the numeric value regardless of the currency symbol ($, €, £, ₹, etc.). If it is not a transaction, set to 0.
-3. merchant: extract the clean merchant, store, website, or person paid. If none is mentioned, use the bank or service name (e.g., StanChart, Chase, HSBC, Barclays, SBI, Paytm). Do NOT hallucinate names not present in the SMS.
-4. type: "credit" (money received), "debit" (money spent / card charge / withdrawal), or "transfer" (own accounts / peer-to-peer transfer).
-5. category: choose the best matching category from the available categories list.
-
-Examples:
-- SMS: "Chase: Charged $45.20 at TARGET. Card ending in 4321. Bal: $1,200.50"
-  JSON: {"isTransaction": true, "amount": 45.20, "merchant": "TARGET", "type": "debit", "category": "Shopping"}
-
-- SMS: "Deposit of EUR 2,500.00 received from ACME CORP. Available balance: EUR 4,500.00 - HSBC"
-  JSON: {"isTransaction": true, "amount": 2500.00, "merchant": "ACME CORP", "type": "credit", "category": "Salary"}
-
-- SMS: "Barclays: ATM withdrawal of £100.00 from A/c ending 8899 on 12-May-2026."
-  JSON: {"isTransaction": true, "amount": 100.00, "merchant": "Barclays", "type": "debit", "category": "Transport"}
-
-- SMS: "Wells Fargo: Payment of $150.00 due on 12/05/2026. Avoid late fees by paying now."
-  JSON: {"isTransaction": false, "amount": 0, "merchant": "Wells Fargo", "type": "debit", "category": "Other"}
-
-- SMS: "Dear Customer, there is an NEFT credit of INR 129,631.00 in your account 421xxxx1769 on 30/05/2026. Available Balance: INR 129,685.68 - StanChart"
-  JSON: {"isTransaction": true, "amount": 129631.00, "merchant": "StanChart", "type": "credit", "category": "Transfer"}
-
-<|user|>
+1. isTransaction MUST be false for alerts, payment requests, links, OTP verification codes, minimum balance warnings, statement generation notices, or pre-approved limit offers. It is true ONLY if money has explicitly and successfully been debited, credited, or spent.
+2. If isTransaction is false, the amount key MUST be strictly forced to 0.
+3. If isTransaction is false and no merchant is being paid, use the bank or service name as the merchant.
+4. Output ONLY the raw JSON block without markdown backticks.<|im_end|>
+<|im_start|>user
 SMS: "${smsBody}"
 SMS Date: ${smsDate}
 Available Categories: ${categoryHint}
 ${merchantContext}
 
-Return JSON matching the schema.
-<|assistant|>` ;
+Return JSON matching the schema.<|im_end|>
+<|im_start|>assistant` ;
 
   const schemaProperties: Record<string, any> = {
     isTransaction: { type: 'boolean' },
@@ -552,6 +533,8 @@ Return JSON matching the schema.
       stopSequences: ['}'],
       jsonSchema: JSON.stringify(schema),
     });
+
+    console.log('raw output=======', rawOutput)
 
     if (!rawOutput || rawOutput.trim() === '') {
       return null;
