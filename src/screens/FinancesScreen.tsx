@@ -299,6 +299,31 @@ export const FinancesScreen = ({ navigation }: any) => {
           </View>
         )}
 
+        <TouchableOpacity
+          onPress={() => navigation.navigate('Subscriptions')}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            backgroundColor: colors.surface,
+            borderColor: colors.border,
+            borderWidth: 1,
+            borderRadius: 14,
+            padding: 14,
+            marginBottom: 16,
+            gap: 12,
+          }}
+          activeOpacity={0.8}
+        >
+          <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: `${colors.accent}15`, alignItems: 'center', justifyContent: 'center' }}>
+            <LucideRepeat color={colors.accent} size={18} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <ThemedText style={{ fontWeight: 'bold', fontSize: 14 }}>Tracked Recurring Bills</ThemedText>
+            <ThemedText type="secondary" style={{ fontSize: 11, marginTop: 2 }}>View auto-detected ledger bills & upcoming cycles</ThemedText>
+          </View>
+          <LucideChevronRight color={colors.secondary} size={16} />
+        </TouchableOpacity>
+
         {subscriptions.length === 0 ? renderEmpty('subscriptions') : subscriptions.map(sub => {
           const days = daysUntilDate(sub.nextDueDate);
           const isUrgent = days <= 3;

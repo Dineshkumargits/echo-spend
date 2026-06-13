@@ -2,7 +2,7 @@ import { ThemedSafeAreaView, ThemedText } from '../components/ThemedSafeAreaView
 import React, { useState, useEffect } from 'react';
 import { View, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { MotiView } from 'moti';
-import { LucideCalendar, LucideRefreshCcw } from 'lucide-react-native';
+import { LucideCalendar, LucideRefreshCcw, LucideChevronLeft } from 'lucide-react-native';
 import * as LucideIcons from 'lucide-react-native';
 import { renderCategoryIcon } from '../components/CategoryManager';
 import { useStore } from '../store/useStore';
@@ -83,12 +83,27 @@ export const SubscriptionsScreen = ({ navigation }: any) => {
         <MotiView
           from={{ opacity: 0, translateY: -20 }}
           animate={{ opacity: 1, translateY: 0 }}
-          className="mt-6 mb-6"
+          style={{ flexDirection: 'row', alignItems: 'center', marginTop: 20, marginBottom: 20, gap: 12 }}
         >
-          <ThemedText type="secondary" className="text-sm uppercase tracking-widest flex-row items-center">
-            <LucideRefreshCcw color={colors.secondary} size={12} /> Auto-Payments
-          </ThemedText>
-          <ThemedText className="text-3xl font-bold">Subscriptions</ThemedText>
+          <TouchableOpacity 
+            onPress={() => navigation.goBack()}
+            style={{ 
+              width: 38, 
+              height: 38, 
+              borderRadius: 19, 
+              backgroundColor: colors.translucent, 
+              alignItems: 'center', 
+              justifyContent: 'center' 
+            }}
+          >
+            <LucideChevronLeft color={colors.primary} size={22} />
+          </TouchableOpacity>
+          <View>
+            <ThemedText type="secondary" className="text-xs uppercase tracking-widest">
+              Auto-Payments
+            </ThemedText>
+            <ThemedText className="text-2xl font-bold">Recurring Bills</ThemedText>
+          </View>
         </MotiView>
 
         <MotiView
@@ -124,7 +139,7 @@ export const SubscriptionsScreen = ({ navigation }: any) => {
              <View className="w-16 h-16 rounded-full items-center justify-center mb-4" style={{ backgroundColor: colors.translucent }}>
                 <LucideCalendar color={colors.secondary} size={32} />
              </View>
-             <ThemedText className="font-bold text-center">No subscriptions yet</ThemedText>
+             <ThemedText className="font-bold text-center">No recurring bills yet</ThemedText>
              <ThemedText type="secondary" className="text-xs text-center mt-2 px-4">
                Mark your transactions as "Recurring" when adding them, and they will automatically appear here.
              </ThemedText>

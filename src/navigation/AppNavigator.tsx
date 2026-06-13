@@ -16,6 +16,7 @@ import SmartScanScreen from '../screens/SmartScanScreen';
 import AddGoalScreen from '../screens/AddGoalScreen';
 import AddLoanScreen from '../screens/AddLoanScreen';
 import AddSubscriptionScreen from '../screens/AddSubscriptionScreen';
+import SubscriptionsScreen from '../screens/SubscriptionsScreen';
 import AnalyticsScreen from '../screens/AnalyticsScreen';
 import TransactionDetailScreen from '../screens/TransactionDetailScreen';
 import BankAccountDetailScreen from '../screens/BankAccountDetailScreen';
@@ -57,6 +58,7 @@ export const AppNavigator = () => {
             <Stack.Screen name="AddGoal" component={AddGoalScreen} options={{ presentation: 'modal' }} />
             <Stack.Screen name="AddLoan" component={AddLoanScreen} options={{ presentation: 'modal' }} />
             <Stack.Screen name="AddSubscription" component={AddSubscriptionScreen} options={{ presentation: 'modal' }} />
+            <Stack.Screen name="Subscriptions" component={SubscriptionsScreen} options={{ presentation: 'card' }} />
             <Stack.Screen name="Analytics" component={AnalyticsScreen} options={{ presentation: 'card' }} />
             <Stack.Screen name="TransactionDetail" component={TransactionDetailScreen} options={{ presentation: 'modal' }} />
             <Stack.Screen name="BankAccountDetail" component={BankAccountDetailScreen} options={{ presentation: 'card' }} />
