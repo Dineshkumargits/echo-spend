@@ -1,5 +1,5 @@
 import { ThemedSafeAreaView, ThemedText } from '../components/ThemedSafeAreaView';
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   TextInput,
@@ -13,16 +13,14 @@ import {
   LucideTrendingUp,
   LucideRepeat,
   LucideX,
-  LucideArrowUpRight,
-  LucideArrowDownLeft,
   LucideChevronLeft,
-  LucideRotateCw,
 } from 'lucide-react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useIsFocused, useNavigation } from '@react-navigation/native';
-import { getTransactions, Transaction } from '../services/database';
+import { getTransactions, getCategories, Transaction, Category } from '../services/database';
 import { useTheme } from '../theme/ThemeProvider';
 import { useStore } from '../store/useStore';
+import { renderCategoryIcon } from '../components/CategoryManager';
 
 type FilterId = 'high' | 'recurring' | null;
 
@@ -41,6 +39,7 @@ const SearchScreen = () => {
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<FilterId>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(false);
   const isFocused = useIsFocused();
   const navigation = useNavigation<any>();
@@ -48,7 +47,7 @@ const SearchScreen = () => {
 
   const fetchTransactions = useCallback(async (query: string, filter: FilterId) => {
     setLoading(true);
-
+ 
     const opts: Parameters<typeof getTransactions>[0] = {
       limit: 100,
       confirmedOnly: true,
@@ -65,8 +64,17 @@ const SearchScreen = () => {
 
   // Reload when tab gains focus
   useEffect(() => {
-    if (isFocused) fetchTransactions(search, activeFilter);
+    if (isFocused) {
+      fetchTransactions(search, activeFilter);
+      getCategories().then(setCategories);
+    }
   }, [isFocused]);
+
+  // Memoize category lookup map to avoid O(n) find on every transaction row render
+  const categoryMap = useMemo(() =>
+    new Map(categories.map(c => [c.name, c])),
+    [categories]
+  );
 
   // Debounced search
   useEffect(() => {
@@ -81,46 +89,47 @@ const SearchScreen = () => {
     setActiveFilter(prev => (prev === id ? null : id));
   };
 
-  const renderItem = ({ item }: { item: Transaction }) => (
-    <TouchableOpacity
-      onPress={() => navigation.navigate('TransactionDetail', { transaction: item })}
-      activeOpacity={0.7}
-    >
-      <MotiView
-        from={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        className="flex-row justify-between items-center py-4 border-b"
-        style={{ borderBottomColor: colors.border }}
+  const renderItem = ({ item }: { item: Transaction }) => {
+    const cat = categoryMap.get(item.category);
+    return (
+      <TouchableOpacity
+        onPress={() => navigation.navigate('TransactionDetail', { transaction: item })}
+        activeOpacity={0.7}
       >
-        <View className="flex-row items-center flex-1 mr-4">
-          <View className="w-8 h-8 rounded-full items-center justify-center mr-3" style={{ backgroundColor: colors.translucent }}>
-            {item.type === 'credit'
-              ? <LucideArrowDownLeft color={colors.success} size={16} />
-              : (item.type === 'transfer'
-                ? <LucideRotateCw color={colors.warning} size={16} />
-                : <LucideArrowUpRight color={colors.danger} size={16} />)
-            }
-          </View>
-          <View className="flex-1">
-            <ThemedText className="font-bold" numberOfLines={1}>{item.merchant}</ThemedText>
-            <ThemedText type="secondary" className="text-xs mt-0.5" numberOfLines={1}>
-              {new Date(item.date).toLocaleDateString('en-IN', {
-                day: 'numeric', month: 'short', year: 'numeric',
-              })} · {item.category}
-              {item.isRecurring ? ' · 🔁' : ''}
-              {item.tags && item.tags.length > 0 ? ` · ${item.tags.map((t: string) => '#' + t).join(' ')}` : ''}
-            </ThemedText>
-          </View>
-        </View>
-        <ThemedText
-          className="font-bold text-base"
-          style={{ color: item.type === 'transfer' ? colors.warning : (item.type === 'credit' ? colors.success : colors.primary) }}
+        <MotiView
+          from={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="flex-row justify-between items-center py-4 border-b"
+          style={{ borderBottomColor: colors.border }}
         >
-          {item.type === 'credit' ? '+' : (item.type === 'transfer' ? '⇄' : '-')}{currency}{item.amount.toLocaleString('en-IN')}
-        </ThemedText>
-      </MotiView>
-    </TouchableOpacity>
-  );
+          <View className="flex-row items-center flex-1 mr-4">
+            <View
+              className="w-8 h-8 rounded-full items-center justify-center mr-3"
+              style={{ backgroundColor: cat?.color ? `${cat.color}20` : colors.translucent }}
+            >
+              {renderCategoryIcon(cat?.icon ?? '📁', cat?.color || colors.secondary, 16)}
+            </View>
+            <View className="flex-1">
+              <ThemedText className="font-bold" numberOfLines={1}>{item.merchant}</ThemedText>
+              <ThemedText type="secondary" className="text-xs mt-0.5" numberOfLines={1}>
+                {new Date(item.date).toLocaleDateString('en-IN', {
+                  day: 'numeric', month: 'short', year: 'numeric',
+                })} · {item.category}
+                {item.isRecurring ? ' · 🔁' : ''}
+                {item.tags && item.tags.length > 0 ? ` · ${item.tags.map((t: string) => '#' + t).join(' ')}` : ''}
+              </ThemedText>
+            </View>
+          </View>
+          <ThemedText
+            className="font-bold text-base"
+            style={{ color: item.type === 'transfer' ? colors.warning : (item.type === 'credit' ? colors.success : colors.primary) }}
+          >
+            {item.type === 'credit' ? '+' : (item.type === 'transfer' ? '⇄' : '-')}{currency}{item.amount.toLocaleString('en-IN')}
+          </ThemedText>
+        </MotiView>
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <ThemedSafeAreaView>

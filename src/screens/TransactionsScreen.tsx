@@ -17,10 +17,7 @@ import { MotiView } from 'moti';
 import {
   LucideSearch,
   LucideX,
-  LucideArrowUpRight,
-  LucideArrowDownLeft,
   LucideChevronLeft,
-  LucideRotateCw,
   LucideSlidersHorizontal,
   LucideFilter,
   LucideRepeat,
@@ -30,6 +27,7 @@ import {
   LucideZap,
   LucideAlertCircle,
 } from 'lucide-react-native';
+import { renderCategoryIcon } from '../components/CategoryManager';
 import { FlashList } from '@shopify/flash-list';
 import { useIsFocused, useNavigation, useRoute } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
@@ -181,12 +179,14 @@ const TransactionsScreen = () => {
 
   // ── Load metadata ─────────────────────────────────────────────────────────
   useEffect(() => {
-    Promise.all([getCategories(), getAccounts(), getAllUniqueTags()]).then(([cats, accs, tgs]) => {
-      setCategories(cats); // show all including subcategories
-      setAccounts(accs);
-      setTagsList(tgs);
-    });
-  }, []);
+    if (isFocused) {
+      Promise.all([getCategories(), getAccounts(), getAllUniqueTags()]).then(([cats, accs, tgs]) => {
+        setCategories(cats); // show all including subcategories
+        setAccounts(accs);
+        setTagsList(tgs);
+      });
+    }
+  }, [isFocused]);
 
   // ── Build query opts ──────────────────────────────────────────────────────
   const buildQueryOpts = useCallback(
@@ -331,6 +331,12 @@ const TransactionsScreen = () => {
   const activeFilterCount = countActiveFilters(filters);
   const themedStyles = useMemo(() => createThemedStyles(colors), [colors]);
 
+  // Memoize category lookup map to avoid O(n) find on every transaction row render
+  const categoryMap = useMemo(() =>
+    new Map(categories.map(c => [c.name, c])),
+    [categories]
+  );
+
   // O(1) account name lookup — accounts are already loaded for the filter UI
   const accountMap = useMemo(() =>
     new Map(accounts.map(a => [a.id, a.name])),
@@ -353,16 +359,6 @@ const TransactionsScreen = () => {
   };
 
   // ─── Render helpers ──────────────────────────────────────────────────────
-
-  const TypeIcon = ({ item, size = 16 }: { item: Transaction; size?: number }) => {
-    if (item.type === 'credit') return <LucideArrowDownLeft color={colors.success} size={size} />;
-    if (item.type === 'transfer') {
-      if (filters.accountId && item.toAccountId === filters.accountId) return <LucideArrowDownLeft color={colors.success} size={size} />;
-      if (filters.accountId && item.accountId === filters.accountId) return <LucideArrowUpRight color={colors.danger} size={size} />;
-      return <LucideRotateCw color={colors.warning} size={size} />;
-    }
-    return <LucideArrowUpRight color={colors.danger} size={size} />;
-  };
 
   const amountColor = (item: Transaction) => {
     if (item.type === 'credit') return colors.success;
@@ -393,43 +389,51 @@ const TransactionsScreen = () => {
 
   // ─── Transaction Row ──────────────────────────────────────────────────────
 
-  const renderItem = ({ item }: { item: Transaction }) => (
-    <TouchableOpacity
-      onPress={() => openDetail(item)}
-      activeOpacity={0.7}
-      style={[themedStyles.txRow, { borderBottomColor: colors.border }]}
-    >
-      {/* Left icon */}
-      <View style={[themedStyles.txIcon, { backgroundColor: colors.translucent }]}>
-        <TypeIcon item={item} size={16} />
-      </View>
+  const renderItem = ({ item }: { item: Transaction }) => {
+    const cat = categoryMap.get(item.category);
+    return (
+      <TouchableOpacity
+        onPress={() => openDetail(item)}
+        activeOpacity={0.7}
+        style={[themedStyles.txRow, { borderBottomColor: colors.border }]}
+      >
+        {/* Left icon */}
+        <View
+          style={[
+            themedStyles.txIcon,
+            { backgroundColor: cat?.color ? `${cat.color}20` : colors.translucent }
+          ]}
+        >
+          {renderCategoryIcon(cat?.icon ?? '📁', cat?.color || colors.secondary, 18)}
+        </View>
 
-      {/* Middle info */}
-      <View style={{ flex: 1, marginHorizontal: 12 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          <ThemedText className="font-bold text-[15px]" numberOfLines={1} style={{ flex: 1 }}>
-            {item.merchant}
-          </ThemedText>
-          {item.isRecurring ? (
-            <LucideRepeat color={colors.accent} size={12} />
-          ) : null}
-          {!item.isConfirmed ? (
-            <LucideAlertCircle color={colors.warning} size={12} />
-          ) : null}
+        {/* Middle info */}
+        <View style={{ flex: 1, marginHorizontal: 12 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <ThemedText className="font-bold text-[15px]" numberOfLines={1} style={{ flex: 1 }}>
+              {item.merchant}
+            </ThemedText>
+            {item.isRecurring ? (
+              <LucideRepeat color={colors.accent} size={12} />
+            ) : null}
+            {!item.isConfirmed ? (
+              <LucideAlertCircle color={colors.warning} size={12} />
+            ) : null}
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 3, gap: 5 }}>
+            {sourceIcon(item.source)}
+            <ThemedText type="secondary" className="text-xs flex-1" numberOfLines={1}>
+              {formatDateShort(item.date)} · {item.category}{getAccountLabel(item)}
+              {item.tags && item.tags.length > 0 ? ` · ${item.tags.map((t: string) => '#' + t).join(' ')}` : ''}
+            </ThemedText>
+          </View>
         </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 3, gap: 5 }}>
-          {sourceIcon(item.source)}
-          <ThemedText type="secondary" className="text-xs flex-1" numberOfLines={1}>
-            {formatDateShort(item.date)} · {item.category}{getAccountLabel(item)}
-            {item.tags && item.tags.length > 0 ? ` · ${item.tags.map((t: string) => '#' + t).join(' ')}` : ''}
-          </ThemedText>
-        </View>
-      </View>
-      <ThemedText className="font-bold text-[15px]" style={{ color: amountColor(item) }}>
-        {amountPrefix(item)}{formatAmount(item.amount, currency)}
-      </ThemedText>
-    </TouchableOpacity>
-  );
+        <ThemedText className="font-bold text-[15px]" style={{ color: amountColor(item) }}>
+          {amountPrefix(item)}{formatAmount(item.amount, currency)}
+        </ThemedText>
+      </TouchableOpacity>
+    );
+  };
 
 
 
