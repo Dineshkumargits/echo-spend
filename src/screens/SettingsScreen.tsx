@@ -712,16 +712,16 @@ const SettingsScreen = ({ navigation }: any) => {
           )}
         </View>
 
-        {/* ── Smart Scan AI ── */}
-        <Section title="Smart Scan AI" />
+        {/* ── Echo AI ── */}
+        <Section title="Echo AI" />
         <View className="rounded-apple-md overflow-hidden" style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
           {!AIModelManager.isDeviceCompatible() ? (
             /* Low RAM Compatibility Warning */
             <>
               <Row
                 icon={<LucideAlertTriangle color={colors.danger} size={20} />}
-                label="Smart Scan AI Incompatible"
-                sub="Your device has less than 2GB of total RAM. On-device Smart Scan AI is disabled to prevent crashes."
+                label="Echo AI Incompatible"
+                sub="Your device has less than 2GB of total RAM. On-device Echo AI is disabled to prevent crashes."
               />
               <View style={{ padding: 12, borderTopWidth: 1, borderTopColor: colors.border }}>
                 <ThemedText type="secondary" className="text-xs">
@@ -734,7 +734,7 @@ const SettingsScreen = ({ navigation }: any) => {
             <>
               <Row
                 icon={<LucideAlertTriangle color={colors.warning} size={20} />}
-                label="Smart Scan AI Not Installed"
+                label="Echo AI Not Installed"
                 sub="Smart SMS parsing is using basic mode"
               />
               <TouchableOpacity
@@ -750,7 +750,7 @@ const SettingsScreen = ({ navigation }: any) => {
               >
                 <LucideDownload color="#fff" size={16} />
                 <ThemedText style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>
-                  Download Smart Scan AI (~980 MB)
+                  Download Echo AI (~980 MB)
                 </ThemedText>
               </TouchableOpacity>
             </>
@@ -765,7 +765,7 @@ const SettingsScreen = ({ navigation }: any) => {
               >
                 <Row
                   icon={<LucideDownload color={colors.accent} size={20} />}
-                  label="Downloading Smart Scan AI..."
+                  label="Downloading Echo AI..."
                   sub={`${aiModelProgress}% complete • Tap to view progress`}
                 />
               </TouchableOpacity>
@@ -781,7 +781,7 @@ const SettingsScreen = ({ navigation }: any) => {
               >
                 <Row
                   icon={<LucideAlertTriangle color={colors.danger} size={20} />}
-                  label="Smart Scan AI Download Failed"
+                  label="Echo AI Download Failed"
                   sub="Tap to retry or cancel setup"
                 />
               </TouchableOpacity>
@@ -791,7 +791,7 @@ const SettingsScreen = ({ navigation }: any) => {
             <>
               <Row
                 icon={<LucideCpu color={colors.success} size={20} />}
-                label="Smart Scan AI"
+                label="Echo AI"
                 sub={`Local Engine • ${aiModelSize || '~980 MB'} • ${aiModelStatus === 'ready' ? 'Active' : 'Ready'}`}
                 right={
                   <View style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: `${colors.success}20` }}>
@@ -803,21 +803,21 @@ const SettingsScreen = ({ navigation }: any) => {
               />
               <Row
                 icon={<LucideTrash2 color={colors.danger} size={18} />}
-                label="Delete Smart Scan AI"
+                label="Delete Echo AI"
                 sub={`Free up ${aiModelSize || '~980 MB'} of storage`}
                 onPress={() => {
                   Alert.alert(
-                    'Delete Smart Scan AI?',
-                    'Without the Smart Scan AI, SMS analysis will use basic pattern matching which is less accurate for unusual transactions.\n\nYou\'ll need to re-download ~980 MB later to restore Smart Scan AI features.',
+                    'Delete Echo AI?',
+                    'Without the Echo AI, SMS analysis will use basic pattern matching which is less accurate for unusual transactions.\n\nYou\'ll need to re-download ~980 MB later to restore Echo AI features.',
                     [
-                      { text: 'Keep Smart Scan AI', style: 'cancel' },
+                      { text: 'Keep Echo AI', style: 'cancel' },
                       {
-                        text: 'Delete Smart Scan AI',
+                        text: 'Delete Echo AI',
                         style: 'destructive',
                         onPress: async () => {
                            await AIModelManager.deleteModel();
                            setAiModelSize('');
-                           notify.info('Smart Scan AI deleted', 'Using basic SMS parsing mode');
+                           notify.info('Echo AI deleted', 'Using basic SMS parsing mode');
                            triggerHaptic(Haptics.ImpactFeedbackStyle.Heavy);
                         },
                       },

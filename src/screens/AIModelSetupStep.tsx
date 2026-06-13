@@ -142,15 +142,15 @@ const AIModelSetupStep = ({ onComplete, showClose = false }: AIModelSetupStepPro
 
           {/* Title */}
           <ThemedText style={[styles.title, { color: colors.primary }]}>
-            {isComplete ? 'Smart Scan AI is Ready!' : 'Power Up Smart Scan AI'}
+            {isComplete ? 'Echo AI is Ready!' : 'Power Up Echo AI'}
           </ThemedText>
 
           {/* Subtitle */}
           <ThemedText style={[styles.subtitle, { color: colors.secondary }]}>
             {isComplete
-              ? 'Your offline Smart Scan AI is set up. Smart SMS parsing is now active.'
+              ? 'Your offline Echo AI is set up. Smart SMS parsing is now active.'
               : !isCompatible
-                ? 'Smart Scan AI is disabled because your device has less than 2GB of total RAM. Echo Spend will use high-performance local regex parsing to scan transactions safely.'
+                ? 'Echo AI is disabled because your device has less than 2GB of total RAM. Echo Spend will use high-performance local regex parsing to scan transactions safely.'
                 : 'A small local AI will be downloaded to your device for intelligent SMS analysis. Everything runs locally — your data never leaves your phone.'}
           </ThemedText>
 
@@ -206,7 +206,7 @@ const AIModelSetupStep = ({ onComplete, showClose = false }: AIModelSetupStepPro
               </View>
               <View style={styles.progressInfo}>
                 <ThemedText style={[styles.progressText, { color: colors.secondary }]}>
-                  Downloading Smart Scan AI...
+                  Downloading Echo AI...
                 </ThemedText>
                 <ThemedText style={[styles.progressPercent, { color: colors.accent }]}>
                   {aiModelProgress}%
@@ -291,7 +291,7 @@ const AIModelSetupStep = ({ onComplete, showClose = false }: AIModelSetupStepPro
                 >
                   <LucideDownload color="#fff" size={20} />
                   <ThemedText style={styles.primaryButtonText}>
-                    Download Smart Scan AI
+                    Download Echo AI
                   </ThemedText>
                 </TouchableOpacity>
 
