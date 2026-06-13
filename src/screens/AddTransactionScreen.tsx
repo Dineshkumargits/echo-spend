@@ -21,6 +21,8 @@ import {
   Loan,
   getSubscriptions,
   Subscription,
+  getPendingSplitMembers,
+  PendingSplitMember,
 } from '../services/database';
 import { useTheme } from '../theme/ThemeProvider';
 import { useStore } from '../store/useStore';
@@ -35,25 +37,29 @@ interface EntityLinkerProps {
   goals: Goal[];
   loans: Loan[];
   subscriptions: Subscription[];
+  splitMembers: PendingSplitMember[];
   selectedGoal: number | null;
   selectedLoan: number | null;
   selectedSub: number | null;
+  selectedSplitMember: number | null;
   onGoal: (id: number | null) => void;
   onLoan: (id: number | null) => void;
   onSub: (id: number | null) => void;
+  onSplitMember: (id: number | null) => void;
   colors: any;
   currency: string;
+  txType: 'debit' | 'credit' | 'transfer';
 }
 
 export const EntityLinker = ({
-  goals, loans, subscriptions,
-  selectedGoal, selectedLoan, selectedSub,
-  onGoal, onLoan, onSub,
-  colors, currency,
+  goals, loans, subscriptions, splitMembers,
+  selectedGoal, selectedLoan, selectedSub, selectedSplitMember,
+  onGoal, onLoan, onSub, onSplitMember,
+  colors, currency, txType,
 }: EntityLinkerProps) => {
-  const [openPicker, setOpenPicker] = useState<'goal' | 'loan' | 'sub' | null>(null);
+  const [openPicker, setOpenPicker] = useState<'goal' | 'loan' | 'sub' | 'split' | null>(null);
 
-  const toggle = (type: 'goal' | 'loan' | 'sub') => {
+  const toggle = (type: 'goal' | 'loan' | 'sub' | 'split') => {
     setOpenPicker(prev => prev === type ? null : type);
     Haptics.selectionAsync();
   };
@@ -74,27 +80,47 @@ export const EntityLinker = ({
   const selectedGoalObj = goals.find(g => g.id === selectedGoal);
   const selectedLoanObj = loans.find(l => l.id === selectedLoan);
   const selectedSubObj = subscriptions.find(s => s.id === selectedSub);
+  const selectedSplitMemberObj = splitMembers.find(sm => sm.memberId === selectedSplitMember);
 
   return (
     <View>
       <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
-        {/* Subscription chip */}
-        <TouchableOpacity
-          style={chipStyle(!!selectedSub, '#5AC8FA')}
-          onPress={() => subscriptions.length > 0 ? toggle('sub') : null}
-          disabled={subscriptions.length === 0}
-          activeOpacity={0.7}
-        >
-          <LucideRepeat color={selectedSub ? '#5AC8FA' : colors.secondary} size={14} />
-          <ThemedText style={{ color: selectedSub ? '#5AC8FA' : colors.secondary, fontSize: 12, fontWeight: 'bold', flex: 1 }} numberOfLines={1}>
-            {selectedSubObj ? selectedSubObj.name : subscriptions.length > 0 ? 'Subscription' : 'No Subs'}
-          </ThemedText>
-          {subscriptions.length > 0 && (
-            openPicker === 'sub'
-              ? <LucideChevronUp color={colors.secondary} size={12} />
-              : <LucideChevronDown color={colors.secondary} size={12} />
-          )}
-        </TouchableOpacity>
+        {/* Subscription chip or Split Repayment chip */}
+        {txType === 'credit' ? (
+          <TouchableOpacity
+            style={chipStyle(!!selectedSplitMember, '#BF5AF2')}
+            onPress={() => splitMembers.length > 0 ? toggle('split') : null}
+            disabled={splitMembers.length === 0}
+            activeOpacity={0.7}
+          >
+            <LucideUsers color={selectedSplitMember ? '#BF5AF2' : colors.secondary} size={14} />
+            <ThemedText style={{ color: selectedSplitMember ? '#BF5AF2' : colors.secondary, fontSize: 12, fontWeight: 'bold', flex: 1 }} numberOfLines={1}>
+              {selectedSplitMemberObj ? selectedSplitMemberObj.memberName : splitMembers.length > 0 ? 'Split Repay' : 'No Splits'}
+            </ThemedText>
+            {splitMembers.length > 0 && (
+              openPicker === 'split'
+                ? <LucideChevronUp color={colors.secondary} size={12} />
+                : <LucideChevronDown color={colors.secondary} size={12} />
+            )}
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={chipStyle(!!selectedSub, '#5AC8FA')}
+            onPress={() => subscriptions.length > 0 ? toggle('sub') : null}
+            disabled={subscriptions.length === 0}
+            activeOpacity={0.7}
+          >
+            <LucideRepeat color={selectedSub ? '#5AC8FA' : colors.secondary} size={14} />
+            <ThemedText style={{ color: selectedSub ? '#5AC8FA' : colors.secondary, fontSize: 12, fontWeight: 'bold', flex: 1 }} numberOfLines={1}>
+              {selectedSubObj ? selectedSubObj.name : subscriptions.length > 0 ? 'Subscription' : 'No Subs'}
+            </ThemedText>
+            {subscriptions.length > 0 && (
+              openPicker === 'sub'
+                ? <LucideChevronUp color={colors.secondary} size={12} />
+                : <LucideChevronDown color={colors.secondary} size={12} />
+            )}
+          </TouchableOpacity>
+        )}
 
         {/* Goal chip */}
         <TouchableOpacity
@@ -163,6 +189,43 @@ export const EntityLinker = ({
               {selectedSub === sub.id && <LucideCheck color="#5AC8FA" size={15} />}
             </TouchableOpacity>
           ))}
+        </View>
+      )}
+
+      {/* Split Repayment picker */}
+      {openPicker === 'split' && (
+        <View style={{ backgroundColor: colors.surface, borderRadius: 14, borderWidth: 1, borderColor: '#BF5AF240', marginBottom: 8, overflow: 'hidden' }}>
+          <TouchableOpacity
+            style={{ padding: 12, borderBottomWidth: 1, borderBottomColor: colors.border }}
+            onPress={() => { onSplitMember(null); setOpenPicker(null); }}
+          >
+            <ThemedText style={{ color: colors.secondary, fontSize: 13 }}>None — unlink split repayment</ThemedText>
+          </TouchableOpacity>
+          {splitMembers.map(member => {
+            const remaining = member.memberShare - member.memberPaidAmount;
+            return (
+              <TouchableOpacity
+                key={member.memberId}
+                style={{
+                  flexDirection: 'row', alignItems: 'center', padding: 12, gap: 10,
+                  borderBottomWidth: 1, borderBottomColor: colors.border,
+                  backgroundColor: selectedSplitMember === member.memberId ? '#BF5AF212' : 'transparent',
+                }}
+                onPress={() => { onSplitMember(member.memberId); setOpenPicker(null); }}
+              >
+                <LucideUsers color={selectedSplitMember === member.memberId ? '#BF5AF2' : colors.secondary} size={15} />
+                <View style={{ flex: 1 }}>
+                  <ThemedText style={{ fontWeight: 'bold', color: selectedSplitMember === member.memberId ? '#BF5AF2' : colors.primary }}>
+                    {member.memberName} — {member.splitTitle}
+                  </ThemedText>
+                  <ThemedText style={{ fontSize: 11, color: colors.secondary }}>
+                    Owes: {currency}{remaining.toLocaleString('en-IN')} (Share: {currency}{member.memberShare.toLocaleString('en-IN')})
+                  </ThemedText>
+                </View>
+                {selectedSplitMember === member.memberId && <LucideCheck color="#BF5AF2" size={15} />}
+              </TouchableOpacity>
+            );
+          })}
         </View>
       )}
 
@@ -244,6 +307,14 @@ export const EntityLinker = ({
           </ThemedText>
         </View>
       )}
+      {selectedSplitMemberObj && (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#BF5AF210', borderRadius: 10, padding: 10, marginBottom: 6 }}>
+          <LucideUsers color="#BF5AF2" size={13} />
+          <ThemedText style={{ fontSize: 12, color: '#BF5AF2', flex: 1 }}>
+            Linked to split repayment for "{selectedSplitMemberObj.splitTitle}" from {selectedSplitMemberObj.memberName}.
+          </ThemedText>
+        </View>
+      )}
       {selectedGoalObj && (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#34C75910', borderRadius: 10, padding: 10, marginBottom: 6 }}>
           <LucideTarget color="#34C759" size={13} />
@@ -318,6 +389,9 @@ export const AddTransactionScreen = ({ navigation: navProp, route }: any) => {
   // Personal Debt state
   const [isBorrowed, setIsBorrowed] = useState(false);
 
+  const [pendingSplitMembers, setPendingSplitMembers] = useState<PendingSplitMember[]>([]);
+  const [selectedSplitMember, setSelectedSplitMember] = useState<number | null>(prefill.splitMemberId ?? null);
+
 
   const themedStyles = useMemo(() => createThemedStyles(colors, isDark), [colors, isDark]);
   const refreshCategories = () => {
@@ -358,12 +432,14 @@ export const AddTransactionScreen = ({ navigation: navProp, route }: any) => {
       getGoals(true),
       getLoans(true),
       getSubscriptions(true),
-    ]).then(([cats, accs, gs, ls, ss]) => {
+      getPendingSplitMembers(),
+    ]).then(([cats, accs, gs, ls, ss, sms]) => {
       setCategories(cats);
       setAccounts(accs);
       setGoals(gs);
       setLoans(ls);
       setSubscriptions(ss);
+      setPendingSplitMembers(sms);
 
       const otherMatch = cats.find(c => c.name === 'Other' && (
         type === 'transfer' ? c.type === 'transfer' :
@@ -387,6 +463,24 @@ export const AddTransactionScreen = ({ navigation: navProp, route }: any) => {
       }
     });
   }, []);
+
+  // Auto-populate when split member selected
+  const handleSplitMemberSelect = (id: number | null) => {
+    setSelectedSub(null);
+    setSelectedGoal(null);
+    setSelectedLoan(null);
+    setSelectedSplitMember(id);
+    if (!id) return;
+    const member = pendingSplitMembers.find(sm => sm.memberId === id);
+    if (!member) return;
+    const remaining = member.memberShare - member.memberPaidAmount;
+    if (remaining > 0) {
+      setAmount(String(remaining));
+    }
+    setMerchant(`${member.memberName} — ${member.splitTitle}`);
+    setCategory('Split');
+    setNotes(`Split repayment from ${member.memberName}`);
+  };
 
   // Auto-populate when subscription selected
   const handleSubSelect = (id: number | null) => {
@@ -601,6 +695,7 @@ export const AddTransactionScreen = ({ navigation: navProp, route }: any) => {
       loanId: selectedLoan || undefined,
       subscriptionId: selectedSub || undefined,
       tags: tags.length > 0 ? tags : undefined,
+      splitMemberId: selectedSplitMember || undefined,
     });
 
     if (splitEnabled && type === 'debit') {
@@ -831,14 +926,18 @@ export const AddTransactionScreen = ({ navigation: navProp, route }: any) => {
                 goals={goals}
                 loans={loans}
                 subscriptions={subscriptions}
+                splitMembers={pendingSplitMembers}
                 selectedGoal={selectedGoal}
                 selectedLoan={selectedLoan}
                 selectedSub={selectedSub}
+                selectedSplitMember={selectedSplitMember}
                 onGoal={handleGoalSelect}
                 onLoan={handleLoanSelect}
                 onSub={handleSubSelect}
+                onSplitMember={handleSplitMemberSelect}
                 colors={colors}
                 currency={preferences.currency}
+                txType={type}
               />
             </View>
 

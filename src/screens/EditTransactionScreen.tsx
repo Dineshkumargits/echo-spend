@@ -25,6 +25,8 @@ import {
   createSplit,
   updateSplit,
   deleteSplit,
+  getPendingSplitMembers,
+  PendingSplitMember,
 } from '../services/database';
 import { useTheme } from '../theme/ThemeProvider';
 import { useStore } from '../store/useStore';
@@ -64,6 +66,8 @@ export const EditTransactionScreen = () => {
   const [selectedLoan, setSelectedLoan] = useState<number | null>(transaction.loanId || null);
   const [selectedSub, setSelectedSub] = useState<number | null>(transaction.subscriptionId || null);
   const [isBorrowed, setIsBorrowed] = useState(transaction.category === 'Debt'); // Simple heuristic
+  const [pendingSplitMembers, setPendingSplitMembers] = useState<PendingSplitMember[]>([]);
+  const [selectedSplitMember, setSelectedSplitMember] = useState<number | null>(transaction.splitMemberId || null);
 
   const [date, setDate] = useState(new Date(transaction.date));
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -127,12 +131,14 @@ export const EditTransactionScreen = () => {
       getLoans(true),
       getSubscriptions(true),
       getSplitByTransactionId(transaction.id),
-    ]).then(([cats, accs, gs, ls, ss, splitData]) => {
+      getPendingSplitMembers(transaction.id),
+    ]).then(([cats, accs, gs, ls, ss, splitData, sms]) => {
       setCategories(cats);
       setAccounts(accs);
       setGoals(gs);
       setLoans(ls);
       setSubscriptions(ss);
+      setPendingSplitMembers(sms);
 
       if (splitData) {
         setExistingSplitId(splitData.split.id);
@@ -164,6 +170,23 @@ export const EditTransactionScreen = () => {
       }
     });
   }, [transaction.id]);
+
+  const handleSplitMemberSelect = (id: number | null) => {
+    setSelectedSub(null);
+    setSelectedGoal(null);
+    setSelectedLoan(null);
+    setSelectedSplitMember(id);
+    if (!id) return;
+    const member = pendingSplitMembers.find(sm => sm.memberId === id);
+    if (!member) return;
+    const remaining = member.memberShare - member.memberPaidAmount;
+    if (remaining > 0) {
+      setAmount(String(remaining));
+    }
+    setMerchant(`${member.memberName} — ${member.splitTitle}`);
+    setCategory('Split');
+    setNotes(`Split repayment from ${member.memberName}`);
+  };
 
   useEffect(() => {
     if (type !== 'debit') {
@@ -359,6 +382,7 @@ export const EditTransactionScreen = () => {
         loanId: selectedLoan || undefined,
         subscriptionId: selectedSub || undefined,
         tags: tags.length > 0 ? tags : undefined,
+        splitMemberId: selectedSplitMember || undefined,
       });
 
       if (shouldDeleteSplit && existingSplitId !== null) {
@@ -645,14 +669,18 @@ export const EditTransactionScreen = () => {
                 goals={goals}
                 loans={loans}
                 subscriptions={subscriptions}
+                splitMembers={pendingSplitMembers}
                 selectedGoal={selectedGoal}
                 selectedLoan={selectedLoan}
                 selectedSub={selectedSub}
+                selectedSplitMember={selectedSplitMember}
                 onGoal={handleGoalSelect}
                 onLoan={handleLoanSelect}
                 onSub={handleSubSelect}
+                onSplitMember={handleSplitMemberSelect}
                 colors={colors}
                 currency={preferences.currency}
+                txType={type}
               />
             </View>
 

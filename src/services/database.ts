@@ -809,6 +809,36 @@ const applyTransactionImpact = async (tx: Omit<Transaction, 'id'> | Transaction,
       );
     }
   }
+
+  // 5. Split Repayment — update split member status if linked
+  if ((tx as any).splitMemberId) {
+    const memberId = (tx as any).splitMemberId;
+    const sumResult = await db.getFirstAsync<{ sum: number }>(
+      'SELECT SUM(amount) AS sum FROM transactions WHERE splitMemberId = ?',
+      memberId
+    );
+    const totalPaid = sumResult?.sum ?? 0;
+    const member = await db.getFirstAsync<{ share: number }>('SELECT share FROM split_members WHERE id = ?', memberId);
+    if (member) {
+      const isPaid = totalPaid >= member.share ? 1 : 0;
+      let paidDate: string | null = null;
+      let repaidToAccountId: number | null = null;
+      if (totalPaid > 0) {
+        const latestTx = await db.getFirstAsync<any>(
+          'SELECT date, accountId FROM transactions WHERE splitMemberId = ? ORDER BY date DESC, id DESC LIMIT 1',
+          memberId
+        );
+        if (latestTx) {
+          paidDate = latestTx.date.split('T')[0];
+          repaidToAccountId = latestTx.accountId;
+        }
+      }
+      await db.runAsync(
+        'UPDATE split_members SET isPaid = ?, paidDate = ?, repaidToAccountId = ? WHERE id = ?',
+        isPaid, paidDate, repaidToAccountId, memberId
+      );
+    }
+  }
 };
 
 /** Internal helper to revert impact */
@@ -2386,4 +2416,42 @@ export const getSplitByTransactionId = async (transactionId: number): Promise<{ 
   const split = await db.getFirstAsync<Split>('SELECT * FROM splits WHERE transactionId = ?', transactionId);
   if (!split) return null;
   return getSplitById(split.id);
+};
+
+export interface PendingSplitMember {
+  memberId: number;
+  memberName: string;
+  memberShare: number;
+  memberPaidAmount: number;
+  splitId: number;
+  splitTitle: string;
+  splitDate: string;
+}
+
+export const getPendingSplitMembers = async (excludeTxId?: number): Promise<PendingSplitMember[]> => {
+  let query = `
+    SELECT sm.id AS memberId, sm.name AS memberName, sm.share AS memberShare,
+           s.id AS splitId, s.title AS splitTitle, s.date AS splitDate,
+           COALESCE((SELECT SUM(t.amount) FROM transactions t WHERE t.splitMemberId = sm.id), 0) AS memberPaidAmount
+    FROM split_members sm
+    JOIN splits s ON sm.splitId = s.id
+    WHERE sm.isMe = 0 AND (sm.isPaid = 0
+  `;
+  const params: any[] = [];
+  if (excludeTxId !== undefined) {
+    query += ` OR sm.id = (SELECT splitMemberId FROM transactions WHERE id = ?)`;
+    params.push(excludeTxId);
+  }
+  query += `) ORDER BY s.date DESC, sm.id ASC`;
+  
+  const rows = await db.getAllAsync<any>(query, ...params);
+  return rows.map(r => ({
+    memberId: r.memberId,
+    memberName: r.memberName,
+    memberShare: r.memberShare,
+    memberPaidAmount: r.memberPaidAmount ?? 0,
+    splitId: r.splitId,
+    splitTitle: r.splitTitle,
+    splitDate: r.splitDate,
+  }));
 };
