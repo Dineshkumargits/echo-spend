@@ -6,7 +6,7 @@ import {
   LucidePlus, LucideTrendingUp, LucideWallet, LucideSearch,
   LucidePieChart, LucideTarget, LucideLandmark, LucideRepeat,
   LucideBrain, LucidePlay, LucidePause, LucideX, LucideRefreshCcw,
-  LucideSparkles,
+  LucideSparkles, LucideCreditCard, LucideCoins,
 } from 'lucide-react-native';
 import { renderCategoryIcon } from '../components/CategoryManager';
 import { FlashList } from '@shopify/flash-list';
@@ -300,7 +300,19 @@ const DashboardScreen = ({ navigation }: any) => {
                 >
                   <View className="flex-row justify-between items-start mb-5">
                     <View className="w-8 h-8 rounded-full items-center justify-center" style={{ backgroundColor: `${colors.accent}20` }}>
-                      <LucideWallet color={colors.accent} size={16} />
+                      {(() => {
+                        switch (acc.accountType) {
+                          case 'credit_card':
+                            return <LucideCreditCard color={colors.accent} size={16} />;
+                          case 'cash':
+                            return <LucideCoins color={colors.accent} size={16} />;
+                          case 'wallet':
+                            return <LucideWallet color={colors.accent} size={16} />;
+                          case 'bank':
+                          default:
+                            return <LucideLandmark color={colors.accent} size={16} />;
+                        }
+                      })()}
                     </View>
                     <View className="px-2 py-0.5 rounded-full" style={{ backgroundColor: colors.border }}>
                       <ThemedText type="secondary" className="text-[9px] font-bold uppercase">
