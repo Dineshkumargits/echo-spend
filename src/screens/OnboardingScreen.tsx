@@ -50,20 +50,26 @@ const WelcomeStep = ({ onNext }: { onNext: () => void }) => {
   );
 };
 
-// ─── Step 2: Currency & Salary Day ───────────────────────────────────────────
-
-const COMMON_CURRENCIES = ['₹', '$', '€', '£', '¥', '₩', 'A$', 'S$', 'AED'];
+// ─── Step 2: Preferences ─────────────────────────────────────────────────────
 
 const PreferencesStep = ({
-  currency, setCurrency,
+  budget, setBudget,
   salaryDay, setSalaryDay,
-  onNext,
+  theme, setTheme,
+  onFinish,
 }: {
-  currency: string; setCurrency: (c: string) => void;
+  budget: string; setBudget: (b: string) => void;
   salaryDay: string; setSalaryDay: (d: string) => void;
-  onNext: () => void;
+  theme: 'dark' | 'light' | 'system'; setTheme: (t: 'dark' | 'light' | 'system') => void;
+  onFinish: () => void;
 }) => {
   const { colors } = useTheme();
+
+  const THEMES: { key: 'dark' | 'light' | 'system'; label: string; icon: React.ReactNode }[] = [
+    { key: 'dark', label: 'Dark', icon: <LucideMoon size={16} color={theme === 'dark' ? '#fff' : colors.secondary} /> },
+    { key: 'light', label: 'Light', icon: <LucideSun size={16} color={theme === 'light' ? '#fff' : colors.secondary} /> },
+    { key: 'system', label: 'System', icon: <LucideMonitor size={16} color={theme === 'system' ? '#fff' : colors.secondary} /> },
+  ];
 
   return (
     <KeyboardAvoidingView
@@ -76,48 +82,26 @@ const PreferencesStep = ({
           animate={{ opacity: 1, translateY: 0 }}
           transition={{ type: 'timing', duration: 400 }}
         >
-          <ThemedText className="text-2xl font-bold mt-6 mb-1">Preferences</ThemedText>
-          <ThemedText type="secondary" className="mb-8">Set your currency and pay cycle.</ThemedText>
+          <ThemedText className="text-2xl font-bold mt-6 mb-1">Set Preferences</ThemedText>
+          <ThemedText type="secondary" className="mb-8">Configure your budget, cycle, and app theme.</ThemedText>
 
-          {/* Currency */}
+          {/* Monthly budget */}
           <ThemedText type="secondary" className="text-xs font-bold uppercase tracking-widest mb-3">
-            Currency
+            Monthly Budget (₹)
           </ThemedText>
-          <View className="flex-row flex-wrap gap-2 mb-6">
-            {COMMON_CURRENCIES.map(c => (
-              <TouchableOpacity
-                key={c}
-                onPress={() => { Haptics.selectionAsync(); setCurrency(c); }}
-                className="px-4 py-2 rounded-full border"
-                style={{
-                  backgroundColor: currency === c ? colors.accent : 'transparent',
-                  borderColor: currency === c ? colors.accent : colors.border,
-                }}
-              >
-                <ThemedText
-                  className="font-bold"
-                  style={{ color: currency === c ? '#fff' : colors.primary }}
-                >
-                  {c}
-                </ThemedText>
-              </TouchableOpacity>
-            ))}
-            {/* Custom currency input */}
-            <TextInput
-              value={COMMON_CURRENCIES.includes(currency) ? '' : currency}
-              onChangeText={v => v && setCurrency(v.trim())}
-              placeholder="Other"
-              placeholderTextColor={colors.muted}
-              style={{
-                paddingHorizontal: 16, paddingVertical: 8,
-                borderRadius: 100, borderWidth: 1,
-                borderColor: !COMMON_CURRENCIES.includes(currency) && currency ? colors.accent : colors.border,
-                color: colors.primary,
-                minWidth: 64, textAlign: 'center',
-              }}
-              maxLength={4}
-            />
-          </View>
+          <TextInput
+            value={budget}
+            onChangeText={setBudget}
+            keyboardType="number-pad"
+            placeholder="50000"
+            placeholderTextColor={colors.muted}
+            style={{
+              padding: 16, borderRadius: 12, borderWidth: 1,
+              borderColor: colors.border, color: colors.primary,
+              backgroundColor: colors.translucent,
+              fontSize: 28, fontWeight: 'bold', marginBottom: 16,
+            }}
+          />
 
           {/* Salary day */}
           <ThemedText type="secondary" className="text-xs font-bold uppercase tracking-widest mb-1">
@@ -126,7 +110,7 @@ const PreferencesStep = ({
           <ThemedText type="secondary" className="text-xs mb-3">
             Day of month your salary arrives — used to calculate monthly spend cycles.
           </ThemedText>
-          <View className="flex-row items-center gap-3">
+          <View className="flex-row items-center gap-3 mb-8">
             <LucideCalendar color={colors.secondary} size={18} />
             <TextInput
               value={salaryDay}
@@ -147,79 +131,6 @@ const PreferencesStep = ({
             />
             <ThemedText type="secondary" className="text-sm">of each month</ThemedText>
           </View>
-          <ThemedText type="secondary" className="text-xs mt-1 mb-10">(1–28)</ThemedText>
-        </MotiView>
-      </ScrollView>
-
-      <View className="px-6 pb-8">
-        <TouchableOpacity
-          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); onNext(); }}
-          className="flex-row items-center justify-center gap-3 py-4 rounded-full"
-          style={{ backgroundColor: colors.accent }}
-        >
-          <ThemedText className="font-bold text-base" style={{ color: '#fff' }}>Continue</ThemedText>
-          <LucideArrowRight color="#fff" size={18} />
-        </TouchableOpacity>
-      </View>
-    </KeyboardAvoidingView>
-  );
-};
-
-// ─── Step 3: Monthly Budget ───────────────────────────────────────────────────
-
-const BudgetStep = ({
-  currency,
-  budget, setBudget,
-  theme, setTheme,
-  onFinish,
-}: {
-  currency: string;
-  budget: string; setBudget: (b: string) => void;
-  theme: 'dark' | 'light' | 'system'; setTheme: (t: 'dark' | 'light' | 'system') => void;
-  onFinish: () => void;
-}) => {
-  const { colors } = useTheme();
-
-  const THEMES: { key: 'dark' | 'light' | 'system'; label: string; icon: React.ReactNode }[] = [
-    { key: 'dark', label: 'Dark', icon: <LucideMoon size={16} color={theme === 'dark' ? '#fff' : colors.secondary} /> },
-    { key: 'light', label: 'Light', icon: <LucideSun size={16} color={theme === 'light' ? '#fff' : colors.secondary} /> },
-    { key: 'system', label: 'System', icon: <LucideMonitor size={16} color={theme === 'system' ? '#fff' : colors.secondary} /> },
-  ];
-
-  return (
-    <KeyboardAvoidingView
-      className="flex-1"
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <ScrollView className="flex-1 px-6" showsVerticalScrollIndicator={false}>
-        <MotiView
-          from={{ opacity: 0, translateY: 20 }}
-          animate={{ opacity: 1, translateY: 0 }}
-          transition={{ type: 'timing', duration: 400 }}
-        >
-          <ThemedText className="text-2xl font-bold mt-6 mb-1">Budget & Theme</ThemedText>
-          <ThemedText type="secondary" className="mb-8">Set a monthly spending limit and choose your look.</ThemedText>
-
-          {/* Monthly budget */}
-          <ThemedText type="secondary" className="text-xs font-bold uppercase tracking-widest mb-3">
-            Monthly Budget ({currency})
-          </ThemedText>
-          <TextInput
-            value={budget}
-            onChangeText={setBudget}
-            keyboardType="number-pad"
-            placeholder="50000"
-            placeholderTextColor={colors.muted}
-            style={{
-              padding: 16, borderRadius: 12, borderWidth: 1,
-              borderColor: colors.border, color: colors.primary,
-              backgroundColor: colors.translucent,
-              fontSize: 28, fontWeight: 'bold', marginBottom: 6,
-            }}
-          />
-          <ThemedText type="secondary" className="text-xs mb-8">
-            You can change this anytime in Settings.
-          </ThemedText>
 
           {/* Theme */}
           <ThemedText type="secondary" className="text-xs font-bold uppercase tracking-widest mb-3">
@@ -463,15 +374,14 @@ const OnboardingScreen = () => {
   const { preferences, completeOnboarding, setCurrency, setSalaryDay, setMonthlyBudget, setTheme } = useStore();
 
   const [step, setStep] = useState(0);
-  const [currency, setCurrencyLocal] = useState(preferences.currency ?? '₹');
   const [salaryDay, setSalaryDayLocal] = useState(String(preferences.salaryDay ?? 1));
   const [budget, setBudgetLocal] = useState(String(preferences.monthlyBudget ?? 50000));
   const [theme, setThemeLocal] = useState<'dark' | 'light' | 'system'>(preferences.theme ?? 'dark');
 
-  const TOTAL_STEPS = 5;
+  const TOTAL_STEPS = 4;
 
   const savePreferences = () => {
-    setCurrency(currency);
+    setCurrency('₹');
     setSalaryDay(parseInt(salaryDay) || 1);
     setMonthlyBudget(parseFloat(budget) || 50000);
     setTheme(theme);
@@ -484,23 +394,16 @@ const OnboardingScreen = () => {
       {step === 0 && <WelcomeStep onNext={() => setStep(1)} />}
       {step === 1 && (
         <PreferencesStep
-          currency={currency} setCurrency={setCurrencyLocal}
+          budget={budget} setBudget={setBudgetLocal}
           salaryDay={salaryDay} setSalaryDay={setSalaryDayLocal}
-          onNext={() => setStep(2)}
+          theme={theme} setTheme={setThemeLocal}
+          onFinish={() => { savePreferences(); setStep(2); }}
         />
       )}
       {step === 2 && (
-        <BudgetStep
-          currency={currency}
-          budget={budget} setBudget={setBudgetLocal}
-          theme={theme} setTheme={setThemeLocal}
-          onFinish={() => { savePreferences(); setStep(3); }}
-        />
+        <AIModelSetupStep onComplete={() => setStep(3)} />
       )}
       {step === 3 && (
-        <AIModelSetupStep onComplete={() => setStep(4)} />
-      )}
-      {step === 4 && (
         <ProTipsStep onFinish={completeOnboarding} />
       )}
     </ThemedSafeAreaView>
