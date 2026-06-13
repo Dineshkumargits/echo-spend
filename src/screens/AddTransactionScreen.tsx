@@ -90,6 +90,8 @@ interface EntityLinkerProps {
   prefillAmount?: string;
   prefillCategory?: string;
   prefillAccountId?: number | null;
+  /** Called just before navigating away to create a new entity from the picker */
+  onNavigatingToCreate?: (type: 'sub' | 'goal') => void;
 }
 
 export const EntityLinker = ({
@@ -112,6 +114,7 @@ export const EntityLinker = ({
   prefillAmount,
   prefillCategory,
   prefillAccountId,
+  onNavigatingToCreate,
 }: EntityLinkerProps) => {
   const [openPicker, setOpenPicker] = useState<
     "goal" | "loan" | "sub" | "split" | null
@@ -309,6 +312,7 @@ export const EntityLinker = ({
             }}
             onPress={() => {
               setOpenPicker(null);
+              onNavigatingToCreate?.('sub');
               navigation.navigate("AddSubscription", {
                 prefillName,
                 prefillAmount,
@@ -504,6 +508,7 @@ export const EntityLinker = ({
             }}
             onPress={() => {
               setOpenPicker(null);
+              onNavigatingToCreate?.('goal');
               navigation.navigate("AddGoal", {
                 prefillName,
                 prefillAmount,
@@ -860,16 +865,11 @@ export const AddTransactionScreen = ({ navigation: navProp, route }: any) => {
   );
 
   const isFirstLoadRef = React.useRef(true);
+  // Tracks when the user explicitly navigated to create a new sub or goal from the EntityLinker.
+  // Auto-link only fires on focus return when this flag is set.
+  const pendingLinkTypeRef = React.useRef<'sub' | 'goal' | null>(null);
   const goalsRef = React.useRef<Goal[]>([]);
   const subsRef = React.useRef<Subscription[]>([]);
-
-  useEffect(() => {
-    goalsRef.current = goals;
-  }, [goals]);
-
-  useEffect(() => {
-    subsRef.current = subscriptions;
-  }, [subscriptions]);
 
   const themedStyles = useMemo(
     () => createThemedStyles(colors, isDark),
@@ -920,23 +920,29 @@ export const AddTransactionScreen = ({ navigation: navProp, route }: any) => {
       ]).then(([cats, accs, gs, ls, ss, sms]) => {
         setCategories(cats);
         setAccounts(accs);
-        // Auto-select newly created goal
-        if (!isFirstLoadRef.current && gs.length > goalsRef.current.length) {
-          const newGoal = gs.find(g => !goalsRef.current.some(oldG => oldG.id === g.id));
-          if (newGoal) {
-            handleGoalSelect(newGoal.id);
+
+        // Smart auto-link: only fires when the user explicitly navigated from
+        // the EntityLinker to create a new sub or goal (pendingLinkTypeRef is set).
+        if (!isFirstLoadRef.current && pendingLinkTypeRef.current === 'goal') {
+          if (gs.length > goalsRef.current.length) {
+            const newGoal = gs.find(g => !goalsRef.current.some(old => old.id === g.id));
+            if (newGoal) handleGoalSelect(newGoal.id);
           }
+          pendingLinkTypeRef.current = null;
+        } else if (!isFirstLoadRef.current && pendingLinkTypeRef.current === 'sub') {
+          if (ss.length > subsRef.current.length) {
+            const newSub = ss.find(s => !subsRef.current.some(old => old.id === s.id));
+            if (newSub) handleSubSelect(newSub.id);
+          }
+          pendingLinkTypeRef.current = null;
         }
+
+        // Update tracking refs with the latest lists
+        goalsRef.current = gs;
+        subsRef.current = ss;
+
         setGoals(gs);
         setLoans(ls);
-
-        // Auto-select newly created subscription
-        if (!isFirstLoadRef.current && ss.length > subsRef.current.length) {
-          const newSub = ss.find(s => !subsRef.current.some(oldS => oldS.id === s.id));
-          if (newSub) {
-            handleSubSelect(newSub.id);
-          }
-        }
         setSubscriptions(ss);
         setPendingSplitMembers(sms);
 
@@ -1736,6 +1742,7 @@ export const AddTransactionScreen = ({ navigation: navProp, route }: any) => {
                 prefillAmount={amount}
                 prefillCategory={category}
                 prefillAccountId={selectedAccount}
+                onNavigatingToCreate={(type) => { pendingLinkTypeRef.current = type; }}
               />
               {(selectedLoan === -1 || selectedLoan === -2) && (
                 <View style={{ marginTop: 12 }}>

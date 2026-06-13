@@ -659,25 +659,27 @@ export const FinancesScreen = ({ navigation }: any) => {
           </View>
           <View style={{ alignItems: 'flex-end', gap: 4 }}>
             <ThemedText style={{ color, fontSize: 11, fontWeight: 'bold' }}>{pct}% {isLent ? 'COLLECTED' : 'REPAID'}</ThemedText>
-            <TouchableOpacity
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: `${color}20`, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 }}
-              onPress={() => {
-                Haptics.selectionAsync();
-                setQuickAction({
-                  type: 'payLoan',
-                  id: loan.id,
-                  label: isLent ? `Record repayment from ${loan.lender}` : `Pay EMI to ${loan.lender}`,
-                  defaultAmount: loan.emiAmount || 0,
-                  accentColor: color,
-                  accountId: loan.linkedAccountId,
-                });
-              }}
-            >
-              <LucideBanknote color={color} size={12} />
-              <ThemedText style={{ color, fontWeight: 'bold', fontSize: 11 }}>
-                {isLent ? 'Record Repayment' : 'Pay EMI'}
-              </ThemedText>
-            </TouchableOpacity>
+            {loan.remainingAmount > 0 && (
+              <TouchableOpacity
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: `${color}20`, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 }}
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  setQuickAction({
+                    type: 'payLoan',
+                    id: loan.id,
+                    label: isLent ? `Record repayment from ${loan.lender}` : `Pay EMI to ${loan.lender}`,
+                    defaultAmount: loan.emiAmount || 0,
+                    accentColor: color,
+                    accountId: loan.linkedAccountId,
+                  });
+                }}
+              >
+                <LucideBanknote color={color} size={12} />
+                <ThemedText style={{ color, fontWeight: 'bold', fontSize: 11 }}>
+                  {isLent ? 'Record Repayment' : 'Pay EMI'}
+                </ThemedText>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
 
