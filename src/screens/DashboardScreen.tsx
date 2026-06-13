@@ -359,9 +359,9 @@ const DashboardScreen = ({ navigation }: any) => {
             <View className="flex-1">
               {aiModelStatus === 'not_downloaded' && (
                 <>
-                  <ThemedText className="font-bold text-sm">Unlock Smart SMS Scanning</ThemedText>
+                  <ThemedText className="font-bold text-sm">Unlock Smart Scan AI</ThemedText>
                   <ThemedText type="secondary" className="text-xs mt-1 leading-5">
-                    Download the local AI engine to enable automatic transaction classification. Everything runs 100% privately on your device.
+                    Download the local Smart Scan AI engine to enable automatic transaction classification. Everything runs 100% privately on your device.
                   </ThemedText>
                   <View className="flex-row gap-4 mt-4">
                     <TouchableOpacity
@@ -371,7 +371,7 @@ const DashboardScreen = ({ navigation }: any) => {
                       }}
                       className="px-4 py-2 rounded-lg bg-accent"
                     >
-                      <ThemedText className="text-white font-bold text-xs">Setup AI</ThemedText>
+                      <ThemedText className="text-white font-bold text-xs">Setup Smart Scan AI</ThemedText>
                     </TouchableOpacity>
                     <TouchableOpacity
                       onPress={() => {
@@ -389,7 +389,7 @@ const DashboardScreen = ({ navigation }: any) => {
 
               {aiModelStatus === 'downloading' && (
                 <>
-                  <ThemedText className="font-bold text-sm">Downloading local AI Engine...</ThemedText>
+                  <ThemedText className="font-bold text-sm">Downloading Smart Scan AI...</ThemedText>
                   <View className="mt-3">
                     <View style={{ width: '100%', height: 6, borderRadius: 3, backgroundColor: colors.border, overflow: 'hidden' }}>
                       <MotiView
@@ -420,7 +420,7 @@ const DashboardScreen = ({ navigation }: any) => {
 
               {aiModelStatus === 'error' && (
                 <>
-                  <ThemedText className="font-bold text-sm" style={{ color: colors.danger }}>AI Download Failed</ThemedText>
+                  <ThemedText className="font-bold text-sm" style={{ color: colors.danger }}>Smart Scan AI Download Failed</ThemedText>
                   <ThemedText type="secondary" className="text-xs mt-1">
                     {aiModelProgress > 0 ? `Failed at ${aiModelProgress}%. ` : ''}{aiModelError || 'Please check your connection and try again.'}
                   </ThemedText>
