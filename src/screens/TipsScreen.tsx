@@ -10,6 +10,8 @@ import {
   NativeModules,
   AppState,
   StyleSheet,
+  Alert,
+  PermissionsAndroid,
 } from 'react-native';
 import {
   LucideChevronLeft,
@@ -159,6 +161,63 @@ export const TipsScreen = () => {
     } catch (e: any) {
       notify.error("Failed to open alarm settings", e?.message);
     }
+  };
+
+  const handleAutoSmsScanToggle = async (value: boolean) => {
+    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+    if (!value) {
+      toggleAutoSmsScan();
+      setTimeout(() => registerBackgroundTasks(), 0);
+      return;
+    }
+
+    if (Platform.OS === 'android') {
+      try {
+        const hasSmsPerm = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_SMS);
+        if (!hasSmsPerm) {
+          const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.READ_SMS, {
+            title: 'SMS Permission Required',
+            message: 'Echo Spend needs permission to read financial SMS messages to automatically scan transactions.',
+            buttonPositive: 'Grant',
+            buttonNegative: 'Cancel',
+          });
+          if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+            showCustomAlert('Permission Denied', 'Echo Spend cannot auto-scan transactions without SMS permissions.');
+            return;
+          }
+        }
+      } catch (e) {
+        console.warn('[TipsScreen] Failed to check SMS permission:', e);
+        return;
+      }
+
+      if (BackgroundOptimizationModule) {
+        try {
+          const ignoring = await BackgroundOptimizationModule.isIgnoringBatteryOptimizations();
+          if (!ignoring) {
+            showCustomAlert(
+              "Background Run Required",
+              "To scan SMS messages reliably in the background, Android requires Echo Spend to run unrestricted (whitelisted from battery optimizations). Tap 'Whitelist' to authorize.",
+              [
+                { text: "Cancel", style: "cancel" },
+                {
+                  text: "Whitelist",
+                  onPress: async () => {
+                    await BackgroundOptimizationModule.requestIgnoreBatteryOptimizations();
+                  }
+                }
+              ]
+            );
+            return;
+          }
+        } catch (e) {
+          console.warn('[TipsScreen] Failed to check battery optimization:', e);
+        }
+      }
+    }
+
+    toggleAutoSmsScan();
+    setTimeout(() => registerBackgroundTasks(), 0);
   };
 
   const Row = ({ icon, label, sub, right, onPress, border = true }: any) => (
@@ -331,11 +390,7 @@ export const TipsScreen = () => {
                 <View style={{ justifyContent: 'center' }}>
                   <Switch
                     value={preferences?.autoSmsScan}
-                    onValueChange={() => {
-                      triggerHaptic();
-                      toggleAutoSmsScan();
-                      setTimeout(() => registerBackgroundTasks(), 0);
-                    }}
+                    onValueChange={(val) => handleAutoSmsScanToggle(val)}
                     trackColor={{ true: colors.success }}
                   />
                 </View>

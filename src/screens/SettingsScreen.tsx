@@ -1,5 +1,6 @@
 import { ThemedSafeAreaView, ThemedText } from '../components/ThemedSafeAreaView';
 import React, { useEffect, useState } from 'react';
+import * as Notifications from 'expo-notifications';
 import {
   View,
   ScrollView,
@@ -13,6 +14,7 @@ import {
   Linking,
   NativeModules,
   AppState,
+  PermissionsAndroid,
 } from 'react-native';
 import { MotiView } from 'moti';
 import {
@@ -104,8 +106,17 @@ const SettingsScreen = ({ navigation }: any) => {
 
   const [isBatteryOptimized, setIsBatteryOptimized] = useState(true);
   const [isExactAlarmAllowed, setIsExactAlarmAllowed] = useState(true);
+  const [isNotificationGranted, setIsNotificationGranted] = useState(true);
 
   const checkBackgroundPermissions = async () => {
+    // Check notification permission (all platforms)
+    try {
+      const { status } = await Notifications.getPermissionsAsync();
+      setIsNotificationGranted(status === 'granted');
+    } catch (e) {
+      console.warn('[Settings] Failed to check notification permission:', e);
+    }
+
     if (Platform.OS !== 'android' || !BackgroundOptimizationModule) return;
     try {
       const ignoring = await BackgroundOptimizationModule.isIgnoringBatteryOptimizations();
@@ -197,6 +208,197 @@ const SettingsScreen = ({ navigation }: any) => {
     } catch (e: any) {
       notify.error("Failed to open exact alarm settings", e?.message);
     }
+  };
+
+  const handleSyncScheduleChange = async (schedule: 'none' | 'daily' | 'weekly') => {
+    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+    if (schedule === 'none') {
+      setSyncSchedule('none');
+      setTimeout(() => registerBackgroundTasks(), 0);
+      return;
+    }
+
+    if (Platform.OS === 'android' && BackgroundOptimizationModule) {
+      try {
+        const alarmAllowed = await BackgroundOptimizationModule.isExactAlarmAllowed();
+        if (!alarmAllowed) {
+          Alert.alert(
+            "Exact Alarm Permission Required",
+            "To run automatic backups precisely at your scheduled time, Echo Spend needs the 'Alarms & Reminders' permission. Tap 'Open Settings' to enable it.",
+            [
+              { text: "Cancel", style: "cancel" },
+              {
+                text: "Open Settings",
+                onPress: async () => {
+                  await BackgroundOptimizationModule.openExactAlarmSettings();
+                }
+              }
+            ]
+          );
+          return;
+        }
+      } catch (e) {
+        console.warn('[Settings] Failed to check exact alarm permission:', e);
+      }
+    }
+
+    setSyncSchedule(schedule);
+    setTimeout(() => registerBackgroundTasks(), 0);
+  };
+
+  const handleAutoSmsScanToggle = async (value: boolean) => {
+    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+    if (!value) {
+      toggleAutoSmsScan();
+      setTimeout(() => registerBackgroundTasks(), 0);
+      return;
+    }
+
+    if (Platform.OS === 'android') {
+      try {
+        const hasSmsPerm = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_SMS);
+        if (!hasSmsPerm) {
+          const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.READ_SMS, {
+            title: 'SMS Permission Required',
+            message: 'Echo Spend needs permission to read financial SMS messages to automatically scan transactions.',
+            buttonPositive: 'Grant',
+            buttonNegative: 'Cancel',
+          });
+          if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+            Alert.alert('Permission Denied', 'Echo Spend cannot auto-scan transactions without SMS permissions.');
+            return;
+          }
+        }
+      } catch (e) {
+        console.warn('[Settings] Failed to check SMS permission:', e);
+        return;
+      }
+
+      if (BackgroundOptimizationModule) {
+        try {
+          const ignoring = await BackgroundOptimizationModule.isIgnoringBatteryOptimizations();
+          if (!ignoring) {
+            Alert.alert(
+              "Background Run Required",
+              "To scan SMS messages reliably in the background, Android requires Echo Spend to run unrestricted (whitelisted from battery optimizations). Tap 'Set Unrestricted' to whitelist the app.",
+              [
+                { text: "Cancel", style: "cancel" },
+                {
+                  text: "Set Unrestricted",
+                  onPress: async () => {
+                    await BackgroundOptimizationModule.requestIgnoreBatteryOptimizations();
+                  }
+                }
+              ]
+            );
+            return;
+          }
+        } catch (e) {
+          console.warn('[Settings] Failed to check battery optimization:', e);
+        }
+      }
+    }
+
+    toggleAutoSmsScan();
+    setTimeout(() => registerBackgroundTasks(), 0);
+  };
+
+  const checkNotificationPermission = async (featureName: string) => {
+    try {
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      let finalStatus = existingStatus;
+      if (existingStatus !== 'granted') {
+        const { status } = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
+      }
+
+      if (finalStatus !== 'granted') {
+        Alert.alert(
+          "Notification Permission Required",
+          `To receive ${featureName}, Echo Spend needs permission to show notifications. Please enable notifications in your system settings.`
+        );
+        return false;
+      }
+
+      if (Platform.OS === 'android' && BackgroundOptimizationModule) {
+        const alarmAllowed = await BackgroundOptimizationModule.isExactAlarmAllowed();
+        if (!alarmAllowed) {
+          Alert.alert(
+            "Exact Alarm Permission Required",
+            `To deliver ${featureName} precisely at the scheduled time, Echo Spend needs the 'Alarms & Reminders' permission. Tap 'Open Settings' to enable it.`,
+            [
+              { text: "Cancel", style: "cancel" },
+              {
+                text: "Open Settings",
+                onPress: async () => {
+                  await BackgroundOptimizationModule.openExactAlarmSettings();
+                }
+              }
+            ]
+          );
+          return false;
+        }
+      }
+
+      return true;
+    } catch (e) {
+      console.warn(`[Settings] Failed to check/request permission for ${featureName}:`, e);
+      return false;
+    }
+  };
+
+  const handleDailyReminderToggle = async (value: boolean) => {
+    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+    if (!value) {
+      toggleDailyReminder();
+      await NotificationService.cancelDailyReminder();
+      return;
+    }
+
+    const hasPerm = await checkNotificationPermission("daily expense reminders");
+    if (!hasPerm) return;
+
+    toggleDailyReminder();
+    await NotificationService.scheduleDailyReminder();
+  };
+
+  const handleBudgetAlertsToggle = async (value: boolean) => {
+    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+    if (!value) {
+      toggleBudgetAlerts();
+      return;
+    }
+
+    const hasPerm = await checkNotificationPermission("budget alerts");
+    if (!hasPerm) return;
+
+    toggleBudgetAlerts();
+  };
+
+  const handleRecurringAlertsToggle = async (value: boolean) => {
+    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+    if (!value) {
+      toggleRecurringAlerts();
+      return;
+    }
+
+    const hasPerm = await checkNotificationPermission("bill reminders");
+    if (!hasPerm) return;
+
+    toggleRecurringAlerts();
+  };
+
+  const handleWeeklyDigestToggle = async (value: boolean) => {
+    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+    if (!value) {
+      toggleWeeklyDigest();
+      return;
+    }
+
+    const hasPerm = await checkNotificationPermission("weekly digests");
+    if (!hasPerm) return;
+
+    toggleWeeklyDigest();
   };
   
   const { colors, isDark } = useTheme();
@@ -403,6 +605,8 @@ const SettingsScreen = ({ navigation }: any) => {
     );
   };
 
+  const alertsBlocked = !isNotificationGranted || (Platform.OS === 'android' && !isExactAlarmAllowed);
+
   const Section = ({ title }: { title: string }) => (
     <ThemedText type="secondary" className="text-xs uppercase tracking-widest mb-3 mt-6 ml-1">{title}</ThemedText>
   );
@@ -466,7 +670,7 @@ const SettingsScreen = ({ navigation }: any) => {
                 {(['none', 'daily', 'weekly'] as const).map(s => (
                   <TouchableOpacity
                     key={s}
-                    onPress={() => { setSyncSchedule(s); setTimeout(() => registerBackgroundTasks(), 0); }}
+                    onPress={() => handleSyncScheduleChange(s)}
                     style={[{ flex: 1, padding: 8, alignItems: 'center', borderRadius: 8 }, preferences.syncSchedule === s && { backgroundColor: colors.surface, elevation: 1 }]}
                   >
                     <ThemedText style={{ fontSize: 10, fontWeight: 'bold', color: preferences.syncSchedule === s ? colors.primary : colors.secondary }}>{s.toUpperCase()}</ThemedText>
@@ -612,44 +816,122 @@ const SettingsScreen = ({ navigation }: any) => {
           <Row icon={<LucideTag color={colors.primary} size={20} />} label="Manage Categories" sub="Icons, colors and sub-groups" onPress={() => navigation.navigate('Categories')} />
         </View>
 
-        {/* ── Notifications ── */}
-        <Section title="Alerts" />
+        {/* ── Alerts & Reminders ── */}
+        <Section title="Alerts & Reminders" />
         <View className="rounded-apple-md overflow-hidden" style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
+
+          {/* ── Permission Status Banner ── */}
+          {alertsBlocked && (
+            <View style={{ padding: 16, backgroundColor: `${colors.warning}12`, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+                <LucideAlertTriangle color={colors.warning} size={16} />
+                <ThemedText style={{ fontWeight: '700', fontSize: 13, marginLeft: 8 }}>Permissions Required</ThemedText>
+              </View>
+              <ThemedText type="secondary" style={{ fontSize: 11, lineHeight: 16, marginBottom: 12 }}>
+                To deliver alerts and reminders precisely at the right time, Echo Spend needs the following permissions:
+              </ThemedText>
+
+              {!isNotificationGranted && (
+                <TouchableOpacity
+                  onPress={async () => {
+                    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+                    const { status } = await Notifications.requestPermissionsAsync();
+                    if (status === 'granted') {
+                      setIsNotificationGranted(true);
+                    } else {
+                      Alert.alert(
+                        'Notifications Blocked',
+                        'Echo Spend needs notification permissions to deliver alerts. Since the permission was previously denied, please enable it manually in your device settings.',
+                        [
+                          { text: 'Cancel', style: 'cancel' },
+                          { text: 'Open Settings', onPress: () => Linking.openSettings() },
+                        ]
+                      );
+                    }
+                  }}
+                  activeOpacity={0.7}
+                  style={{
+                    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                    padding: 12, borderRadius: 10, marginBottom: 8,
+                    backgroundColor: colors.surface, borderWidth: 1, borderColor: `${colors.danger}30`,
+                  }}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                    <View style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: `${colors.danger}15`, alignItems: 'center', justifyContent: 'center' }}>
+                      <LucideBell color={colors.danger} size={16} />
+                    </View>
+                    <View style={{ marginLeft: 10, flex: 1 }}>
+                      <ThemedText style={{ fontWeight: '600', fontSize: 12 }}>Notifications</ThemedText>
+                      <ThemedText type="secondary" style={{ fontSize: 10 }}>Show alert banners, badges & sounds</ThemedText>
+                    </View>
+                  </View>
+                  <View style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: colors.accent }}>
+                    <ThemedText style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>ENABLE</ThemedText>
+                  </View>
+                </TouchableOpacity>
+              )}
+
+              {Platform.OS === 'android' && !isExactAlarmAllowed && (
+                <TouchableOpacity
+                  onPress={async () => {
+                    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+                    if (BackgroundOptimizationModule) {
+                      await BackgroundOptimizationModule.openExactAlarmSettings();
+                    }
+                  }}
+                  activeOpacity={0.7}
+                  style={{
+                    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                    padding: 12, borderRadius: 10,
+                    backgroundColor: colors.surface, borderWidth: 1, borderColor: `${colors.danger}30`,
+                  }}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                    <View style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: `${colors.danger}15`, alignItems: 'center', justifyContent: 'center' }}>
+                      <LucideTimer color={colors.danger} size={16} />
+                    </View>
+                    <View style={{ marginLeft: 10, flex: 1 }}>
+                      <ThemedText style={{ fontWeight: '600', fontSize: 12 }}>Alarms & Reminders</ThemedText>
+                      <ThemedText type="secondary" style={{ fontSize: 10 }}>Precise scheduling at exact times</ThemedText>
+                    </View>
+                  </View>
+                  <View style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: colors.accent }}>
+                    <ThemedText style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>ENABLE</ThemedText>
+                  </View>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+
           <Row
-            icon={<LucideBell color={colors.primary} size={20} />}
+            icon={<LucideBell color={alertsBlocked ? colors.secondary : colors.primary} size={20} />}
             label="Budget Alerts"
-            right={<Switch value={preferences.budgetAlerts} onValueChange={toggleBudgetAlerts} trackColor={{ true: colors.success }} />}
+            sub={alertsBlocked ? "⚠ Enable permissions above to activate" : undefined}
+            right={<Switch value={preferences.budgetAlerts} onValueChange={(val) => handleBudgetAlertsToggle(val)} trackColor={{ true: colors.success }} />}
           />
           <Row
-            icon={<LucideBrain color={colors.primary} size={20} />}
+            icon={<LucideBrain color={alertsBlocked ? colors.secondary : colors.primary} size={20} />}
             label="Daily Expense Reminder"
-            sub="9:00 PM reminder to record spends"
+            sub={alertsBlocked ? "⚠ Enable permissions above to activate" : "9:00 PM reminder to record spends"}
             right={
               <Switch 
                 value={preferences.dailyReminder} 
-                onValueChange={() => {
-                  triggerHaptic();
-                  toggleDailyReminder();
-                  // Schedule/Cancel based on the new value (deferred)
-                  if (!preferences.dailyReminder) {
-                    NotificationService.scheduleDailyReminder();
-                  } else {
-                    NotificationService.cancelDailyReminder();
-                  }
-                }} 
+                onValueChange={(val) => handleDailyReminderToggle(val)} 
                 trackColor={{ true: colors.success }} 
               />
             }
           />
           <Row
-            icon={<LucideRefreshCcw color={colors.primary} size={20} />}
+            icon={<LucideRefreshCcw color={alertsBlocked ? colors.secondary : colors.primary} size={20} />}
             label="Bill Reminders"
-            right={<Switch value={preferences.recurringAlerts} onValueChange={toggleRecurringAlerts} trackColor={{ true: colors.success }} />}
+            sub={alertsBlocked ? "⚠ Enable permissions above to activate" : undefined}
+            right={<Switch value={preferences.recurringAlerts} onValueChange={(val) => handleRecurringAlertsToggle(val)} trackColor={{ true: colors.success }} />}
           />
           <Row
-            icon={<LucideDownload color={colors.primary} size={20} />}
+            icon={<LucideDownload color={alertsBlocked ? colors.secondary : colors.primary} size={20} />}
             label="Weekly Digest"
-            right={<Switch value={preferences.weeklyDigest} onValueChange={toggleWeeklyDigest} trackColor={{ true: colors.success }} />}
+            sub={alertsBlocked ? "⚠ Enable permissions above to activate" : undefined}
+            right={<Switch value={preferences.weeklyDigest} onValueChange={(val) => handleWeeklyDigestToggle(val)} trackColor={{ true: colors.success }} />}
           />
         </View>
 
@@ -683,17 +965,24 @@ const SettingsScreen = ({ navigation }: any) => {
             right={
               <Switch
                 value={preferences.autoSmsScan}
-                onValueChange={() => {
-                  triggerHaptic();
-                  toggleAutoSmsScan();
-                  // registerBackgroundTasks reads from store after the toggle commits,
-                  // so defer by one tick to pick up the updated preference value.
-                  setTimeout(() => registerBackgroundTasks(), 0);
-                }}
+                onValueChange={(val) => handleAutoSmsScanToggle(val)}
                 trackColor={{ true: colors.success }}
               />
             }
           />
+          {preferences.autoSmsScan && Platform.OS === 'android' && (
+            <Row
+              icon={<LucideAlertTriangle color={colors.warning} size={18} />}
+              label="Troubleshoot Background Runs"
+              sub="Guide to keep background scans alive on your device"
+              onPress={() => {
+                Linking.openURL('https://dontkillmyapp.com').catch(() => {
+                  notify.error("Could not open troubleshooting URL");
+                });
+              }}
+              right={<LucideChevronRight color={colors.secondary} size={14} />}
+            />
+          )}
           {preferences.autoApproveSmallSpends && (
             <View className="p-4 border-t" style={{ borderTopColor: colors.border }}>
                <ThemedText type="secondary" className="text-[10px] uppercase font-bold mb-2">Threshold Amount ({preferences.currency})</ThemedText>
@@ -883,50 +1172,7 @@ const SettingsScreen = ({ navigation }: any) => {
           </>
         )}
 
-        {/* ── Android Background Tasks (Android Only) ── */}
-        {Platform.OS === 'android' && (
-          <>
-            <Section title="Background Tasks & Sync (Android)" />
-            <View className="rounded-apple-md overflow-hidden mb-24" style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
-              <Row
-                icon={<LucideZap color={isBatteryOptimized ? colors.warning : colors.success} size={20} />}
-                label="Unrestricted Background Run"
-                sub={isBatteryOptimized ? "Restricted — tap to request whitelisting" : "Allowed — app runs freely in background"}
-                onPress={handleBatteryOptimizationPress}
-                right={
-                  <View style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: isBatteryOptimized ? `${colors.warning}20` : `${colors.success}20` }}>
-                    <ThemedText style={{ fontSize: 10, fontWeight: '700', color: isBatteryOptimized ? colors.warning : colors.success }}>
-                      {isBatteryOptimized ? "RESTRICTED" : "UNRESTRICTED"}
-                    </ThemedText>
-                  </View>
-                }
-              />
-              <Row
-                icon={<LucideTimer color={isExactAlarmAllowed ? colors.success : colors.warning} size={20} />}
-                label="Exact Alarm Scheduling"
-                sub={isExactAlarmAllowed ? "Allowed — backups run precisely on time" : "Delayed — tap to grant exact alarm permission"}
-                onPress={handleExactAlarmPress}
-                right={
-                  <View style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: isExactAlarmAllowed ? `${colors.success}20` : `${colors.warning}20` }}>
-                    <ThemedText style={{ fontSize: 10, fontWeight: '700', color: isExactAlarmAllowed ? colors.success : colors.warning }}>
-                      {isExactAlarmAllowed ? "ALLOWED" : "DELAYED"}
-                    </ThemedText>
-                  </View>
-                }
-              />
-              <Row
-                icon={<LucideAlertTriangle color={colors.accent} size={20} />}
-                label="Background Troubleshooting Guide"
-                sub="Guide to keep background tasks alive on OEM devices"
-                onPress={() => {
-                  Linking.openURL('https://dontkillmyapp.com').catch(() => {
-                    notify.error("Could not open troubleshooting URL");
-                  });
-                }}
-              />
-            </View>
-          </>
-        )}
+
       </ScrollView>
       <TourGuideModal visible={showTour} onClose={() => setShowTour(false)} />
       </KeyboardAvoidingView>

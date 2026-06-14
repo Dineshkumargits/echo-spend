@@ -2,7 +2,7 @@ import "./src/global.css";
 import "react-native-reanimated";
 import React, { useEffect, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { AppState, AppStateStatus, View, TouchableOpacity, Text, StyleSheet, Platform, PermissionsAndroid } from 'react-native';
+import { AppState, AppStateStatus, View, TouchableOpacity, Text, StyleSheet, Platform, PermissionsAndroid, NativeModules } from 'react-native';
 import { Notifier } from './src/components/Notifier';
 import { ThemeProvider, useTheme } from './src/theme/ThemeProvider';
 import { AppNavigator } from './src/navigation/AppNavigator';
@@ -245,6 +245,132 @@ function AppContent() {
       };
     }
   }, [dbInitialized, preferences.autoSmsScan]);
+
+  // Contextual permission enforcement: automatically disable features if permissions are revoked in system settings
+  useEffect(() => {
+    if (!dbInitialized || Platform.OS !== 'android') return;
+
+    const enforcePermissions = async () => {
+      const { 
+        preferences, 
+        toggleAutoSmsScan, 
+        setSyncSchedule, 
+        toggleDailyReminder,
+        toggleBudgetAlerts,
+        toggleRecurringAlerts,
+        toggleWeeklyDigest,
+      } = useStore.getState();
+      let changed = false;
+
+      // 1. Check SMS scan requirements
+      if (preferences.autoSmsScan) {
+        try {
+          const hasSmsPerm = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_SMS);
+          if (!hasSmsPerm) {
+            toggleAutoSmsScan();
+            changed = true;
+            console.log('[App] Auto SMS scan disabled: SMS permission revoked.');
+          } else {
+            const { BackgroundOptimizationModule } = NativeModules;
+            if (BackgroundOptimizationModule) {
+              const ignoring = await BackgroundOptimizationModule.isIgnoringBatteryOptimizations();
+              if (!ignoring) {
+                toggleAutoSmsScan();
+                changed = true;
+                console.log('[App] Auto SMS scan disabled: battery optimization whitelist revoked.');
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('[App] Failed to verify SMS scanning permissions:', e);
+        }
+      }
+
+      // 2. Check exact alarm requirements (Android only)
+      let exactAlarmRevoked = false;
+      const { BackgroundOptimizationModule } = NativeModules;
+      if (Platform.OS === 'android' && BackgroundOptimizationModule) {
+        try {
+          const alarmAllowed = await BackgroundOptimizationModule.isExactAlarmAllowed();
+          if (!alarmAllowed) {
+            exactAlarmRevoked = true;
+          }
+        } catch (e) {
+          console.warn('[App] Failed to verify exact alarm permission:', e);
+        }
+      }
+
+      if (exactAlarmRevoked) {
+        if (preferences.syncSchedule !== 'none') {
+          setSyncSchedule('none');
+          changed = true;
+          console.log('[App] Scheduled cloud sync disabled: exact alarm permission revoked.');
+        }
+        if (preferences.dailyReminder || preferences.budgetAlerts || preferences.recurringAlerts || preferences.weeklyDigest) {
+          if (preferences.dailyReminder) {
+            toggleDailyReminder();
+            await NotificationService.cancelDailyReminder();
+          }
+          if (preferences.budgetAlerts) {
+            toggleBudgetAlerts();
+          }
+          if (preferences.recurringAlerts) {
+            toggleRecurringAlerts();
+          }
+          if (preferences.weeklyDigest) {
+            toggleWeeklyDigest();
+          }
+          changed = true;
+          console.log('[App] Exact alarm permission revoked: Disabled daily reminder and alert settings.');
+        }
+      }
+
+      // 3. Check notification permissions for daily reminders, budget alerts, bill reminders, and weekly digests
+      const anyNotificationEnabled = preferences.dailyReminder || preferences.budgetAlerts || preferences.recurringAlerts || preferences.weeklyDigest;
+      if (anyNotificationEnabled && !exactAlarmRevoked) {
+        try {
+          const { status } = await Notifications.getPermissionsAsync();
+          if (status !== 'granted') {
+            if (preferences.dailyReminder) {
+              toggleDailyReminder();
+              await NotificationService.cancelDailyReminder();
+            }
+            if (preferences.budgetAlerts) {
+              toggleBudgetAlerts();
+            }
+            if (preferences.recurringAlerts) {
+              toggleRecurringAlerts();
+            }
+            if (preferences.weeklyDigest) {
+              toggleWeeklyDigest();
+            }
+            changed = true;
+            console.log('[App] Notification permissions revoked: Disabled daily reminder and alert settings.');
+          }
+        } catch (e) {
+          console.warn('[App] Failed to verify notification permissions:', e);
+        }
+      }
+
+      if (changed) {
+        // Re-run background task registration to clean up cancelled/revoked tasks
+        registerBackgroundTasks();
+      }
+    };
+
+    // Run immediately on launch
+    enforcePermissions();
+
+    // Run whenever the app returns from background to foreground
+    const handleAppStateChange = (nextState: AppStateStatus) => {
+      if (nextState === 'active') {
+        enforcePermissions();
+      }
+    };
+    
+    const sub = AppState.addEventListener('change', handleAppStateChange);
+    return () => sub.remove();
+  }, [dbInitialized]);
 
   // Biometric auto-lock on app background
   useEffect(() => {
