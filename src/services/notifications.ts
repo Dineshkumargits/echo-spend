@@ -1,5 +1,5 @@
 import * as Notifications from 'expo-notifications';
-import { Platform, AppState } from 'react-native';
+import { Platform, AppState, NativeModules } from 'react-native';
 import { useStore } from '../store/useStore';
 
 // Single authoritative handler — keeps badge, plays sound, shows alert.
@@ -207,11 +207,20 @@ export const NotificationService = {
 
   /**
    * Schedules a silent "ping" notification that triggers the background cloud sync.
-   * Uses DATE trigger for AlarmManager.setExact precision on Android.
+   * Uses native AlarmManager on Android for precision background execution.
    */
   async scheduleSyncTask(timeStr: string) {
     try {
       await NotificationService.cancelSyncTask();
+
+      if (Platform.OS === 'android') {
+        const { BackgroundOptimizationModule } = NativeModules;
+        if (BackgroundOptimizationModule) {
+          console.log(`[Notifications] Scheduling precision native sync alarm for ${timeStr}`);
+          await BackgroundOptimizationModule.scheduleSyncAlarm(timeStr);
+          return;
+        }
+      }
 
       const [hour, min] = timeStr.split(':').map(Number);
       const now = new Date();
@@ -221,12 +230,11 @@ export const NotificationService = {
         target.setDate(target.getDate() + 1);
       }
 
-      // Silent notification (no title/body) still triggers the ReceivedListener
-      // on Android and iOS while allowing us to run code at an exact time.
+      // Fallback/Non-Android path
       await Notifications.scheduleNotificationAsync({
         identifier: 'echo-sync-ping',
         content: {
-          title: '', // Empty = silent on most OS
+          title: '', 
           body: '',
           data: { triggerSync: true, rescheduleSync: true, syncTime: timeStr },
         },
@@ -242,6 +250,13 @@ export const NotificationService = {
 
   async cancelSyncTask() {
     try {
+      if (Platform.OS === 'android') {
+        const { BackgroundOptimizationModule } = NativeModules;
+        if (BackgroundOptimizationModule) {
+          await BackgroundOptimizationModule.cancelSyncAlarm();
+          return;
+        }
+      }
       await Notifications.cancelScheduledNotificationAsync('echo-sync-ping');
     } catch {}
   },

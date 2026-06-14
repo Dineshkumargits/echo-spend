@@ -1,16 +1,19 @@
 package com.adkdinesh.echospend
 
 import android.app.AlarmManager
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
+import android.util.Log
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
+import java.util.Calendar
 
 class BackgroundOptimizationModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
 
@@ -85,6 +88,89 @@ class BackgroundOptimizationModule(reactContext: ReactApplicationContext) : Reac
             }
         } else {
             promise.resolve(false)
+        }
+    }
+
+    @ReactMethod
+    fun scheduleSyncAlarm(timeStr: String, promise: Promise) {
+        val context = reactApplicationContext
+        try {
+            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            val intent = Intent(context, SyncReceiver::class.java)
+            val pendingIntent = PendingIntent.getBroadcast(
+                context,
+                1001,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val timeParts = timeStr.split(":")
+            if (timeParts.size < 2) {
+                promise.reject("INVALID_TIME", "Time must be in HH:mm format")
+                return
+            }
+            val hour = timeParts[0].toInt()
+            val min = timeParts[1].toInt()
+
+            val calendar = Calendar.getInstance().apply {
+                timeInMillis = System.currentTimeMillis()
+                set(Calendar.HOUR_OF_DAY, hour)
+                set(Calendar.MINUTE, min)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+
+            if (calendar.timeInMillis <= System.currentTimeMillis()) {
+                calendar.add(Calendar.DAY_OF_YEAR, 1)
+            }
+
+            val triggerTime = calendar.timeInMillis
+            Log.d("BackgroundOptimization", "Scheduling sync alarm for: " + calendar.time.toString())
+
+            val canScheduleExact = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                alarmManager.canScheduleExactAlarms()
+            } else {
+                true
+            }
+
+            if (canScheduleExact) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
+                } else {
+                    alarmManager.setExact(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
+                }
+            } else {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
+                } else {
+                    alarmManager.set(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
+                }
+            }
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("SCHEDULING_FAILED", e.message)
+        }
+    }
+
+    @ReactMethod
+    fun cancelSyncAlarm(promise: Promise) {
+        val context = reactApplicationContext
+        try {
+            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            val intent = Intent(context, SyncReceiver::class.java)
+            val pendingIntent = PendingIntent.getBroadcast(
+                context,
+                1001,
+                intent,
+                PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+            )
+            if (pendingIntent != null) {
+                alarmManager.cancel(pendingIntent)
+                pendingIntent.cancel()
+            }
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("CANCEL_FAILED", e.message)
         }
     }
 }
