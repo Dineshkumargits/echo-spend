@@ -10,7 +10,6 @@ import { NotificationService } from '../services/notifications';
 
 export const useNotifications = () => {
   const requestPermissions = useCallback(async (): Promise<boolean> => {
-    if (!Device.isDevice) return false;
     // Delegate to the centralised NotificationService which sets up all channels.
     return NotificationService.requestPermissions();
   }, []);

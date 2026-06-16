@@ -197,8 +197,7 @@ export const NotificationService = {
           type: Notifications.SchedulableTriggerInputTypes.DAILY,
           hour: 21,
           minute: 0,
-          repeats: true,
-        } as any,
+        },
       });
     } catch (e) {
       console.error('[Notifications] Failed to schedule daily reminder:', e);

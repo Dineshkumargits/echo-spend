@@ -177,8 +177,14 @@ function AppContent() {
         const screen = response.notification.request.content.data?.screen as string | undefined;
         if (!screen || !navigationRef.isReady()) return;
         const navigableScreens = ['SmartInbox', 'Budget', 'Analytics', 'Home', 'Txns', 'Finances', 'Settings'];
-        if (navigableScreens.includes(screen)) {
-          navigationRef.navigate(screen as never);
+        
+        let targetScreen = screen;
+        if (targetScreen === 'Dashboard') {
+          targetScreen = 'Home';
+        }
+
+        if (navigableScreens.includes(targetScreen)) {
+          navigationRef.navigate(targetScreen as never);
         }
       });
     };
@@ -286,48 +292,9 @@ function AppContent() {
         }
       }
 
-      // 2. Check exact alarm requirements (Android only)
-      let exactAlarmRevoked = false;
-      const { BackgroundOptimizationModule } = NativeModules;
-      if (Platform.OS === 'android' && BackgroundOptimizationModule) {
-        try {
-          const alarmAllowed = await BackgroundOptimizationModule.isExactAlarmAllowed();
-          if (!alarmAllowed) {
-            exactAlarmRevoked = true;
-          }
-        } catch (e) {
-          console.warn('[App] Failed to verify exact alarm permission:', e);
-        }
-      }
-
-      if (exactAlarmRevoked) {
-        if (preferences.syncSchedule !== 'none') {
-          setSyncSchedule('none');
-          changed = true;
-          console.log('[App] Scheduled cloud sync disabled: exact alarm permission revoked.');
-        }
-        if (preferences.dailyReminder || preferences.budgetAlerts || preferences.recurringAlerts || preferences.weeklyDigest) {
-          if (preferences.dailyReminder) {
-            toggleDailyReminder();
-            await NotificationService.cancelDailyReminder();
-          }
-          if (preferences.budgetAlerts) {
-            toggleBudgetAlerts();
-          }
-          if (preferences.recurringAlerts) {
-            toggleRecurringAlerts();
-          }
-          if (preferences.weeklyDigest) {
-            toggleWeeklyDigest();
-          }
-          changed = true;
-          console.log('[App] Exact alarm permission revoked: Disabled daily reminder and alert settings.');
-        }
-      }
-
       // 3. Check notification permissions for daily reminders, budget alerts, bill reminders, and weekly digests
       const anyNotificationEnabled = preferences.dailyReminder || preferences.budgetAlerts || preferences.recurringAlerts || preferences.weeklyDigest;
-      if (anyNotificationEnabled && !exactAlarmRevoked) {
+      if (anyNotificationEnabled) {
         try {
           const { status } = await Notifications.getPermissionsAsync();
           if (status !== 'granted') {

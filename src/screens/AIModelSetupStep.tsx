@@ -63,7 +63,7 @@ const AIModelSetupStep = ({ onComplete, showClose = false }: AIModelSetupStepPro
 
   // Auto-proceed after download completes
   useEffect(() => {
-    if (aiModelStatus === 'downloaded' || aiModelStatus === 'ready') {
+    if (aiModelStatus === 'downloaded' || aiModelStatus === 'loading' || aiModelStatus === 'ready') {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       const timer = setTimeout(handleComplete, 1200);
       return () => clearTimeout(timer);
@@ -104,7 +104,7 @@ const AIModelSetupStep = ({ onComplete, showClose = false }: AIModelSetupStepPro
 
   const isCompatible = AIModelManager.isDeviceCompatible();
   const isDownloading = aiModelStatus === 'downloading';
-  const isComplete = aiModelStatus === 'downloaded' || aiModelStatus === 'ready';
+  const isComplete = aiModelStatus === 'downloaded' || aiModelStatus === 'loading' || aiModelStatus === 'ready';
 
   return (
     <View style={{ flex: 1 }}>

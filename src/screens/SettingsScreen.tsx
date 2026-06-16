@@ -223,13 +223,21 @@ const SettingsScreen = ({ navigation }: any) => {
         const alarmAllowed = await BackgroundOptimizationModule.isExactAlarmAllowed();
         if (!alarmAllowed) {
           Alert.alert(
-            "Exact Alarm Permission Required",
-            "To run automatic backups precisely at your scheduled time, Echo Spend needs the 'Alarms & Reminders' permission. Tap 'Open Settings' to enable it.",
+            "Precision Alarm Recommendation",
+            "To run automatic backups precisely at your scheduled time, Echo Spend recommends the 'Alarms & Reminders' permission. Without it, backups will still run but may be slightly delayed to optimize battery life.",
             [
-              { text: "Cancel", style: "cancel" },
+              {
+                text: "Continue Anyway",
+                onPress: () => {
+                  setSyncSchedule(schedule);
+                  setTimeout(() => registerBackgroundTasks(), 0);
+                }
+              },
               {
                 text: "Open Settings",
                 onPress: async () => {
+                  setSyncSchedule(schedule);
+                  setTimeout(() => registerBackgroundTasks(), 0);
                   await BackgroundOptimizationModule.openExactAlarmSettings();
                 }
               }
@@ -279,14 +287,27 @@ const SettingsScreen = ({ navigation }: any) => {
           const ignoring = await BackgroundOptimizationModule.isIgnoringBatteryOptimizations();
           if (!ignoring) {
             Alert.alert(
-              "Background Run Required",
-              "To scan SMS messages reliably in the background, Android requires Echo Spend to run unrestricted (whitelisted from battery optimizations). Tap 'Set Unrestricted' to whitelist the app.",
+              "Recommended Setting",
+              "To scan SMS messages reliably in the background (especially when your phone is asleep), we recommend setting Echo Spend to run 'Unrestricted' in battery settings.",
               [
-                { text: "Cancel", style: "cancel" },
+                {
+                  text: "Not Now",
+                  style: "cancel",
+                  onPress: () => {
+                    toggleAutoSmsScan();
+                    setTimeout(() => registerBackgroundTasks(), 0);
+                  }
+                },
                 {
                   text: "Set Unrestricted",
                   onPress: async () => {
-                    await BackgroundOptimizationModule.requestIgnoreBatteryOptimizations();
+                    try {
+                      await BackgroundOptimizationModule.requestIgnoreBatteryOptimizations();
+                    } catch (err) {
+                      console.warn('[Settings] Failed to request battery optimization bypass:', err);
+                    }
+                    toggleAutoSmsScan();
+                    setTimeout(() => registerBackgroundTasks(), 0);
                   }
                 }
               ]
@@ -324,10 +345,10 @@ const SettingsScreen = ({ navigation }: any) => {
         const alarmAllowed = await BackgroundOptimizationModule.isExactAlarmAllowed();
         if (!alarmAllowed) {
           Alert.alert(
-            "Exact Alarm Permission Required",
-            `To deliver ${featureName} precisely at the scheduled time, Echo Spend needs the 'Alarms & Reminders' permission. Tap 'Open Settings' to enable it.`,
+            "Precision Alarm Recommendation",
+            `To deliver ${featureName} precisely at the scheduled time, Echo Spend recommends the 'Alarms & Reminders' permission. Without it, alerts will still be delivered but may be slightly delayed by the system.`,
             [
-              { text: "Cancel", style: "cancel" },
+              { text: "Continue" },
               {
                 text: "Open Settings",
                 onPress: async () => {
@@ -336,7 +357,6 @@ const SettingsScreen = ({ navigation }: any) => {
               }
             ]
           );
-          return false;
         }
       }
 
@@ -1164,7 +1184,7 @@ const SettingsScreen = ({ navigation }: any) => {
                      'Daily Expense Check-in',
                      "Don't forget to add today's expenses! Tap to open Echo Spend.",
                      'alerts',
-                     { screen: 'Dashboard' }
+                     { screen: 'Home' }
                    );
                  }} 
                />

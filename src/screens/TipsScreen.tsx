@@ -196,14 +196,27 @@ export const TipsScreen = () => {
           const ignoring = await BackgroundOptimizationModule.isIgnoringBatteryOptimizations();
           if (!ignoring) {
             showCustomAlert(
-              "Background Run Required",
-              "To scan SMS messages reliably in the background, Android requires Echo Spend to run unrestricted (whitelisted from battery optimizations). Tap 'Whitelist' to authorize.",
+              "Recommended Setting",
+              "To ensure SMS auto-detection works reliably in the background (especially when your phone is asleep), we recommend setting Echo Spend to run 'Unrestricted' in battery settings.",
               [
-                { text: "Cancel", style: "cancel" },
                 {
-                  text: "Whitelist",
+                  text: "Not Now",
+                  style: "cancel",
+                  onPress: () => {
+                    toggleAutoSmsScan();
+                    setTimeout(() => registerBackgroundTasks(), 0);
+                  }
+                },
+                {
+                  text: "Set Unrestricted",
                   onPress: async () => {
-                    await BackgroundOptimizationModule.requestIgnoreBatteryOptimizations();
+                    try {
+                      await BackgroundOptimizationModule.requestIgnoreBatteryOptimizations();
+                    } catch (err) {
+                      console.warn('[TipsScreen] Failed to request battery optimization bypass:', err);
+                    }
+                    toggleAutoSmsScan();
+                    setTimeout(() => registerBackgroundTasks(), 0);
                   }
                 }
               ]
