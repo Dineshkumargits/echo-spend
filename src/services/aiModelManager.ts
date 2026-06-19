@@ -6,7 +6,7 @@ import { useStore } from '../store/useStore';
 
 const extra = Constants.expoConfig?.extra ?? {};
 const AI_MODEL_URL: string =
-  extra.aiModelUrl || 'https://huggingface.co/ADKDinesh/Qwen2.5-1.5B-SMS-Finance-Parser-GGUF/resolve/main/qwen2.5-1.5b-sms-finance-parser-q4_k_m.gguf';
+  extra.aiModelUrl || 'https://huggingface.co/ADKDinesh/Qwen2.5-1.5B-SMS-Finance-Parser-GGUF/resolve/main/qwen2.5-1.5b-sms-finance-parser-q6_k.gguf';
 
 const MODEL_DIR = `${FileSystem.documentDirectory}models/`;
 const getModelFilename = (): string => {

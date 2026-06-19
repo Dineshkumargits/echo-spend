@@ -83,7 +83,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ],
 
   extra: {
-    aiModelUrl: process.env.AI_MODEL_URL || 'https://huggingface.co/ADKDinesh/Qwen2.5-1.5B-SMS-Finance-Parser-GGUF/resolve/main/qwen2.5-1.5b-sms-finance-parser-q4_k_m.gguf',
+    aiModelUrl: process.env.AI_MODEL_URL || 'https://huggingface.co/ADKDinesh/Qwen2.5-1.5B-SMS-Finance-Parser-GGUF/resolve/main/qwen2.5-1.5b-sms-finance-parser-q6_k.gguf',
     googleAndroidClientId: process.env.GOOGLE_ANDROID_CLIENT_ID ||
       '608510187153-uere9cnfgq0ji1iqcq56ajp2pnuaqr8p.apps.googleusercontent.com',
     googleIosClientId: process.env.GOOGLE_IOS_CLIENT_ID ||

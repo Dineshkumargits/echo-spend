@@ -493,15 +493,20 @@ async function parseWithLLM(
   const categoryHint = `[${categoryNames.map(name => `'${name}'`).join(', ')}]`;
   const merchantContext = 'Merchant Context: Clean string resolution for known nodes.';
 
-  // Streamlined prompt optimized for 1B edge models with explicit global rules
+  // Byte-for-byte exact prompt template used during SFT fine-tuning and validation
   const prompt = `<|im_start|>system
 You are a strict, deterministic banking SMS data extraction engine. Analyze the provided SMS input text and output a single valid JSON object matching the exact schema keys in sequence.
 
+Schema:
+{"isTransaction": boolean, "amount": float, "merchant": string, "type": string, "category": string}
+
 Rules:
-1. isTransaction MUST be false for alerts, payment requests, links, OTP verification codes, minimum balance warnings, statement generation notices, or pre-approved limit offers. It is true ONLY if money has explicitly and successfully been debited, credited, or spent.
+1. isTransaction MUST be false for alerts, payment requests, links, OTP verification codes, minimum balance warnings, statement generation notices, pre-approved limit offers, standing instruction activations, mandate setups, subscription registrations, failed/declined transactions, card activations, marketing/promotional offers, voucher rewards, or EMI conversion advertisements. It is true ONLY if money has explicitly and successfully been debited, credited, or spent.
 2. If isTransaction is false, the amount key MUST be strictly forced to 0.
 3. If isTransaction is false and no merchant is being paid, use the bank or service name as the merchant.
-4. Output ONLY the raw JSON block without markdown backticks.<|im_end|>
+4. type MUST be determined by what happened to YOUR account: if YOUR account was credited, type is "credit". If YOUR account was debited or money was spent, type is "debit". Ignore references to other accounts.
+5. amount MUST be the actual transaction amount, NOT the available balance, available limit, or any other number in the SMS.
+6. Output ONLY the raw JSON block without markdown backticks.<|im_end|>
 <|im_start|>user
 SMS: "${smsBody}"
 SMS Date: ${smsDate}
@@ -509,7 +514,7 @@ Available Categories: ${categoryHint}
 ${merchantContext}
 
 Return JSON matching the schema.<|im_end|>
-<|im_start|>assistant` ;
+<|im_start|>assistant`;
 
   const schemaProperties: Record<string, any> = {
     isTransaction: { type: 'boolean' },
