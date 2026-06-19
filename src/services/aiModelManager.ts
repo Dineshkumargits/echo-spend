@@ -55,6 +55,36 @@ export const AIModelManager = {
     }
   },
 
+  /** Get expected model size in bytes, fetching from Hugging Face if online or using default fallback */
+  async getExpectedModelSize(): Promise<number> {
+    try {
+      const res = await fetch(AI_MODEL_URL, { method: 'HEAD' });
+      const sizeStr = res.headers.get('content-length');
+      if (sizeStr) {
+        const size = parseInt(sizeStr, 10);
+        if (!isNaN(size) && size > 0) {
+          return size;
+        }
+      }
+    } catch (e) {
+      console.warn('[AIModelManager] Failed to fetch dynamic model size, using fallback:', e);
+    }
+    return 1272739328; // fallback ~1.2 GB
+  },
+
+  /** Get human-readable formatted expected model size */
+  async getFormattedExpectedSize(): Promise<string> {
+    const bytes = await this.getExpectedModelSize();
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    const val = bytes / Math.pow(k, i);
+    if (sizes[i] === 'GB') {
+      return `~${val.toFixed(1)} GB`;
+    }
+    return `~${Math.round(val)} ${sizes[i]}`;
+  },
+
   /** Get model file size on disk in bytes, or 0 if not downloaded */
   async getModelSizeOnDisk(): Promise<number> {
     try {

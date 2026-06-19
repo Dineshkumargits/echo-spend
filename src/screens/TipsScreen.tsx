@@ -59,6 +59,14 @@ export const TipsScreen = () => {
 
   const [isBatteryOptimized, setIsBatteryOptimized] = useState(true);
   const [isExactAlarmAllowed, setIsExactAlarmAllowed] = useState(true);
+  const [expectedModelSize, setExpectedModelSize] = useState<string>('~1.2 GB');
+  const [loadingExpectedSize, setLoadingExpectedSize] = useState<boolean>(true);
+
+  useEffect(() => {
+    AIModelManager.getFormattedExpectedSize()
+      .then(setExpectedModelSize)
+      .finally(() => setLoadingExpectedSize(false));
+  }, []);
 
   // Custom Alert State
   const [alertVisible, setAlertVisible] = useState(false);
@@ -334,7 +342,7 @@ export const TipsScreen = () => {
                     ? "Qwen AI model is downloaded and ready to initialize."
                     : aiModelStatus === 'loading'
                     ? "Qwen AI model is initializing in the background..."
-                    : "Smart categorization without internet. Tap to view how to install the model (~980MB)."
+                    : `Smart categorization without internet. Tap to view how to install the model ${loadingExpectedSize ? '' : `(${expectedModelSize})`}.`
                 }
                 right={
                   <View style={[styles.badge, { backgroundColor: isAiActive ? `${colors.success}20` : `${colors.warning}20` }]}>

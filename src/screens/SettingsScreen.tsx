@@ -432,6 +432,14 @@ const SettingsScreen = ({ navigation }: any) => {
   const [salaryDayInput, setSalaryDayInput] = useState((preferences?.salaryDay ?? 1).toString());
   
   const [autoLockInput, setAutoLockInput] = useState((preferences?.autoLockMinutes ?? 5).toString());
+  const [expectedModelSize, setExpectedModelSize] = useState<string>('~1.2 GB');
+  const [loadingExpectedSize, setLoadingExpectedSize] = useState<boolean>(true);
+
+  useEffect(() => {
+    AIModelManager.getFormattedExpectedSize()
+      .then(setExpectedModelSize)
+      .finally(() => setLoadingExpectedSize(false));
+  }, []);
 
   const { checkSupport, authenticate, isSupported } = useBiometric();
   const [showTour, setShowTour] = useState(false);
@@ -1102,9 +1110,13 @@ const SettingsScreen = ({ navigation }: any) => {
                   backgroundColor: colors.accent,
                 }}
               >
-                <LucideDownload color="#fff" size={16} />
+                {loadingExpectedSize ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <LucideDownload color="#fff" size={16} />
+                )}
                 <ThemedText style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>
-                  Download Echo AI (~980 MB)
+                  Download Echo AI {loadingExpectedSize ? '...' : `(${expectedModelSize})`}
                 </ThemedText>
               </TouchableOpacity>
             </>
@@ -1146,7 +1158,7 @@ const SettingsScreen = ({ navigation }: any) => {
               <Row
                 icon={<LucideCpu color={colors.success} size={20} />}
                 label="Echo AI"
-                sub={`Local Engine • ${aiModelSize || '~980 MB'} • ${aiModelStatus === 'ready' ? 'Active' : 'Ready'}`}
+                sub={`Local Engine • ${aiModelSize || expectedModelSize} • ${aiModelStatus === 'ready' ? 'Active' : 'Ready'}`}
                 right={
                   <View style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: `${colors.success}20` }}>
                     <ThemedText style={{ fontSize: 10, fontWeight: '700', color: colors.success }}>
@@ -1158,11 +1170,11 @@ const SettingsScreen = ({ navigation }: any) => {
               <Row
                 icon={<LucideTrash2 color={colors.danger} size={18} />}
                 label="Delete Echo AI"
-                sub={`Free up ${aiModelSize || '~980 MB'} of storage`}
+                sub={`Free up ${aiModelSize || expectedModelSize} of storage`}
                 onPress={() => {
                   Alert.alert(
                     'Delete Echo AI?',
-                    'Without the Echo AI, SMS analysis will use basic pattern matching which is less accurate for unusual transactions.\n\nYou\'ll need to re-download ~980 MB later to restore Echo AI features.',
+                    `Without the Echo AI, SMS analysis will use basic pattern matching which is less accurate for unusual transactions.\n\nYou'll need to re-download ${expectedModelSize} later to restore Echo AI features.`,
                     [
                       { text: 'Keep Echo AI', style: 'cancel' },
                       {

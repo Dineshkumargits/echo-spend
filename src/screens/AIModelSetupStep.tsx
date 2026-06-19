@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  View, TouchableOpacity, Animated, Easing, StyleSheet, Platform,
+  View, TouchableOpacity, Animated, Easing, StyleSheet, Platform, ActivityIndicator,
 } from 'react-native';
 import { ThemedText } from '../components/ThemedSafeAreaView';
 import { MotiView } from 'moti';
@@ -28,6 +28,14 @@ const AIModelSetupStep = ({ onComplete, showClose = false }: AIModelSetupStepPro
   const navigation = useNavigation<any>();
   const { aiModelStatus, aiModelProgress, aiModelError } = useStore();
   const [error, setError] = useState<string | null>(null);
+  const [expectedSize, setExpectedSize] = useState<string>('~1.2 GB');
+  const [loadingSize, setLoadingSize] = useState<boolean>(true);
+
+  useEffect(() => {
+    AIModelManager.getFormattedExpectedSize()
+      .then(setExpectedSize)
+      .finally(() => setLoadingSize(false));
+  }, []);
 
   // Sparkle animation
   const sparkleAnim = useRef(new Animated.Value(0)).current;
@@ -162,8 +170,14 @@ const AIModelSetupStep = ({ onComplete, showClose = false }: AIModelSetupStepPro
               transition={{ type: 'timing', duration: 300, delay: 200 }}
               style={[styles.sizeBadge, { backgroundColor: colors.surface, borderColor: colors.border }]}
             >
-              <LucideDownload color={colors.accent} size={14} />
-              <ThemedText style={[styles.sizeText, { color: colors.primary }]}>~980 MB</ThemedText>
+              {loadingSize ? (
+                <ActivityIndicator size="small" color={colors.accent} style={{ marginRight: 6 }} />
+              ) : (
+                <LucideDownload color={colors.accent} size={14} style={{ marginRight: 6 }} />
+              )}
+              <ThemedText style={[styles.sizeText, { color: colors.primary }]}>
+                {loadingSize ? 'Calculating size...' : expectedSize}
+              </ThemedText>
               <View style={[styles.dot, { backgroundColor: colors.muted }]} />
               <ThemedText style={[styles.sizeText, { color: colors.secondary }]}>One-time download</ThemedText>
             </MotiView>
