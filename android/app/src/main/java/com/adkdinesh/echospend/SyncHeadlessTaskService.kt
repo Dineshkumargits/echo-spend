@@ -25,19 +25,29 @@ class SyncHeadlessTaskService : HeadlessJsTaskService() {
             )
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.createNotificationChannel(channel)
-
+ 
             val notification = Notification.Builder(this, channelId)
                 .setContentTitle("Cloud Syncing")
                 .setContentText("Syncing your data to Google Drive...")
                 .setSmallIcon(android.R.drawable.stat_notify_sync)
                 .build()
-
+ 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(1001, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
             } else {
                 startForeground(1001, notification)
             }
         }
+    }
+ 
+    override fun onDestroy() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
+        super.onDestroy()
     }
 
     override fun getTaskConfig(intent: Intent?): HeadlessJsTaskConfig? {

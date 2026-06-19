@@ -186,7 +186,12 @@ export const closeDatabase = async () => {
  */
 export const checkpointWal = async () => {
   if (db) {
-    try { await db.execAsync('PRAGMA wal_checkpoint(TRUNCATE)'); } catch (_) {}
+    try {
+      await db.execAsync('PRAGMA wal_checkpoint(TRUNCATE)');
+    } catch (e) {
+      console.error('[Database] WAL checkpoint failed:', e);
+      throw e;
+    }
   }
 };
 

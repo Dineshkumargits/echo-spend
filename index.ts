@@ -1,5 +1,5 @@
 import { registerRootComponent } from 'expo';
-import { AppRegistry } from 'react-native';
+import { AppRegistry, Platform, NativeModules } from 'react-native';
 import App from './App';
 import { processIncomingSms } from './src/services/backgroundTasks';
 import { SyncService } from './src/services/sync';
@@ -12,6 +12,7 @@ import { NotificationService } from './src/services/notifications';
 // the environment is set up appropriately
 registerRootComponent(App);
 
+
 // Register Headless JS task for incoming SMS on Android
 AppRegistry.registerHeadlessTask('SmsHeadlessTask', () => async (taskData: any) => {
   const { body, date } = taskData;
@@ -21,30 +22,65 @@ AppRegistry.registerHeadlessTask('SmsHeadlessTask', () => async (taskData: any) 
 });
 
 // Register Headless JS task for Cloud Sync triggered by AlarmManager on Android
-AppRegistry.registerHeadlessTask('SyncHeadlessTask', () => async () => {
-  console.log('[SyncHeadlessTask] Woken up by native AlarmManager. Starting sync...');
-  try {
-    const { preferences, googleUser } = useStore.getState();
-    if (!googleUser || preferences.syncSchedule === 'none') {
-      console.log('[SyncHeadlessTask] Sync skipped: No googleUser or sync schedule set to none.');
-      return;
-    }
+AppRegistry.registerHeadlessTask('SyncHeadlessTask', () => {
+  return async (taskData: any) => {
+    
+    // Timeout safeguard: reject after 45 seconds to prevent background service hanging forever
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error('Sync task timed out after 45 seconds')), 45000);
+    });
 
-    const result = await SyncService.syncToGoogleDrive();
-    if (result) {
-      const nowIso = new Date().toISOString();
-      await setLastSyncTimeInDb(nowIso);
-      console.log('[SyncHeadlessTask] Sync completed successfully.');
-    } else {
-      console.log('[SyncHeadlessTask] Sync failed.');
-    }
+    try {
+      // Wait for Zustand hydration
+      const checkHydration = () => {
+        return new Promise<void>((resolve) => {
+          if (useStore.getState().hasHydrated) {
+            resolve();
+            return;
+          }
+          const unsub = useStore.subscribe((state) => {
+            if (state.hasHydrated) {
+              unsub();
+              resolve();
+            }
+          });
+        });
+      };
 
-    // Always reschedule the alarm for tomorrow
-    console.log('[SyncHeadlessTask] Rescheduling sync alarm for tomorrow...');
-    await NotificationService.scheduleSyncTask(preferences.syncTime);
-  } catch (error) {
-    console.error('[SyncHeadlessTask] Error during headless sync:', error);
-  }
+      await Promise.race([checkHydration(), timeoutPromise]);
+
+      const { preferences, googleUser } = useStore.getState();
+      if (!googleUser || preferences.syncSchedule === 'none') {
+        console.log('[SyncHeadlessTask] Sync skipped: No googleUser or sync schedule set to none.');
+        if (timeoutId) clearTimeout(timeoutId);
+        return;
+      }
+
+      const result = await Promise.race([SyncService.syncToGoogleDrive(), timeoutPromise]) as boolean;
+      if (result) {
+        const nowIso = new Date().toISOString();
+        await setLastSyncTimeInDb(nowIso);
+        console.log('[SyncHeadlessTask] Sync completed successfully.');
+      } else {
+        console.log('[SyncHeadlessTask] Sync failed.');
+      }
+
+      // Always reschedule the alarm for tomorrow
+      console.log('[SyncHeadlessTask] Rescheduling sync alarm for tomorrow...');
+      await NotificationService.scheduleSyncTask(preferences.syncTime);
+    } catch (error) {
+      console.error('[SyncHeadlessTask] Error during headless sync:', error);
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+      if (Platform.OS === 'android') {
+        const { BackgroundOptimizationModule } = NativeModules;
+        if (BackgroundOptimizationModule) {
+          await BackgroundOptimizationModule.stopHeadlessService('com.adkdinesh.echospend.SyncHeadlessTaskService').catch(() => {});
+        }
+      }
+    }
+  };
 });
 
 // Register Headless JS task for Boot recovery on Android
@@ -83,5 +119,12 @@ AppRegistry.registerHeadlessTask('BootHeadlessTask', () => async () => {
     }
   } catch (e) {
     console.error('[BootHeadlessTask] Failed to restore alarms on boot:', e);
+  } finally {
+    if (Platform.OS === 'android') {
+      const { BackgroundOptimizationModule } = NativeModules;
+      if (BackgroundOptimizationModule) {
+        await BackgroundOptimizationModule.stopHeadlessService('com.adkdinesh.echospend.BootHeadlessTaskService').catch(() => {});
+      }
+    }
   }
 });

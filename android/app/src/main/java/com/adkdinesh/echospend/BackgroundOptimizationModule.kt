@@ -173,4 +173,24 @@ class BackgroundOptimizationModule(reactContext: ReactApplicationContext) : Reac
             promise.reject("CANCEL_FAILED", e.message)
         }
     }
+
+    @ReactMethod
+    fun stopHeadlessService(serviceClassName: String, promise: Promise) {
+        val context = reactApplicationContext
+        try {
+            val packageName = context.packageName
+            val className = if (serviceClassName.startsWith(".")) {
+                packageName + serviceClassName
+            } else {
+                serviceClassName
+            }
+            val clazz = Class.forName(className)
+            val intent = Intent(context, clazz)
+            val stopped = context.stopService(intent)
+            promise.resolve(stopped)
+        } catch (e: Exception) {
+            Log.e("BackgroundOptimization", "Failed to stop headless service $serviceClassName", e)
+            promise.reject("STOP_FAILED", e.message)
+        }
+    }
 }

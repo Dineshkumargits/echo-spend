@@ -40,6 +40,16 @@ class BootHeadlessTaskService : HeadlessJsTaskService() {
         }
     }
 
+    override fun onDestroy() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
+        super.onDestroy()
+    }
+
     override fun getTaskConfig(intent: Intent?): HeadlessJsTaskConfig? {
         val data = Arguments.createMap()
         return HeadlessJsTaskConfig(

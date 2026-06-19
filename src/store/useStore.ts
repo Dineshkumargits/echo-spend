@@ -312,6 +312,16 @@ export const useStore = create<AppState>()(
     {
       name: 'echo-spend-storage',
       storage: createJSONStorage(() => secureStorage as any),
+      partialize: (state) => {
+        const {
+          isSyncing,
+          syncProgressText,
+          hasHydrated,
+          dbReloadKey,
+          ...rest
+        } = state;
+        return rest;
+      },
       merge: (persistedState: any, currentState: AppState) => {
         // Deep merge preferences to ensure new fields are present
         const merged = { ...currentState, ...(persistedState as AppState) };

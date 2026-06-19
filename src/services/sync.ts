@@ -1,4 +1,5 @@
 import * as Sharing from 'expo-sharing';
+import Constants from 'expo-constants';
 import { useStore } from '../store/useStore';
 import {
   getAllTransactionsForExport,
@@ -25,6 +26,20 @@ import {
 const DRIVE_UPLOAD_URL = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
 const DRIVE_LIST_URL = 'https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&fields=files(id,name,modifiedTime)';
 
+const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeout = 15000): Promise<Response> => {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    return response;
+  } finally {
+    clearTimeout(id);
+  }
+};
+
 export class SyncService {
   /** 
    * Get a valid access token. 
@@ -35,6 +50,15 @@ export class SyncService {
     if (!googleUser) return null;
 
     try {
+      // Ensure Google Signin is configured before making any SDK calls
+      const extra = Constants.expoConfig?.extra ?? {};
+      GoogleSignin.configure({
+        webClientId: extra.googleWebClientId,
+        iosClientId: extra.googleIosClientId,
+        offlineAccess: true,
+        scopes: ['https://www.googleapis.com/auth/drive.appdata'],
+      });
+
       // Check if user is still signed in and get fresh tokens
       const currentUser = await GoogleSignin.getCurrentUser();
       if (!currentUser) {
@@ -91,8 +115,13 @@ export class SyncService {
   /** Upload local SQLite DB to Google Drive appDataFolder */
   static async syncToGoogleDrive(manualToken?: string): Promise<boolean> {
     const { setSyncing, updateLastSynced } = useStore.getState();
-    
-    try {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error('Sync operation timed out after 45 seconds')), 45000);
+    });
+
+    const runSync = async () => {
       setSyncing(true, 'Preparing backup...');
       
       const accessToken = manualToken || await SyncService.getValidAccessToken();
@@ -107,12 +136,20 @@ export class SyncService {
       const { preferences } = useStore.getState();
       await saveInternalPreferences(JSON.stringify(preferences));
 
-      // Checkpoint WAL so all data is flushed into the main .db file before we read it.
-      // Without this, recent writes sitting in the WAL file are missing from the backup.
-      await checkpointWal();
-      const base64Content = await readAsStringAsync(dbPath, {
-        encoding: EncodingType.Base64,
-      });
+      // Close the database to force SQLite to merge all WAL changes into the main .db file.
+      // A full close is much more reliable than checkpointWal() because
+      // checkpointWal() can fail silently (without throwing) if there are active read connections.
+      await closeDatabase();
+
+      let base64Content: string;
+      try {
+        base64Content = await readAsStringAsync(dbPath, {
+          encoding: EncodingType.Base64,
+        });
+      } finally {
+        // Always re-initialize the database connection so the app can continue working
+        await initDatabase();
+      }
 
       setSyncing(true, 'Connecting to Google Drive...');
       const existingId = await SyncService.getExistingBackupId(accessToken);
@@ -134,7 +171,7 @@ export class SyncService {
         : DRIVE_UPLOAD_URL;
 
       setSyncing(true, 'Uploading to Drive...');
-      const response = await fetch(url, {
+      const response = await fetchWithTimeout(url, {
         method: existingId ? 'PATCH' : 'POST',
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -155,19 +192,26 @@ export class SyncService {
       
       // Delay slightly for UX
       await new Promise(r => setTimeout(r, 800));
-      setSyncing(false);
       return true;
+    };
+
+    try {
+      const result = await Promise.race([runSync(), timeoutPromise]);
+      setSyncing(false);
+      return result;
     } catch (error) {
       console.error('[Sync] Sync failed:', error);
       setSyncing(false);
       return false;
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
     }
   }
 
   /** Get ID of existing backup file in Drive appDataFolder */
   static async getExistingBackupId(accessToken: string): Promise<string | null> {
     try {
-      const res = await fetch(DRIVE_LIST_URL, {
+      const res = await fetchWithTimeout(DRIVE_LIST_URL, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       if (!res.ok) return null;
@@ -182,8 +226,13 @@ export class SyncService {
   /** Restore DB from Google Drive */
   static async restoreFromGoogleDrive(manualToken?: string): Promise<boolean> {
     const { setSyncing } = useStore.getState();
-    
-    try {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error('Restore operation timed out after 45 seconds')), 45000);
+    });
+
+    const runRestore = async () => {
       setSyncing(true, 'Locating backup on Drive...');
       
       const accessToken = manualToken || await SyncService.getValidAccessToken();
@@ -211,10 +260,10 @@ export class SyncService {
       setSyncing(true, 'Applying backup...');
       await closeDatabase();
 
-      // Delete stale WAL and SHM files — if left behind they get applied on top
-      // of the restored DB by SQLite, reverting it back to the empty/pre-restore state.
+      // Delete the existing database file and stale WAL/SHM files
       const walPath = `${dbPath}-wal`;
       const shmPath = `${dbPath}-shm`;
+      try { await deleteAsync(dbPath, { idempotent: true }); } catch (_) {}
       try { await deleteAsync(walPath, { idempotent: true }); } catch (_) {}
       try { await deleteAsync(shmPath, { idempotent: true }); } catch (_) {}
 
@@ -228,10 +277,15 @@ export class SyncService {
 
       // Restore preferences from the internal DB table
       try {
+        console.log('[Sync] Restored database initialization complete. Reading saved preferences...');
         const savedPrefs = await getInternalPreferences();
+        console.log('[Sync] Retrieved saved preferences from DB:', savedPrefs);
         if (savedPrefs) {
           const parsed = JSON.parse(savedPrefs);
           useStore.getState().importPreferences(parsed);
+          console.log('[Sync] Imported preferences successfully. Restored budget:', parsed.monthlyBudget, 'Restored salaryDay:', parsed.salaryDay);
+        } else {
+          console.warn('[Sync] No user_preferences row found in app_settings table of restored DB.');
         }
       } catch (e) {
         console.warn('[Sync] Failed to restore preferences from DB:', e);
@@ -241,13 +295,23 @@ export class SyncService {
       // Without this, every screen still shows its stale in-memory state.
       useStore.getState().incrementDbReloadKey();
 
+      // Clean up the temporary download file to free up space
+      try { await deleteAsync(tempPath, { idempotent: true }); } catch (_) {}
+
       await new Promise(r => setTimeout(r, 500));
-      setSyncing(false);
       return true;
+    };
+
+    try {
+      const result = await Promise.race([runRestore(), timeoutPromise]);
+      setSyncing(false);
+      return result;
     } catch (error) {
       console.error('[Sync] Drive restore failed:', error);
       setSyncing(false);
       return false;
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
     }
   }
 

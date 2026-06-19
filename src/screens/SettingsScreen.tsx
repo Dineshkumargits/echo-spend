@@ -58,6 +58,7 @@ import { useTheme } from '../theme/ThemeProvider';
 import { registerBackgroundTasks } from '../services/backgroundTasks';
 import { NotificationService } from '../services/notifications';
 import { AIModelManager } from '../services/aiModelManager';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { TourGuideModal } from '../components/TourGuideModal';
 
 const extra = Constants.expoConfig?.extra ?? {};
@@ -427,7 +428,7 @@ const SettingsScreen = ({ navigation }: any) => {
   
   const [thresholdInput, setThresholdInput] = useState((preferences?.autoApproveThreshold ?? 100).toString());
   const [budgetInput, setBudgetInput] = useState((preferences?.monthlyBudget ?? 50000).toString());
-  const [syncTimeInput, setSyncTimeInput] = useState(preferences?.syncTime ?? '03:00');
+  const [showTimePicker, setShowTimePicker] = useState(false);
   const [salaryDayInput, setSalaryDayInput] = useState((preferences?.salaryDay ?? 1).toString());
   
   const [autoLockInput, setAutoLockInput] = useState((preferences?.autoLockMinutes ?? 5).toString());
@@ -445,6 +446,19 @@ const SettingsScreen = ({ navigation }: any) => {
       if (size > 0) setAiModelSize(`${(size / (1024 * 1024)).toFixed(0)} MB`);
     });
   }, [aiModelStatus]);
+
+  // Sync local text input state when preferences are updated from external sources (e.g. Google Drive restore)
+  useEffect(() => {
+    setThresholdInput((preferences?.autoApproveThreshold ?? 100).toString());
+    setBudgetInput((preferences?.monthlyBudget ?? 50000).toString());
+    setSalaryDayInput((preferences?.salaryDay ?? 1).toString());
+    setAutoLockInput((preferences?.autoLockMinutes ?? 5).toString());
+  }, [
+    preferences?.autoApproveThreshold,
+    preferences?.monthlyBudget,
+    preferences?.salaryDay,
+    preferences?.autoLockMinutes,
+  ]);
 
   const triggerHaptic = (style = Haptics.ImpactFeedbackStyle.Light) => {
     if (preferences.hapticsEnabled) {
@@ -524,14 +538,30 @@ const SettingsScreen = ({ navigation }: any) => {
     );
   };
 
-  const handleSaveSyncTime = () => {
-    const timeRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/;
-    if (timeRegex.test(syncTimeInput)) {
-      setSyncTime(syncTimeInput);
+  const formatDisplayTime = (timeStr: string): string => {
+    return timeStr;
+  };
+
+  const getDateTimeObject = (timeStr: string): Date => {
+    const date = new Date();
+    try {
+      const [hoursStr, minutesStr] = timeStr.split(':');
+      date.setHours(parseInt(hoursStr, 10), parseInt(minutesStr, 10), 0, 0);
+    } catch {}
+    return date;
+  };
+
+  const handleTimePickerChange = (event: any, selectedDate?: Date) => {
+    if (Platform.OS === 'android') {
+      setShowTimePicker(false);
+    }
+    if (selectedDate && event.type !== 'dismissed') {
+      const hours = selectedDate.getHours().toString().padStart(2, '0');
+      const minutes = selectedDate.getMinutes().toString().padStart(2, '0');
+      const timeStr = `${hours}:${minutes}`;
+      setSyncTime(timeStr);
       notify.success('Sync time updated');
       registerBackgroundTasks();
-    } else {
-      setSyncTimeInput(preferences.syncTime);
     }
   };
 
@@ -700,18 +730,33 @@ const SettingsScreen = ({ navigation }: any) => {
               {preferences.syncSchedule !== 'none' && (
                 <View className="p-4 border-t" style={{ borderTopColor: colors.border }}>
                    <ThemedText type="secondary" className="text-[10px] uppercase font-bold mb-2">Sync Time (Auto)</ThemedText>
-                   <View className="flex-row gap-2">
-                     <TextInput 
-                        className="bg-border flex-1 p-2 rounded-apple-sm font-bold" 
-                        style={{ color: colors.primary }}
-                        value={syncTimeInput}
-                        onChangeText={setSyncTimeInput}
-                        onBlur={handleSaveSyncTime}
-                        placeholder="HH:MM"
-                        keyboardType="numbers-and-punctuation"
-                     />
-                     <TouchableOpacity onPress={handleSaveSyncTime} className="bg-accent px-4 justify-center rounded-apple-sm"><ThemedText className="text-white font-bold text-xs">SET</ThemedText></TouchableOpacity>
-                   </View>
+                   <TouchableOpacity 
+                     onPress={() => { setShowTimePicker(true); Haptics.selectionAsync(); }} 
+                     className="bg-border flex-row justify-between items-center p-3 rounded-apple-sm"
+                     activeOpacity={0.7}
+                   >
+                     <ThemedText className="font-bold text-sm" style={{ color: colors.primary }}>
+                       {formatDisplayTime(preferences.syncTime)}
+                     </ThemedText>
+                     <ThemedText className="text-xs font-bold" style={{ color: colors.accent }}>SELECT TIME</ThemedText>
+                   </TouchableOpacity>
+                   {showTimePicker && (
+                     <View style={Platform.OS === 'ios' ? { backgroundColor: colors.surface, borderRadius: 14, overflow: 'hidden', marginTop: 12, borderWidth: 1, borderColor: colors.border } : undefined}>
+                       <DateTimePicker
+                         value={getDateTimeObject(preferences.syncTime)}
+                         mode="time"
+                         is24Hour={true}
+                         display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                         onChange={handleTimePickerChange}
+                         themeVariant={isDark ? 'dark' : 'light'}
+                       />
+                       {Platform.OS === 'ios' && (
+                         <TouchableOpacity onPress={() => setShowTimePicker(false)} style={{ borderTopWidth: 1, borderTopColor: colors.border, padding: 12, alignItems: 'center' }}>
+                           <ThemedText style={{ color: colors.accent, fontWeight: 'bold' }}>Done</ThemedText>
+                         </TouchableOpacity>
+                       )}
+                     </View>
+                   )}
                 </View>
               )}
             </>
