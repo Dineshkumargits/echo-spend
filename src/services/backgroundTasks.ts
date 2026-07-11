@@ -12,6 +12,7 @@ import {
   getAllSmsHashes,
   getLastSyncTimeFromDb,
   setLastSyncTimeInDb,
+  logSyncAttempt,
   Transaction,
   getCurrentMonthSpend,
   getCategoryBreakdown,
@@ -63,6 +64,12 @@ TaskManager.defineTask(BACKGROUND_SYNC_TASK, async () => {
     const { preferences, googleUser } = useStore.getState();
 
     if (!googleUser || preferences.syncSchedule === 'none') {
+      await logSyncAttempt({
+        timestamp: new Date().toISOString(),
+        source: 'background-fetch',
+        outcome: 'skipped',
+        reason: !googleUser ? 'Not signed in to Google' : 'Sync schedule set to none',
+      }).catch(() => {});
       return BackgroundFetch.BackgroundFetchResult.NoData;
     }
 
@@ -88,12 +95,14 @@ TaskManager.defineTask(BACKGROUND_SYNC_TASK, async () => {
       if (preferences.syncSchedule === 'weekly') {
         const sixDaysMs = 6 * 24 * 60 * 60 * 1000;
         if (now.getTime() - lastSyncTime < sixDaysMs) {
+          await logSyncAttempt({ timestamp: new Date().toISOString(), source: 'background-fetch', outcome: 'skipped', reason: 'Weekly schedule not yet due' }).catch(() => {});
           return BackgroundFetch.BackgroundFetchResult.NoData;
         }
       }
 
       // Check if we already synced after the most recent scheduled time
       if (lastSyncTime >= lastScheduledTime.getTime()) {
+        await logSyncAttempt({ timestamp: new Date().toISOString(), source: 'background-fetch', outcome: 'skipped', reason: 'Already synced after last scheduled time' }).catch(() => {});
         return BackgroundFetch.BackgroundFetchResult.NoData;
       }
     }
@@ -105,15 +114,24 @@ TaskManager.defineTask(BACKGROUND_SYNC_TASK, async () => {
       const nowIso = new Date().toISOString();
       await setLastSyncTimeInDb(nowIso);
       // Zustand updateLastSynced is already called inside syncToGoogleDrive()
+      await logSyncAttempt({ timestamp: nowIso, source: 'background-fetch', outcome: 'success' }).catch(() => {});
 
       // Reschedule the exact silent alarm for tomorrow
       await NotificationService.scheduleSyncTask(preferences.syncTime).catch(() => {});
+    } else {
+      await logSyncAttempt({ timestamp: new Date().toISOString(), source: 'background-fetch', outcome: 'failure', reason: 'syncToGoogleDrive returned false' }).catch(() => {});
     }
     return result
       ? BackgroundFetch.BackgroundFetchResult.NewData
       : BackgroundFetch.BackgroundFetchResult.Failed;
   } catch (error) {
     console.error('[Background] Sync task failed:', error);
+    await logSyncAttempt({
+      timestamp: new Date().toISOString(),
+      source: 'background-fetch',
+      outcome: 'failure',
+      reason: error instanceof Error ? error.message : String(error),
+    }).catch(() => {});
     return BackgroundFetch.BackgroundFetchResult.Failed;
   } finally {
     _syncRunning = false;
@@ -148,13 +166,26 @@ TaskManager.defineTask(BACKGROUND_NOTIFICATION_TASK, async ({ data, error }) => 
 
         if (shouldSync) {
           console.log('[BackgroundNotification] Syncing to Google Drive...');
-          await SyncService.syncToGoogleDrive();
+          const result = await SyncService.syncToGoogleDrive();
           const nowIso = new Date().toISOString();
-          await setLastSyncTimeInDb(nowIso);
+          if (result) {
+            await setLastSyncTimeInDb(nowIso);
+            await logSyncAttempt({ timestamp: nowIso, source: 'notification', outcome: 'success' }).catch(() => {});
+          } else {
+            await logSyncAttempt({ timestamp: nowIso, source: 'notification', outcome: 'failure', reason: 'syncToGoogleDrive returned false' }).catch(() => {});
+          }
+        } else {
+          await logSyncAttempt({ timestamp: new Date().toISOString(), source: 'notification', outcome: 'skipped', reason: 'Synced within the last hour' }).catch(() => {});
         }
       }
     } catch (e) {
       console.error('[BackgroundNotification] Google Drive sync failed:', e);
+      await logSyncAttempt({
+        timestamp: new Date().toISOString(),
+        source: 'notification',
+        outcome: 'failure',
+        reason: e instanceof Error ? e.message : String(e),
+      }).catch(() => {});
     }
   }
 

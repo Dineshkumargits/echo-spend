@@ -52,7 +52,7 @@ import Constants from 'expo-constants';
 import { notify } from '../utils/notify';
 import { useStore } from '../store/useStore';
 import { SyncService } from '../services/sync';
-import { resetAllData } from '../services/database';
+import { resetAllData, getLastSyncAttempt, SyncAttemptLog } from '../services/database';
 import { useBiometric } from '../hooks/useBiometric';
 import { useTheme } from '../theme/ThemeProvider';
 import { registerBackgroundTasks } from '../services/backgroundTasks';
@@ -108,6 +108,15 @@ const SettingsScreen = ({ navigation }: any) => {
   const [isBatteryOptimized, setIsBatteryOptimized] = useState(true);
   const [isExactAlarmAllowed, setIsExactAlarmAllowed] = useState(true);
   const [isNotificationGranted, setIsNotificationGranted] = useState(true);
+  const [lastSyncAttempt, setLastSyncAttempt] = useState<SyncAttemptLog | null>(null);
+
+  const loadLastSyncAttempt = async () => {
+    try {
+      setLastSyncAttempt(await getLastSyncAttempt());
+    } catch (e) {
+      console.warn('[Settings] Failed to load last sync attempt:', e);
+    }
+  };
 
   const checkBackgroundPermissions = async () => {
     // Check notification permission (all platforms)
@@ -132,11 +141,13 @@ const SettingsScreen = ({ navigation }: any) => {
 
   useEffect(() => {
     checkBackgroundPermissions();
-    
+    loadLastSyncAttempt();
+
     if (Platform.OS === 'android') {
       const subscription = AppState.addEventListener('change', (nextState) => {
         if (nextState === 'active') {
           checkBackgroundPermissions();
+          loadLastSyncAttempt();
         }
       });
       return () => subscription.remove();
@@ -263,27 +274,8 @@ const SettingsScreen = ({ navigation }: any) => {
       return;
     }
 
-    if (Platform.OS === 'android') {
-      try {
-        const hasSmsPerm = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_SMS);
-        if (!hasSmsPerm) {
-          const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.READ_SMS, {
-            title: 'SMS Permission Required',
-            message: 'Echo Spend needs permission to read financial SMS messages to automatically scan transactions.',
-            buttonPositive: 'Grant',
-            buttonNegative: 'Cancel',
-          });
-          if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
-            Alert.alert('Permission Denied', 'Echo Spend cannot auto-scan transactions without SMS permissions.');
-            return;
-          }
-        }
-      } catch (e) {
-        console.warn('[Settings] Failed to check SMS permission:', e);
-        return;
-      }
-
-      if (BackgroundOptimizationModule) {
+    const proceedWithSmsScanEnable = async () => {
+      if (Platform.OS === 'android' && BackgroundOptimizationModule) {
         try {
           const ignoring = await BackgroundOptimizationModule.isIgnoringBatteryOptimizations();
           if (!ignoring) {
@@ -319,10 +311,57 @@ const SettingsScreen = ({ navigation }: any) => {
           console.warn('[Settings] Failed to check battery optimization:', e);
         }
       }
+
+      toggleAutoSmsScan();
+      setTimeout(() => registerBackgroundTasks(), 0);
+    };
+
+    if (Platform.OS === 'android') {
+      try {
+        const hasSmsPerm = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_SMS);
+        if (!hasSmsPerm) {
+          Alert.alert(
+            "SMS Transaction Scanning",
+            "Echo Spend requests permission to read and receive SMS messages (READ_SMS and RECEIVE_SMS) to automatically scan, detect, and import financial transactions from your bank or card alerts. This process runs completely locally and offline on your device, ensuring your sensitive financial data remains private.\n\nDo you want to enable this feature and grant the required permissions?",
+            [
+              {
+                text: "Decline",
+                style: "cancel",
+                onPress: () => {
+                  // Do nothing
+                }
+              },
+              {
+                text: "Agree & Enable",
+                onPress: async () => {
+                  try {
+                    const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.READ_SMS, {
+                      title: 'SMS Permission Required',
+                      message: 'Echo Spend needs permission to read financial SMS messages to automatically scan transactions.',
+                      buttonPositive: 'Grant',
+                      buttonNegative: 'Cancel',
+                    });
+                    if (granted === PermissionsAndroid.RESULTS.GRANTED) {
+                      await proceedWithSmsScanEnable();
+                    } else {
+                      Alert.alert('Permission Denied', 'Echo Spend cannot auto-scan transactions without SMS permissions.');
+                    }
+                  } catch (e) {
+                    console.warn('[Settings] Failed to request SMS permission:', e);
+                  }
+                }
+              }
+            ]
+          );
+          return;
+        }
+      } catch (e) {
+        console.warn('[Settings] Failed to check SMS permission:', e);
+        return;
+      }
     }
 
-    toggleAutoSmsScan();
-    setTimeout(() => registerBackgroundTasks(), 0);
+    await proceedWithSmsScanEnable();
   };
 
   const checkNotificationPermission = async (featureName: string) => {
@@ -723,6 +762,17 @@ const SettingsScreen = ({ navigation }: any) => {
                 onPress={handleSyncNow}
                 right={isSyncing ? <ActivityIndicator size="small" color={colors.accent} /> : <ThemedText className="text-xs font-bold" style={{ color: colors.accent }}>SYNC NOW</ThemedText>}
               />
+              {preferences.syncSchedule !== 'none' && (
+                <Row
+                  icon={<LucideAlertTriangle color={lastSyncAttempt?.outcome === 'failure' ? colors.danger : colors.secondary} size={18} />}
+                  label="Last Automatic Attempt"
+                  sub={
+                    lastSyncAttempt
+                      ? `${new Date(lastSyncAttempt.timestamp).toLocaleString('en-IN')} · ${lastSyncAttempt.outcome}${lastSyncAttempt.reason ? ` (${lastSyncAttempt.reason})` : ''} · via ${lastSyncAttempt.source}`
+                      : 'No automatic attempt recorded yet — the scheduled alarm may not be firing on this device'
+                  }
+                />
+              )}
               <Row icon={<LucideTimer color={colors.primary} size={18} />} label="Sync Schedule" sub={`Frequency: ${preferences.syncSchedule}`} />
               <View className="flex-row p-1" style={{ backgroundColor: colors.translucent }}>
                 {(['none', 'daily', 'weekly'] as const).map(s => (

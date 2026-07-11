@@ -108,24 +108,7 @@ function AppContent() {
     const setup = async () => {
       registerBackgroundTasks();
 
-      // 1. Request SMS Permission on Android on startup
-      if (Platform.OS === 'android') {
-        try {
-          const hasSmsPerm = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_SMS);
-          if (!hasSmsPerm) {
-            await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.READ_SMS, {
-              title: 'SMS Permission',
-              message: 'Echo Spend needs permission to read financial SMS messages to automatically scan transactions.',
-              buttonPositive: 'Grant',
-              buttonNegative: 'Cancel',
-            });
-          }
-        } catch (e) {
-          console.warn('[App] Failed to request SMS permission on startup:', e);
-        }
-      }
-
-      // 2. Permissions must be granted before anything notification-related runs.
+      // 1. Permissions must be granted before anything notification-related runs.
       const granted = await requestPermissions();
       setNotifPermGranted(granted);
 

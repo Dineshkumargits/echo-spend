@@ -179,27 +179,8 @@ export const TipsScreen = () => {
       return;
     }
 
-    if (Platform.OS === 'android') {
-      try {
-        const hasSmsPerm = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_SMS);
-        if (!hasSmsPerm) {
-          const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.READ_SMS, {
-            title: 'SMS Permission Required',
-            message: 'Echo Spend needs permission to read financial SMS messages to automatically scan transactions.',
-            buttonPositive: 'Grant',
-            buttonNegative: 'Cancel',
-          });
-          if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
-            showCustomAlert('Permission Denied', 'Echo Spend cannot auto-scan transactions without SMS permissions.');
-            return;
-          }
-        }
-      } catch (e) {
-        console.warn('[TipsScreen] Failed to check SMS permission:', e);
-        return;
-      }
-
-      if (BackgroundOptimizationModule) {
+    const proceedWithSmsScanEnable = async () => {
+      if (Platform.OS === 'android' && BackgroundOptimizationModule) {
         try {
           const ignoring = await BackgroundOptimizationModule.isIgnoringBatteryOptimizations();
           if (!ignoring) {
@@ -235,10 +216,57 @@ export const TipsScreen = () => {
           console.warn('[TipsScreen] Failed to check battery optimization:', e);
         }
       }
+
+      toggleAutoSmsScan();
+      setTimeout(() => registerBackgroundTasks(), 0);
+    };
+
+    if (Platform.OS === 'android') {
+      try {
+        const hasSmsPerm = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_SMS);
+        if (!hasSmsPerm) {
+          showCustomAlert(
+            "SMS Transaction Scanning",
+            "Echo Spend requests permission to read and receive SMS messages (READ_SMS and RECEIVE_SMS) to automatically scan, detect, and import financial transactions from your bank or card alerts. This process runs completely locally and offline on your device, ensuring your sensitive financial data remains private.\n\nDo you want to enable this feature and grant the required permissions?",
+            [
+              {
+                text: "Decline",
+                style: "cancel",
+                onPress: () => {
+                  // Do nothing
+                }
+              },
+              {
+                text: "Agree & Enable",
+                onPress: async () => {
+                  try {
+                    const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.READ_SMS, {
+                      title: 'SMS Permission Required',
+                      message: 'Echo Spend needs permission to read financial SMS messages to automatically scan transactions.',
+                      buttonPositive: 'Grant',
+                      buttonNegative: 'Cancel',
+                    });
+                    if (granted === PermissionsAndroid.RESULTS.GRANTED) {
+                      await proceedWithSmsScanEnable();
+                    } else {
+                      showCustomAlert('Permission Denied', 'Echo Spend cannot auto-scan transactions without SMS permissions.');
+                    }
+                  } catch (e) {
+                    console.warn('[TipsScreen] Failed to request SMS permission:', e);
+                  }
+                }
+              }
+            ]
+          );
+          return;
+        }
+      } catch (e) {
+        console.warn('[TipsScreen] Failed to check SMS permission:', e);
+        return;
+      }
     }
 
-    toggleAutoSmsScan();
-    setTimeout(() => registerBackgroundTasks(), 0);
+    await proceedWithSmsScanEnable();
   };
 
   const Row = ({ icon, label, sub, right, onPress, border = true }: any) => (
@@ -363,7 +391,7 @@ export const TipsScreen = () => {
                     showCustomAlert(
                       aiModelStatus === 'ready' ? "AI Model Active" : "AI Model Ready",
                       aiModelStatus === 'ready'
-                        ? "The Llama model is successfully installed and active! It classifies your transaction merchant SMS entirely locally."
+                        ? "The Qwen model is successfully installed and active! It classifies your transaction merchant SMS entirely locally."
                         : "The AI model is downloaded and ready. It will automatically load to process your next incoming bank SMS.",
                       [{ text: "Great" }]
                     );

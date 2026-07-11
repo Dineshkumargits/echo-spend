@@ -114,24 +114,41 @@ export class SyncService {
 
   /** Upload local SQLite DB to Google Drive appDataFolder */
   static async syncToGoogleDrive(manualToken?: string): Promise<boolean> {
-    const { setSyncing, updateLastSynced } = useStore.getState();
+    const { isSyncing, setSyncing, updateLastSynced } = useStore.getState();
+    if (isSyncing) {
+      console.log('[Sync] Sync already in progress, skipping concurrent run.');
+      return false;
+    }
+
+    let isAborted = false;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
     const timeoutPromise = new Promise<never>((_, reject) => {
-      timeoutId = setTimeout(() => reject(new Error('Sync operation timed out after 45 seconds')), 45000);
+      timeoutId = setTimeout(() => {
+        isAborted = true;
+        reject(new Error('Sync operation timed out after 45 seconds'));
+      }, 45000);
     });
 
+    const safeSetSyncing = (status: boolean, text = '') => {
+      if (!isAborted) {
+        setSyncing(status, text);
+      }
+    };
+
     const runSync = async () => {
-      setSyncing(true, 'Preparing backup...');
+      safeSetSyncing(true, 'Preparing backup...');
       
       const accessToken = manualToken || await SyncService.getValidAccessToken();
+      if (isAborted) return false;
       if (!accessToken) throw new Error('No authentication available');
 
       const dbPath = `${documentDirectory}SQLite/echospend.db`;
       const fileInfo = await getInfoAsync(dbPath);
+      if (isAborted) return false;
       if (!fileInfo.exists) throw new Error('Database file not found');
 
-      setSyncing(true, 'Reading local data...');
+      safeSetSyncing(true, 'Reading local data...');
       // Backup current preferences into the DB file so they travel together
       const { preferences } = useStore.getState();
       await saveInternalPreferences(JSON.stringify(preferences));
@@ -139,10 +156,12 @@ export class SyncService {
       // Close the database to force SQLite to merge all WAL changes into the main .db file.
       // A full close is much more reliable than checkpointWal() because
       // checkpointWal() can fail silently (without throwing) if there are active read connections.
+      if (isAborted) return false;
       await closeDatabase();
 
       let base64Content: string;
       try {
+        if (isAborted) return false;
         base64Content = await readAsStringAsync(dbPath, {
           encoding: EncodingType.Base64,
         });
@@ -151,7 +170,8 @@ export class SyncService {
         await initDatabase();
       }
 
-      setSyncing(true, 'Connecting to Google Drive...');
+      if (isAborted) return false;
+      safeSetSyncing(true, 'Connecting to Google Drive...');
       const existingId = await SyncService.getExistingBackupId(accessToken);
 
       const metadata = {
@@ -170,7 +190,8 @@ export class SyncService {
         ? `https://www.googleapis.com/upload/drive/v3/files/${existingId}?uploadType=multipart`
         : DRIVE_UPLOAD_URL;
 
-      setSyncing(true, 'Uploading to Drive...');
+      if (isAborted) return false;
+      safeSetSyncing(true, 'Uploading to Drive...');
       const response = await fetchWithTimeout(url, {
         method: existingId ? 'PATCH' : 'POST',
         headers: {
@@ -180,12 +201,14 @@ export class SyncService {
         body,
       });
 
+      if (isAborted) return false;
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
         throw new Error(`Drive upload failed: ${JSON.stringify(err)}`);
       }
 
-      setSyncing(true, 'Finishing up...');
+      if (isAborted) return false;
+      safeSetSyncing(true, 'Finishing up...');
       updateLastSynced();
       // Also persist to SQLite so background tasks can reliably read it
       await setLastSyncTimeInDb(new Date().toISOString());
@@ -223,41 +246,60 @@ export class SyncService {
     }
   }
 
-  /** Restore DB from Google Drive */
   static async restoreFromGoogleDrive(manualToken?: string): Promise<boolean> {
-    const { setSyncing } = useStore.getState();
+    const { isSyncing, setSyncing } = useStore.getState();
+    if (isSyncing) {
+      console.log('[Sync] Restore/Sync already in progress, skipping concurrent run.');
+      return false;
+    }
+
+    let isAborted = false;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
     const timeoutPromise = new Promise<never>((_, reject) => {
-      timeoutId = setTimeout(() => reject(new Error('Restore operation timed out after 45 seconds')), 45000);
+      timeoutId = setTimeout(() => {
+        isAborted = true;
+        reject(new Error('Restore operation timed out after 45 seconds'));
+      }, 45000);
     });
 
+    const safeSetSyncing = (status: boolean, text = '') => {
+      if (!isAborted) {
+        setSyncing(status, text);
+      }
+    };
+
     const runRestore = async () => {
-      setSyncing(true, 'Locating backup on Drive...');
+      safeSetSyncing(true, 'Locating backup on Drive...');
       
       const accessToken = manualToken || await SyncService.getValidAccessToken();
+      if (isAborted) return false;
       if (!accessToken) throw new Error('No authentication available');
 
       const existingId = await SyncService.getExistingBackupId(accessToken);
+      if (isAborted) return false;
       if (!existingId) throw new Error('No backup found in Google Drive');
 
-      setSyncing(true, 'Downloading database...');
+      safeSetSyncing(true, 'Downloading database...');
       const downloadUrl = `https://www.googleapis.com/drive/v3/files/${existingId}?alt=media`;
       const dbPath = `${documentDirectory}SQLite/echospend.db`;
       const tempPath = `${documentDirectory}echospend_restore_tmp.db`;
 
       // Download to a temp path first to avoid corrupting the live DB on failure
-      setSyncing(true, 'Downloading backup...');
+      if (isAborted) return false;
+      safeSetSyncing(true, 'Downloading backup...');
       const downloadResult = await downloadAsync(downloadUrl, tempPath, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
 
+      if (isAborted) return false;
       if (downloadResult.status !== 200) {
         throw new Error(`Download failed with status ${downloadResult.status}`);
       }
 
       // Close the live connection before swapping the file
-      setSyncing(true, 'Applying backup...');
+      if (isAborted) return false;
+      safeSetSyncing(true, 'Applying backup...');
       await closeDatabase();
 
       // Delete the existing database file and stale WAL/SHM files
@@ -268,11 +310,13 @@ export class SyncService {
       try { await deleteAsync(shmPath, { idempotent: true }); } catch (_) {}
 
       // Move temp file over the live DB
+      if (isAborted) return false;
       const { moveAsync } = await import('expo-file-system/legacy');
       await moveAsync({ from: tempPath, to: dbPath });
 
       // Reinitialize so the app picks up restored data immediately
-      setSyncing(true, 'Reinitializing database...');
+      if (isAborted) return false;
+      safeSetSyncing(true, 'Reinitializing database...');
       await initDatabase();
 
       // Restore preferences from the internal DB table

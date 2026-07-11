@@ -644,38 +644,15 @@ export const SmsParserService = {
       };
     }
 
-    // ── Step 1: Regex parser (fast path) ────────────────────────────────────
+    // ── Step 1: Always run regex to extract structural fields ───────────────
+    // (date, balance, account match) — these are never wrong from regex.
+    // Semantic fields (type, merchant, category) will be overridden by AI below.
     const regexResult = parseWithRegex(smsBody, accounts, categories, merchantHints, smsTimestamp);
-    // Regex determined this is not a transaction at all → skip
-    if (!regexResult) {
-      // If the on-device model is loaded, give it a chance to classify ambiguous SMS
-      // that regex outright rejected (e.g. unusual formats)
-      const modelLoaded = AIModelManager.isModelLoaded();
-      if (modelLoaded) {
-        try {
-          const llmResult = await parseWithLLM(
-            smsBody, smsDate, accounts, categories, budgets,
-            subscriptions, loans, goals, merchantHints,
-          );
-          if (llmResult) return llmResult;
-        } catch (err) {
-          console.error('[SmsParserService] LLM failed for regex-rejected SMS:', err);
-        }
-      }
-      return {
-        isTransaction: false,
-        transaction: { rawSms: smsBody, isConfirmed: false },
-        confidence: 'low',
-        alreadySaved: false,
-      };
-    }
 
-    // ── Step 2: High-confidence regex → return immediately ──────────────────
-    if (regexResult.confidence === 'high' && regexResult.transaction.merchant !== 'Review Needed') {
-      return regexResult;
-    }
-
-    // ── Step 3: Ambiguous — try on-device LLM ──────────────────────────────
+    // ── Step 2: If AI model is loaded → AI is the primary parser ────────────
+    // Regex is only used as a structural supplement (date, balance, account).
+    // We never skip AI just because regex was confident — regex can tie-break
+    // incorrectly on SMSes that contain both "credited" and "debited" words.
     const modelLoaded = AIModelManager.isModelLoaded();
     if (modelLoaded) {
       try {
@@ -684,28 +661,40 @@ export const SmsParserService = {
           subscriptions, loans, goals, merchantHints,
         );
         if (llmResult) {
-          // Merge LLM result with regexResult for date, balance, and account matching
+          if (regexResult) {
+            // AI handles semantic fields; regex supplies structural fields it's reliable for
+            return {
+              isTransaction: true,
+              transaction: {
+                ...regexResult.transaction,      // date, balanceAfter, suggestedAccountId from regex
+                amount: regexResult.transaction.amount || llmResult.transaction.amount || 0,
+                merchant: llmResult.transaction.merchant || regexResult.transaction.merchant || 'Review Needed',
+                category: llmResult.transaction.category || regexResult.transaction.category || 'Other',
+                type: llmResult.transaction.type,  // AI is sole authority on type — no regex override
+                confidence: regexResult.confidence === 'high' ? 'high' : 'medium',
+              },
+              confidence: regexResult.confidence === 'high' ? 'high' : 'medium',
+              alreadySaved: false,
+              suggestedAccountId: regexResult.suggestedAccountId,
+              balanceAfter: regexResult.balanceAfter,
+              isAnomaly: llmResult.isAnomaly || regexResult.isAnomaly || false,
+              parsedOffline: false,
+            };
+          }
+          // No regex result but AI succeeded (unusual format)
+          return llmResult;
+        }
+        // AI returned null → this SMS is not a transaction
+        if (llmResult === null && !regexResult) {
           return {
-            isTransaction: true,
-            transaction: {
-              ...regexResult.transaction, // Keep regex date, balanceAfter, accountId, etc.
-              amount: regexResult.transaction.amount || llmResult.transaction.amount || 0,
-              merchant: llmResult.transaction.merchant || regexResult.transaction.merchant || 'Review Needed',
-              category: llmResult.transaction.category || regexResult.transaction.category || 'Other',
-              type: llmResult.transaction.type || regexResult.transaction.type || 'debit',
-              confidence: 'medium',
-            },
-            confidence: 'medium',
+            isTransaction: false,
+            transaction: { rawSms: smsBody, isConfirmed: false },
+            confidence: 'low',
             alreadySaved: false,
-            suggestedAccountId: regexResult.suggestedAccountId,
-            balanceAfter: regexResult.balanceAfter,
-            isAnomaly: llmResult.isAnomaly || regexResult.isAnomaly || false,
-            parsedOffline: false,
           };
         }
       } catch (err) {
-        console.error('[SmsParserService] LLM failed for ambiguous SMS:', err);
-        // LLM failed — fall through to regex result
+        console.error('[SmsParserService] LLM failed — falling back to regex:', err);
       }
     } else if (!_aiDownNotified) {
       // Model not loaded — show a one-time notification per scan
@@ -714,8 +703,16 @@ export const SmsParserService = {
       setTimeout(() => { _aiDownNotified = false; }, 60_000);
     }
 
-    // ── Step 4: Fall back to regex result ────────────────────────────────────
-    console.log('[SmsParserService] Falling back to Regex Parse Result.');
+    // ── Step 3: AI not loaded / failed → fall back to regex ─────────────────
+    if (!regexResult) {
+      return {
+        isTransaction: false,
+        transaction: { rawSms: smsBody, isConfirmed: false },
+        confidence: 'low',
+        alreadySaved: false,
+      };
+    }
+    console.log('[SmsParserService] Falling back to regex result (AI not available).');
     regexResult.parsedOffline = true;
     return regexResult;
   },

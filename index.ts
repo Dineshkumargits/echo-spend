@@ -3,7 +3,7 @@ import { AppRegistry, Platform, NativeModules } from 'react-native';
 import App from './App';
 import { processIncomingSms } from './src/services/backgroundTasks';
 import { SyncService } from './src/services/sync';
-import { setLastSyncTimeInDb } from './src/services/database';
+import { setLastSyncTimeInDb, logSyncAttempt } from './src/services/database';
 import { useStore } from './src/store/useStore';
 import { NotificationService } from './src/services/notifications';
 
@@ -53,6 +53,12 @@ AppRegistry.registerHeadlessTask('SyncHeadlessTask', () => {
       const { preferences, googleUser } = useStore.getState();
       if (!googleUser || preferences.syncSchedule === 'none') {
         console.log('[SyncHeadlessTask] Sync skipped: No googleUser or sync schedule set to none.');
+        await logSyncAttempt({
+          timestamp: new Date().toISOString(),
+          source: 'alarm',
+          outcome: 'skipped',
+          reason: !googleUser ? 'Not signed in to Google' : 'Sync schedule set to none',
+        }).catch(() => {});
         if (timeoutId) clearTimeout(timeoutId);
         return;
       }
@@ -62,8 +68,10 @@ AppRegistry.registerHeadlessTask('SyncHeadlessTask', () => {
         const nowIso = new Date().toISOString();
         await setLastSyncTimeInDb(nowIso);
         console.log('[SyncHeadlessTask] Sync completed successfully.');
+        await logSyncAttempt({ timestamp: nowIso, source: 'alarm', outcome: 'success' }).catch(() => {});
       } else {
         console.log('[SyncHeadlessTask] Sync failed.');
+        await logSyncAttempt({ timestamp: new Date().toISOString(), source: 'alarm', outcome: 'failure', reason: 'syncToGoogleDrive returned false' }).catch(() => {});
       }
 
       // Always reschedule the alarm for tomorrow
@@ -71,6 +79,12 @@ AppRegistry.registerHeadlessTask('SyncHeadlessTask', () => {
       await NotificationService.scheduleSyncTask(preferences.syncTime);
     } catch (error) {
       console.error('[SyncHeadlessTask] Error during headless sync:', error);
+      await logSyncAttempt({
+        timestamp: new Date().toISOString(),
+        source: 'alarm',
+        outcome: 'failure',
+        reason: error instanceof Error ? error.message : String(error),
+      }).catch(() => {});
     } finally {
       if (timeoutId) clearTimeout(timeoutId);
       if (Platform.OS === 'android') {

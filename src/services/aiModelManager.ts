@@ -6,7 +6,7 @@ import { useStore } from '../store/useStore';
 
 const extra = Constants.expoConfig?.extra ?? {};
 const AI_MODEL_URL: string =
-  extra.aiModelUrl || 'https://huggingface.co/ADKDinesh/Qwen2.5-1.5B-SMS-Finance-Parser-GGUF/resolve/main/qwen2.5-1.5b-sms-finance-parser-q6_k.gguf';
+  extra.aiModelUrl || 'https://huggingface.co/ADKDinesh/Qwen2.5-1.5B-SMS-Finance-Parser-GGUF/resolve/main/qwen2.5-1.5b-sms-finance-parser-q4_k_m.gguf';
 
 const MODEL_DIR = `${FileSystem.documentDirectory}models/`;
 const getModelFilename = (): string => {
@@ -17,7 +17,7 @@ const getModelFilename = (): string => {
       return lastPart;
     }
   } catch { /* fallback */ }
-  return 'Llama-3.2-1B-Instruct-Q4_K_M.gguf';
+  return 'qwen2.5-1.5b-sms-finance-parser-q4_k_m.gguf';
 };
 const MODEL_FILENAME = getModelFilename();
 const MODEL_PATH = `${MODEL_DIR}${MODEL_FILENAME}`;
@@ -69,7 +69,7 @@ export const AIModelManager = {
     } catch (e) {
       console.warn('[AIModelManager] Failed to fetch dynamic model size, using fallback:', e);
     }
-    return 1272739328; // fallback ~1.2 GB
+    return 986047968; // fallback ~940 MB
   },
 
   /** Get human-readable formatted expected model size */

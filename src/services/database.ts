@@ -598,6 +598,30 @@ export const setLastSyncTimeInDb = async (isoDate: string): Promise<void> => {
   await db.runAsync('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)', 'last_sync_time', isoDate);
 };
 
+export interface SyncAttemptLog {
+  timestamp: string;
+  source: 'alarm' | 'background-fetch' | 'notification' | 'boot';
+  outcome: 'success' | 'failure' | 'skipped';
+  reason?: string;
+}
+
+/**
+ * Records every automatic (non-manual) sync attempt, regardless of outcome.
+ * Manual "Sync Now" always works per user reports, so the open question when
+ * diagnosing background-sync failures is whether the OS ever invokes the
+ * scheduled alarm/task at all. This log gives visibility into that from the
+ * Settings screen without needing adb logcat.
+ */
+export const logSyncAttempt = async (entry: SyncAttemptLog): Promise<void> => {
+  await db.runAsync('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)', 'last_sync_attempt', JSON.stringify(entry));
+};
+
+export const getLastSyncAttempt = async (): Promise<SyncAttemptLog | null> => {
+  const row = await db.getFirstAsync<{ value: string }>('SELECT value FROM app_settings WHERE key = ?', 'last_sync_attempt');
+  if (!row?.value) return null;
+  try { return JSON.parse(row.value); } catch { return null; }
+};
+
 
 // ─── Transactions ────────────────────────────────────────────────────────────
 

@@ -25,6 +25,59 @@ import {
 
 // ─── Receive modal ────────────────────────────────────────────────────────────
 
+const AccountRow = React.memo(({
+  acc,
+  isSelected,
+  currency,
+  onPress,
+  colors,
+}: {
+  acc: Account;
+  isSelected: boolean;
+  currency: string;
+  onPress: (id: number) => void;
+  colors: any;
+}) => {
+  const isCC = acc.accountType === 'credit_card';
+  return (
+    <TouchableOpacity
+      key={acc.id}
+      onPress={() => onPress(acc.id)}
+      activeOpacity={0.75}
+      style={{ marginBottom: 8 }}
+    >
+      <MotiView
+        animate={{
+          backgroundColor: isSelected ? `${colors.accent}18` : colors.translucent,
+          borderColor: isSelected ? colors.accent : colors.border,
+        }}
+        transition={{ type: 'timing', duration: 180 }}
+        style={{
+          flexDirection: 'row', alignItems: 'center', gap: 12,
+          padding: 14, borderRadius: 14,
+          borderWidth: 1.5,
+        }}
+      >
+        <View style={{ width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: `${colors.accent}20` }}>
+          {isCC ? <LucideCreditCard color={colors.accent} size={16} /> : <LucideWallet color={colors.accent} size={16} />}
+        </View>
+        <View style={{ flex: 1 }}>
+          <ThemedText style={{ fontSize: 14, fontWeight: '600' }}>{acc.name}</ThemedText>
+          <ThemedText style={{ fontSize: 11, color: colors.secondary }}>
+            {acc.accountType.replace('_', ' ')} · Balance: {currency}{acc.balance.toLocaleString('en-IN')}
+          </ThemedText>
+        </View>
+        <MotiView
+          animate={{ opacity: isSelected ? 1 : 0, scale: isSelected ? 1 : 0.5 }}
+          transition={{ type: 'timing', duration: 160 }}
+        >
+          <LucideCheck color={colors.accent} size={18} />
+        </MotiView>
+      </MotiView>
+    </TouchableOpacity>
+  );
+});
+
 const ReceiveModal = ({
   member, accounts, defaultAccountId, currency, onConfirm, onClose,
 }: {
@@ -40,6 +93,8 @@ const ReceiveModal = ({
   const [amountStr, setAmountStr] = useState(remaining.toFixed(2));
   const [selected, setSelected] = useState<number>(defaultAccountId ?? accounts[0]?.id ?? 0);
 
+  const handleSelect = useCallback((id: number) => setSelected(id), []);
+
   const handleConfirm = () => {
     const amt = parseFloat(amountStr);
     if (isNaN(amt) || amt <= 0) {
@@ -54,83 +109,76 @@ const ReceiveModal = ({
   };
 
   return (
-    <Modal transparent animationType="fade" onRequestClose={onClose}>
+    <Modal transparent animationType="none" onRequestClose={onClose}>
       <TouchableOpacity
         style={{ flex: 1, backgroundColor: '#00000080', justifyContent: 'flex-end' }}
         activeOpacity={1}
         onPress={onClose}
       >
-        <TouchableOpacity activeOpacity={1}
-          style={{ backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40 }}
+        <MotiView
+          from={{ translateY: 80, opacity: 0 }}
+          animate={{ translateY: 0, opacity: 1 }}
+          exit={{ translateY: 80, opacity: 0 }}
+          transition={{ type: 'spring', damping: 22, stiffness: 200 }}
         >
-          <ThemedText style={{ fontSize: 17, fontWeight: '700', marginBottom: 4 }}>
-            Receive from {member.name}
-          </ThemedText>
-          <ThemedText style={{ fontSize: 13, color: colors.secondary, marginBottom: 16 }}>
-            Total share: {currency}{member.share.toLocaleString('en-IN')} · Already paid: {currency}{(member.paidAmount ?? 0).toLocaleString('en-IN')}
-          </ThemedText>
-
-          <ThemedText style={{ fontSize: 11, fontWeight: '700', color: colors.secondary, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>
-            Repayment Amount ({currency})
-          </ThemedText>
-          <TextInput
-            value={amountStr}
-            onChangeText={setAmountStr}
-            keyboardType="decimal-pad"
-            style={{
-              padding: 12,
-              borderRadius: 12,
-              borderWidth: 1.5,
-              borderColor: colors.border,
-              color: colors.primary,
-              backgroundColor: colors.translucent,
-              fontSize: 16,
-              fontWeight: '600',
-              marginBottom: 16,
-            }}
-          />
-
-          <ThemedText style={{ fontSize: 11, fontWeight: '700', color: colors.secondary, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 10 }}>
-            Add to account
-          </ThemedText>
-
-          {accounts.map(acc => {
-            const isCC = acc.accountType === 'credit_card';
-            return (
-              <TouchableOpacity
-                key={acc.id}
-                onPress={() => setSelected(acc.id)}
-                style={{
-                  flexDirection: 'row', alignItems: 'center', gap: 12,
-                  padding: 14, borderRadius: 14, marginBottom: 8,
-                  backgroundColor: selected === acc.id ? `${colors.accent}15` : colors.translucent,
-                  borderWidth: 1.5,
-                  borderColor: selected === acc.id ? colors.accent : 'transparent',
-                }}
-              >
-                <View style={{ width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: `${colors.accent}20` }}>
-                  {isCC ? <LucideCreditCard color={colors.accent} size={16} /> : <LucideWallet color={colors.accent} size={16} />}
-                </View>
-                <View style={{ flex: 1 }}>
-                  <ThemedText style={{ fontSize: 14, fontWeight: '600' }}>{acc.name}</ThemedText>
-                  <ThemedText style={{ fontSize: 11, color: colors.secondary }}>
-                    {acc.accountType.replace('_', ' ')} · Balance: {currency}{acc.balance.toLocaleString('en-IN')}
-                  </ThemedText>
-                </View>
-                {selected === acc.id && <LucideCheck color={colors.accent} size={18} />}
-              </TouchableOpacity>
-            );
-          })}
-
-          <TouchableOpacity
-            onPress={handleConfirm}
-            style={{ marginTop: 8, padding: 16, borderRadius: 14, backgroundColor: colors.success, alignItems: 'center' }}
+          <TouchableOpacity activeOpacity={1}
+            style={{ backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40 }}
           >
-            <ThemedText style={{ fontSize: 15, fontWeight: '700', color: '#fff' }}>
-              Confirm — Receive {currency}{parseFloat(amountStr || '0').toLocaleString('en-IN')}
+            {/* Drag handle */}
+            <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: 'center', marginBottom: 16 }} />
+
+            <ThemedText style={{ fontSize: 17, fontWeight: '700', marginBottom: 4 }}>
+              Receive from {member.name}
             </ThemedText>
+            <ThemedText style={{ fontSize: 13, color: colors.secondary, marginBottom: 16 }}>
+              Total share: {currency}{member.share.toLocaleString('en-IN')} · Already paid: {currency}{(member.paidAmount ?? 0).toLocaleString('en-IN')}
+            </ThemedText>
+
+            <ThemedText style={{ fontSize: 11, fontWeight: '700', color: colors.secondary, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>
+              Repayment Amount ({currency})
+            </ThemedText>
+            <TextInput
+              value={amountStr}
+              onChangeText={setAmountStr}
+              keyboardType="decimal-pad"
+              style={{
+                padding: 12,
+                borderRadius: 12,
+                borderWidth: 1.5,
+                borderColor: colors.border,
+                color: colors.primary,
+                backgroundColor: colors.translucent,
+                fontSize: 16,
+                fontWeight: '600',
+                marginBottom: 16,
+              }}
+            />
+
+            <ThemedText style={{ fontSize: 11, fontWeight: '700', color: colors.secondary, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 10 }}>
+              Add to account
+            </ThemedText>
+
+            {accounts.map(acc => (
+              <AccountRow
+                key={acc.id}
+                acc={acc}
+                isSelected={selected === acc.id}
+                currency={currency}
+                onPress={handleSelect}
+                colors={colors}
+              />
+            ))}
+
+            <TouchableOpacity
+              onPress={handleConfirm}
+              style={{ marginTop: 8, padding: 16, borderRadius: 14, backgroundColor: colors.success, alignItems: 'center' }}
+            >
+              <ThemedText style={{ fontSize: 15, fontWeight: '700', color: '#fff' }}>
+                Confirm — Receive {currency}{parseFloat(amountStr || '0').toLocaleString('en-IN')}
+              </ThemedText>
+            </TouchableOpacity>
           </TouchableOpacity>
-        </TouchableOpacity>
+        </MotiView>
       </TouchableOpacity>
     </Modal>
   );
