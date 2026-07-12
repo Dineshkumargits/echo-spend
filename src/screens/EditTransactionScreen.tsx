@@ -30,6 +30,8 @@ import {
   PendingSplitMember,
 } from '../services/database';
 import { useTheme } from '../theme/ThemeProvider';
+import { SectionLabel } from '../components/Signal';
+import { fonts } from '../theme/tokens';
 import { useStore } from '../store/useStore';
 import { EntityLinker } from './AddTransactionScreen';
 import { CategoryPicker } from '../components/CategoryPicker';
@@ -588,31 +590,43 @@ export const EditTransactionScreen = () => {
       >
         <View style={themedStyles.content}>
           <View style={themedStyles.header}>
-            <ThemedText className="text-2xl font-bold">Edit Transaction</ThemedText>
-            <TouchableOpacity onPress={() => navigation.goBack()}>
-              <LucideX color={colors.secondary} size={24} />
+            <View>
+              <SectionLabel>Adjust signal</SectionLabel>
+              <ThemedText style={{ fontFamily: fonts.displayBold, fontSize: 26, letterSpacing: -0.5, marginTop: 2 }}>
+                Edit transaction
+              </ThemedText>
+            </View>
+            <TouchableOpacity
+              onPress={() => navigation.goBack()}
+              style={{ width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.translucent }}
+            >
+              <LucideX color={colors.secondary} size={19} />
             </TouchableOpacity>
           </View>
 
-          {/* Type toggle */}
-          <View style={[themedStyles.typeToggle, { backgroundColor: colors.translucent }]}>
-            {(['debit', 'credit', 'transfer'] as const).map(t => (
-              <TouchableOpacity
-                key={t}
-                onPress={() => setType(t)}
-                style={[
-                  themedStyles.typeBtn,
-                  type === t && { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }
-                ]}
-              >
-                <ThemedText
-                  className="text-xs font-bold"
-                  style={{ color: type === t ? colors.primary : colors.secondary }}
+          {/* Type — underline segmented, signal colored */}
+          <View style={themedStyles.typeToggle}>
+            {(['debit', 'credit', 'transfer'] as const).map(t => {
+              const active = type === t;
+              const segColor = t === 'debit' ? colors.debit : t === 'credit' ? colors.credit : colors.secondary;
+              return (
+                <TouchableOpacity
+                  key={t}
+                  onPress={() => setType(t)}
+                  style={[
+                    themedStyles.typeBtn,
+                    active && { borderBottomColor: segColor },
+                  ]}
                 >
-                  {t === 'debit' ? 'EXPENSE' : (t === 'transfer' ? 'TRANSFER' : 'INCOME')}
-                </ThemedText>
-              </TouchableOpacity>
-            ))}
+                  <ThemedText
+                    font="signal"
+                    style={{ fontSize: 11, letterSpacing: 1.4, textTransform: 'uppercase', color: active ? colors.primary : colors.secondary }}
+                  >
+                    {t === 'debit' ? 'Out' : (t === 'transfer' ? 'Move' : 'In')}
+                  </ThemedText>
+                </TouchableOpacity>
+              );
+            })}
           </View>
 
           <ScrollView
@@ -628,7 +642,7 @@ export const EditTransactionScreen = () => {
                 <TextInput
                   style={[
                     themedStyles.amountInput,
-                    { color: type === 'transfer' ? colors.warning : (type === 'credit' ? colors.success : colors.accent) },
+                    { color: type === 'transfer' ? colors.primary : (type === 'credit' ? colors.credit : colors.debit) },
                     errors.amount && { borderBottomColor: colors.danger }
                   ]}
                   placeholder="0"
@@ -991,11 +1005,15 @@ export const EditTransactionScreen = () => {
               disabled={!amount || saving}
             >
               {saving ? (
-                <ActivityIndicator color="#FFFFFF" size="small" />
+                <ActivityIndicator color={colors.onAccent} size="small" />
               ) : (
                 <>
-                  <LucideCheck color="#FFFFFF" size={22} />
-                  <ThemedText className="font-bold text-lg ml-2" style={{ color: '#FFFFFF' }}>Update Transaction</ThemedText>
+                  <LucideCheck color={colors.onAccent} size={19} />
+                  <ThemedText
+                    style={{ fontFamily: fonts.signalBold, fontSize: 13, letterSpacing: 1.4, textTransform: 'uppercase', marginLeft: 8, color: colors.onAccent }}
+                  >
+                    Update transaction
+                  </ThemedText>
                 </>
               )}
             </TouchableOpacity>
@@ -1010,15 +1028,15 @@ export const EditTransactionScreen = () => {
 const createThemedStyles = (colors: any, isDark: boolean) => StyleSheet.create({
   content: { padding: 24, flex: 1 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
-  typeToggle: { flexDirection: 'row', borderRadius: 50, padding: 4, marginBottom: 24 },
-  typeBtn: { flex: 1, paddingVertical: 10, borderRadius: 50, alignItems: 'center' },
+  typeToggle: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: colors.border, marginBottom: 24 },
+  typeBtn: { flex: 1, paddingVertical: 12, alignItems: 'center', borderBottomWidth: 2, borderBottomColor: 'transparent', marginBottom: -1 },
   field: { marginBottom: 24 },
-  label: { fontSize: 11, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1, fontWeight: 'bold' },
-  amountInput: { fontSize: 36, fontWeight: 'bold', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: 'transparent' },
-  merchantInput: { fontSize: 17, borderBottomWidth: 1, paddingVertical: 10 },
-  notesInput: { fontSize: 15, borderBottomWidth: 1, paddingVertical: 10, minHeight: 44 },
-  selectedIconWrap: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
-  saveButton: { height: 60, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
+  label: { fontFamily: fonts.signal, fontSize: 10, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 2 },
+  amountInput: { fontFamily: fonts.signalBold, fontSize: 42, fontVariant: ['tabular-nums'], paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: 'transparent' },
+  merchantInput: { fontFamily: fonts.textMedium, fontSize: 17, borderBottomWidth: 1, paddingVertical: 10 },
+  notesInput: { fontFamily: fonts.text, fontSize: 15, borderBottomWidth: 1, paddingVertical: 10, minHeight: 44 },
+  selectedIconWrap: { width: 36, height: 36, borderRadius: 11, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+  saveButton: { height: 58, borderRadius: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
   footer: { padding: 20, borderTopWidth: 1 },
   dateRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, borderBottomWidth: 1 },
   pill: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, borderWidth: 1, marginRight: 8 },

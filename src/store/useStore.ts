@@ -1,9 +1,11 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import * as SecureStore from 'expo-secure-store';
+import { DEFAULT_THEME_ID } from '../theme/tokens';
 
 interface UserPreferences {
-  theme: 'dark' | 'light' | 'system';
+  theme: 'dark' | 'light' | 'system';  // light/dark mode (not the color pack)
+  themeId: string;                      // curated theme pack id (see THEMES in tokens.ts)
   autoApproveSmallSpends: boolean;
   autoApproveThreshold: number;
   monthlyBudget: number;
@@ -53,6 +55,7 @@ interface AppState {
   aiModelNudgeDismissed: boolean;
 
   setTheme: (theme: 'dark' | 'light' | 'system') => void;
+  setThemeId: (themeId: string) => void;
   toggleAutoApprove: () => void;
   setAutoApproveThreshold: (amount: number) => void;
   setMonthlyBudget: (budget: number) => void;
@@ -102,6 +105,7 @@ const secureStorage = {
 
 const DEFAULT_PREFERENCES: UserPreferences = {
   theme: 'dark',
+  themeId: DEFAULT_THEME_ID,
   autoApproveSmallSpends: false,
   autoApproveThreshold: 100,
   monthlyBudget: 50000,
@@ -144,6 +148,9 @@ export const useStore = create<AppState>()(
 
       setTheme: (theme) =>
         set((s) => ({ preferences: { ...s.preferences, theme } })),
+
+      setThemeId: (themeId) =>
+        set((s) => ({ preferences: { ...s.preferences, themeId } })),
 
       toggleAutoApprove: () =>
         set((s) => ({

@@ -180,14 +180,14 @@ const TIPS = [
   {
     step: 1,
     icon: LucideWallet,
-    color: '#0A84FF',
+    color: '#56D4C0',
     title: 'Add all your accounts',
     desc: 'Link your bank accounts, credit cards, cash, and wallets so every rupee is tracked in one place.',
   },
   {
     step: 2,
     icon: LucideTag,
-    color: '#30D158',
+    color: '#56D4C0',
     title: 'Customise categories',
     desc: 'Rename, recolour, or add categories that match your actual spending habits — food, EMI, fuel, etc.',
   },
@@ -201,7 +201,7 @@ const TIPS = [
   {
     step: 4,
     icon: LucideTarget,
-    color: '#FF9500',
+    color: '#FFB454',
     title: 'Set goals & track loans',
     desc: 'Create savings goals, log borrowed money, and add recurring subscriptions to stay on top of commitments.',
   },

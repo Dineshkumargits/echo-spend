@@ -22,6 +22,8 @@ import {
 import { useTheme } from '../theme/ThemeProvider';
 import { ThemedText } from '../components/ThemedSafeAreaView';
 import { useStore } from '../store/useStore';
+import { SonarSweep, SectionLabel } from '../components/Signal';
+import { fonts } from '../theme/tokens';
 
 function formatRelativeTime(isoDate: string): string {
   const diff = Date.now() - new Date(isoDate).getTime();
@@ -39,7 +41,7 @@ const SmartScanTab = ({ navigation }: any) => {
   const [pendingCount, setPendingCount] = useState(0);
   const [latestPending, setLatestPending] = useState<Transaction[]>([]);
   const [lastScanTime, setLastScanTime] = useState<string | null>(null);
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const { preferences } = useStore();
   const isFocused = useIsFocused();
 
@@ -102,32 +104,18 @@ const SmartScanTab = ({ navigation }: any) => {
             className="items-center w-full"
           >
             {/* Icon with glow */}
-            <MotiView
-              from={{ opacity: 0.7 }}
-              animate={{ opacity: 1 }}
-              transition={{ type: 'timing', duration: 2000, loop: true }}
-            >
-              <View
-                className="w-28 h-28 rounded-full items-center justify-center mb-6"
-                style={{
-                  backgroundColor: 'rgba(10, 132, 255, 0.12)',
-                  borderWidth: 1,
-                  borderColor: 'rgba(10, 132, 255, 0.25)',
-                }}
-              >
-                <View
-                  className="w-20 h-20 rounded-full items-center justify-center"
-                  style={{ backgroundColor: 'rgba(10, 132, 255, 0.22)' }}
-                >
-                  <LucideZap color="#0A84FF" size={36} />
-                </View>
-              </View>
-            </MotiView>
+            <View className="mb-6">
+              <SonarSweep size={150} />
+            </View>
 
-            <Text className="text-primary text-3xl font-bold text-center mb-2">
+            <SectionLabel>On-device AI</SectionLabel>
+            <Text
+              className="text-center mb-2"
+              style={{ fontFamily: fonts.displayBold, fontSize: 30, letterSpacing: -0.5, marginTop: 4, color: colors.primary }}
+            >
               Smart Scan
             </Text>
-            <Text className="text-muted text-center text-sm px-8 leading-5 mb-2">
+            <Text className="text-center text-sm px-8 leading-5 mb-2" style={{ color: colors.muted }}>
               AI reads your bank SMS and auto-categorizes transactions — with account detection and anomaly alerts.
             </Text>
 
@@ -157,8 +145,8 @@ const SmartScanTab = ({ navigation }: any) => {
               activeOpacity={0.85}
               className="rounded-full px-10 py-4 mb-3 w-full items-center"
               style={{
-                backgroundColor: '#0A84FF',
-                shadowColor: '#0A84FF',
+                backgroundColor: colors.debit,
+                shadowColor: colors.debit,
                 shadowOffset: { width: 0, height: 4 },
                 shadowOpacity: 0.4,
                 shadowRadius: 16,
@@ -166,8 +154,13 @@ const SmartScanTab = ({ navigation }: any) => {
               }}
             >
               <View className="flex-row items-center">
-                <LucideZap color="#FFFFFF" size={20} />
-                <Text className="text-white text-lg font-bold ml-2">Scan SMS</Text>
+                <LucideZap color={colors.onAccent} size={18} />
+                <Text
+                  className="ml-2"
+                  style={{ fontFamily: fonts.signalBold, fontSize: 13, letterSpacing: 1.4, textTransform: 'uppercase', color: colors.onAccent }}
+                >
+                  Scan SMS
+                </Text>
               </View>
             </TouchableOpacity>
 
@@ -251,7 +244,7 @@ const SmartScanTab = ({ navigation }: any) => {
               </Text>
             </View>
             <View className="flex-1 p-4 rounded-apple-md border ml-2" style={{ backgroundColor: colors.surface, borderColor: colors.border }}>
-              <Text style={{ color: '#30D158', fontSize: 11, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>
+              <Text style={{ color: colors.credit, fontSize: 11, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>
                 AI Powered
               </Text>
               <Text style={{ color: colors.secondary, fontSize: 11, lineHeight: 16 }}>

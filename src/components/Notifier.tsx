@@ -10,11 +10,13 @@ import {
 } from 'lucide-react-native';
 import { notify, NotifyMsg } from '../utils/notify';
 import { useTheme } from '../theme/ThemeProvider';
+import { withAlpha } from '../theme/tokens';
 
+// Tone resolves to a theme color at render time so toasts follow the active pack.
 const CONFIG = {
-  success: { icon: LucideCheckCircle2, color: '#30D158', bg: '#30D15818' },
-  error:   { icon: LucideXCircle,      color: '#FF453A', bg: '#FF453A18' },
-  info:    { icon: LucideInfo,         color: '#0A84FF', bg: '#0A84FF18' },
+  success: { icon: LucideCheckCircle2, tone: 'credit' as const },
+  error:   { icon: LucideXCircle,      tone: 'danger' as const },
+  info:    { icon: LucideInfo,         tone: 'debit'  as const },
 };
 
 const AUTO_DISMISS_MS = 2800;
@@ -33,6 +35,7 @@ const NotifyItem = ({
   const { colors, isDark } = useTheme();
   const cfg = CONFIG[msg.type];
   const Icon = cfg.icon;
+  const toneColor = colors[cfg.tone];
 
   useEffect(() => {
     const t = setTimeout(onDismiss, AUTO_DISMISS_MS);
@@ -49,14 +52,14 @@ const NotifyItem = ({
         styles.pill,
         {
           top: topOffset + index * 56,
-          backgroundColor: isDark ? colors.surfaceElevated : '#FFFFFF',
-          borderColor: `${cfg.color}35`,
+          backgroundColor: isDark ? colors.surfaceElevated : colors.surface,
+          borderColor: withAlpha(toneColor, '35'),
           shadowColor: isDark ? '#000' : '#00000030',
         },
       ]}
     >
-      <View style={[styles.iconWrap, { backgroundColor: cfg.bg }]}>
-        <Icon color={cfg.color} size={16} />
+      <View style={[styles.iconWrap, { backgroundColor: withAlpha(toneColor, '18') }]}>
+        <Icon color={toneColor} size={16} />
       </View>
       <View style={styles.textWrap}>
         <Text style={[styles.text, { color: colors.primary }]} numberOfLines={1}>

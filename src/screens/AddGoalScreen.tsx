@@ -18,6 +18,7 @@ import {
   getAccounts, getCategories, Account, Category, Goal 
 } from '../services/database';
 import { useTheme } from '../theme/ThemeProvider';
+import { withAlpha } from '../theme/tokens';
 import { useStore } from '../store/useStore';
 import { CategoryPicker } from '../components/CategoryPicker';
 
@@ -160,16 +161,16 @@ export const AddGoalScreen = () => {
     field: { marginBottom: 20 },
     label: { fontSize: 11, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1, fontWeight: 'bold', color: colors.secondary },
     input: { fontSize: 18, borderBottomWidth: 1, borderBottomColor: colors.border, paddingVertical: 10, color: colors.primary },
-    amountInput: { fontSize: 36, fontWeight: 'bold', borderBottomWidth: 1, borderBottomColor: colors.border, paddingVertical: 10, color: '#34C759' },
+    amountInput: { fontSize: 36, fontWeight: 'bold', borderBottomWidth: 1, borderBottomColor: colors.border, paddingVertical: 10, color: colors.credit },
     dateRow: { flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: colors.border, paddingVertical: 12, gap: 10 },
     iosPickerContainer: { backgroundColor: colors.surface, borderRadius: 14, overflow: 'hidden', marginTop: 12, borderWidth: 1, borderColor: colors.border },
     iosPickerDone: { borderTopWidth: 1, borderTopColor: colors.border, padding: 12, alignItems: 'center' },
     pickerSheet: { backgroundColor: colors.surface, borderRadius: 14, borderWidth: 1, borderColor: colors.border, marginTop: 8, overflow: 'hidden' },
     pickerItem: { flexDirection: 'row', alignItems: 'center', padding: 14, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 10 },
     catChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, marginRight: 8, marginBottom: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, flexDirection: 'row', alignItems: 'center', gap: 6 },
-    saveButton: { height: 60, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 16, backgroundColor: '#34C759' },
+    saveButton: { height: 60, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 16, backgroundColor: colors.credit },
     deleteButton: { height: 56, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 12, borderWidth: 1, borderColor: colors.danger },
-    estimateBox: { backgroundColor: '#34C75912', borderRadius: 12, padding: 12, marginTop: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    estimateBox: { backgroundColor: withAlpha(colors.credit, '12'), borderRadius: 12, padding: 12, marginTop: 8, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
     splitRow: { flexDirection: 'row', gap: 16 },
     halfField: { flex: 1 },
   });
@@ -255,10 +256,10 @@ export const AddGoalScreen = () => {
             {/* Estimate preview */}
             {estimatedMonths !== null && estimatedMonths > 0 && (
               <View style={[s.estimateBox, { marginTop: -8, marginBottom: 20 }]}>
-                <ThemedText style={{ fontSize: 12, color: '#34C759' }}>
+                <ThemedText style={{ fontSize: 12, color: colors.credit }}>
                   Estimated time to reach goal
                 </ThemedText>
-                <ThemedText style={{ fontWeight: 'bold', color: '#34C759' }}>
+                <ThemedText style={{ fontWeight: 'bold', color: colors.credit }}>
                   {estimatedMonths < 12
                     ? `${estimatedMonths} month${estimatedMonths !== 1 ? 's' : ''}`
                     : `${Math.floor(estimatedMonths / 12)}y ${estimatedMonths % 12}m`}
@@ -287,7 +288,7 @@ export const AddGoalScreen = () => {
                   />
                   {Platform.OS === 'ios' && (
                     <TouchableOpacity onPress={() => setShowDatePicker(false)} style={s.iosPickerDone}>
-                      <ThemedText style={{ color: '#34C759', fontWeight: 'bold' }}>Done</ThemedText>
+                      <ThemedText style={{ color: colors.credit, fontWeight: 'bold' }}>Done</ThemedText>
                     </TouchableOpacity>
                   )}
                 </View>
@@ -320,19 +321,19 @@ export const AddGoalScreen = () => {
                   {accounts.map(acc => (
                     <TouchableOpacity
                       key={acc.id}
-                      style={[s.pickerItem, linkedAccountId === acc.id && { backgroundColor: '#34C75912' }]}
+                      style={[s.pickerItem, linkedAccountId === acc.id && { backgroundColor: withAlpha(colors.credit, '12') }]}
                       onPress={() => { setLinkedAccountId(acc.id); setShowAccountPicker(false); }}
                     >
-                      <LucideCreditCard color={linkedAccountId === acc.id ? '#34C759' : colors.secondary} size={16} />
+                      <LucideCreditCard color={linkedAccountId === acc.id ? colors.credit : colors.secondary} size={16} />
                       <View style={{ flex: 1 }}>
-                        <ThemedText style={{ fontWeight: 'bold', color: linkedAccountId === acc.id ? '#34C759' : colors.primary }}>
+                        <ThemedText style={{ fontWeight: 'bold', color: linkedAccountId === acc.id ? colors.credit : colors.primary }}>
                           {acc.name}
                         </ThemedText>
                         <ThemedText style={{ fontSize: 11, color: colors.secondary }}>
                           {acc.accountType} · {preferences.currency}{acc.balance.toLocaleString('en-IN')}
                         </ThemedText>
                       </View>
-                      {linkedAccountId === acc.id && <LucideCheck color="#34C759" size={16} />}
+                      {linkedAccountId === acc.id && <LucideCheck color={colors.credit} size={16} />}
                     </TouchableOpacity>
                   ))}
                 </View>

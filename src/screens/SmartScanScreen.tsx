@@ -3,7 +3,6 @@ import {
   View,
   TouchableOpacity,
   ScrollView,
-  ActivityIndicator,
   Alert,
   PermissionsAndroid,
   Platform,
@@ -68,6 +67,8 @@ import { ReviewTransactionCard } from "../components/ReviewTransactionCard";
 import * as Haptics from "expo-haptics";
 import { useFocusEffect } from "@react-navigation/native";
 import { AIModelManager } from "../services/aiModelManager";
+import { SonarSweep, SectionLabel } from "../components/Signal";
+import { fonts } from "../theme/tokens";
 
 type Phase = "scanning" | "review";
 
@@ -138,6 +139,10 @@ const SmartScanScreen = ({ navigation }: any) => {
   const [scanTotal, setScanTotal] = useState(0);
   const [scanCurrent, setScanCurrent] = useState(0);
   const [newFoundCount, setNewFoundCount] = useState(0);
+  // Live scan log — display only: last few parsed results + skip counter
+  const [scanLog, setScanLog] = useState<string[]>([]);
+  const [skippedCount, setSkippedCount] = useState(0);
+  const [currentParsing, setCurrentParsing] = useState<string | null>(null);
 
   // Review state
   const [queue, setQueue] = useState<Transaction[]>([]);
@@ -195,6 +200,9 @@ const SmartScanScreen = ({ navigation }: any) => {
         setScanCurrent(0);
         setScanTotal(0);
         setNewFoundCount(0);
+        setScanLog([]);
+        setSkippedCount(0);
+        setCurrentParsing(null);
         setAiModelDown(false);
         setOfflineTxIds(new Set());
 
@@ -400,6 +408,7 @@ const SmartScanScreen = ({ navigation }: any) => {
           if (savedHashes.has(hashSms(sms.body))) return false;
           return true;
         });
+        setSkippedCount(smsInbox.length - keywordFiltered.length);
 
         // Step 2 — match each SMS to a registered account (best-effort; unmatched
         // SMS are still included so fraud-alert formats like SBI's "ending XXXX …
@@ -462,6 +471,7 @@ const SmartScanScreen = ({ navigation }: any) => {
         for (let i = 0; i < capped.length; i++) {
           const sms = capped[i];
           setScanCurrent(i + 1);
+          setCurrentParsing(sms.matchedAccount?.name ?? 'message');
           if (sms.matchedAccount) scannedAccountIds.add(sms.matchedAccount.id);
 
           try {
@@ -479,11 +489,13 @@ const SmartScanScreen = ({ navigation }: any) => {
             // re-scan it, then skip without adding to the review queue.
             if (!parsed.isTransaction) {
               await markSmsProcessed(hashSms(sms.body));
+              setSkippedCount((c) => c + 1);
               continue;
             }
 
             if (parsed.alreadySaved) {
               await markSmsProcessed(hashSms(sms.body));
+              setSkippedCount((c) => c + 1);
               continue;
             }
 
@@ -491,6 +503,7 @@ const SmartScanScreen = ({ navigation }: any) => {
             // Layer 1: Exact rawSms body match (covers confirmed + unconfirmed)
             if (await isRawSmsAlreadyExists(sms.body)) {
               await markSmsProcessed(hashSms(sms.body));
+              setSkippedCount((c) => c + 1);
               continue;
             }
 
@@ -520,6 +533,7 @@ const SmartScanScreen = ({ navigation }: any) => {
                 )
               ) {
                 await markSmsProcessed(hashSms(sms.body));
+                setSkippedCount((c) => c + 1);
                 continue;
               }
 
@@ -542,6 +556,10 @@ const SmartScanScreen = ({ navigation }: any) => {
                 await addTransaction(txData);
                 await markSmsProcessed(hashSms(sms.body));
                 setNewFoundCount((c) => c + 1);
+                setScanLog((prev) => [
+                  ...prev.slice(-4),
+                  `${txData.merchant ?? 'Unknown'} ${txData.type === 'credit' ? '+' : '−'}${currency}${(txData.amount ?? 0).toLocaleString('en-IN')} · ${(txData.category ?? 'other').toLowerCase()} · auto`,
+                ]);
               } else {
                 const txData = {
                   ...parsed.transaction,
@@ -555,14 +573,20 @@ const SmartScanScreen = ({ navigation }: any) => {
                 newlySavedIds.push(newId);
                 if (parsed.parsedOffline) offlineSavedIds.push(newId);
                 setNewFoundCount((c) => c + 1);
+                setScanLog((prev) => [
+                  ...prev.slice(-4),
+                  `${txData.merchant ?? 'Unknown'} ${txData.type === 'credit' ? '+' : '−'}${currency}${(txData.amount ?? 0).toLocaleString('en-IN')} · ${(txData.category ?? 'other').toLowerCase()}`,
+                ]);
               }
             } else {
               await markSmsProcessed(hashSms(sms.body));
+              setSkippedCount((c) => c + 1);
             }
           } catch {
             // Skip unparseable SMS — it will not be marked as processed, so it can be retried
           }
         }
+        setCurrentParsing(null);
 
         // Advance cursor AFTER the processing loop — not before — so a crash during
         // parsing doesn't permanently skip SMS that were never actually saved.
@@ -770,30 +794,17 @@ const SmartScanScreen = ({ navigation }: any) => {
             animate={{ opacity: 1, scale: 1 }}
             className="w-full items-center"
           >
-            {/* Animated pulse ring */}
-            <MotiView
-              from={{ scale: 1, opacity: 0.6 }}
-              animate={{ scale: 1.15, opacity: 0.2 }}
-              transition={{ type: "timing", duration: 1200, loop: true }}
-              className="absolute w-32 h-32 rounded-full"
-              style={{ backgroundColor: colors.accent }}
-            />
-            <View
-              className="w-28 h-28 rounded-full items-center justify-center mb-10"
-              style={{
-                backgroundColor: `${colors.accent}25`,
-                borderWidth: 1,
-                borderColor: `${colors.accent}40`,
-              }}
-            >
-              <ActivityIndicator color={colors.accent} size="large" />
-            </View>
+            {/* Sonar sweep — the on-device AI listening to your inbox */}
+            <SonarSweep size={180} style={{ marginBottom: 32 }} />
 
-            <ThemedText className="font-bold text-2xl mb-2">
+            <ThemedText
+              className="text-2xl mb-2"
+              style={{ fontFamily: fonts.signalBold, fontVariant: ["tabular-nums"] }}
+            >
               {scanTotal > 0
                 ? `${scanCurrent} / ${scanTotal}`
                 : isModelInitializing
-                  ? "Initializing AI Engine…"
+                  ? "Listening…"
                   : "Preparing…"}
             </ThemedText>
             <ThemedText type="secondary" className="text-sm text-center">
@@ -801,6 +812,9 @@ const SmartScanScreen = ({ navigation }: any) => {
                 ? "Loading local Qwen2.5-1.5B model context…"
                 : `Matching SMS to your ${accounts.filter((a) => a.accountType === "bank" || a.accountType === "credit_card").length} tracked account${accounts.filter((a) => a.accountType === "bank" || a.accountType === "credit_card").length !== 1 ? "s" : ""}`}
             </ThemedText>
+            <SectionLabel color={colors.ai} style={{ marginTop: 10 }}>
+              All processing on-device · nothing uploaded
+            </SectionLabel>
             {scanFromDate && (
               <ThemedText type="secondary" className="text-xs mb-1 mt-1">
                 Scanning from{" "}
@@ -848,11 +862,37 @@ const SmartScanScreen = ({ navigation }: any) => {
               </View>
             )}
 
+            {/* Live parse log — the signal trace of this scan */}
+            {(scanLog.length > 0 || skippedCount > 0 || currentParsing) && (
+              <MotiView
+                from={{ opacity: 0, translateY: 8 }}
+                animate={{ opacity: 1, translateY: 0 }}
+                className="w-full p-3.5 rounded-apple-md border"
+                style={{ backgroundColor: colors.surface, borderColor: colors.border, gap: 6 }}
+              >
+                {scanLog.slice(-4).map((line, i) => (
+                  <ThemedText key={`${i}-${line}`} font="signal" style={{ fontSize: 10, color: colors.credit }} numberOfLines={1}>
+                    ＋ {line}
+                  </ThemedText>
+                ))}
+                {currentParsing && (
+                  <ThemedText font="signal" style={{ fontSize: 10, color: colors.debit }} numberOfLines={1}>
+                    ◌ parsing {currentParsing} …
+                  </ThemedText>
+                )}
+                {skippedCount > 0 && (
+                  <ThemedText font="signal" style={{ fontSize: 10, color: colors.secondary }}>
+                    · {skippedCount} skipped (OTP / promo / duplicates)
+                  </ThemedText>
+                )}
+              </MotiView>
+            )}
+
             {newFoundCount > 0 && (
               <MotiView
                 from={{ opacity: 0, translateY: 8 }}
                 animate={{ opacity: 1, translateY: 0 }}
-                className="px-5 py-3 rounded-full flex-row items-center"
+                className="px-5 py-3 rounded-full flex-row items-center mt-4"
                 style={{ backgroundColor: `${colors.success}15` }}
               >
                 <LucideCheck color={colors.success} size={14} />

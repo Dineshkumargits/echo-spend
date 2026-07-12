@@ -13,21 +13,16 @@ import {
   Pressable,
   KeyboardAvoidingView,
 } from 'react-native';
-import { MotiView } from 'moti';
 import {
   LucideSearch,
   LucideX,
-  LucideChevronLeft,
   LucideSlidersHorizontal,
-  LucideFilter,
   LucideRepeat,
-  LucideCheck,
   LucideSmartphone,
   LucidePenLine,
   LucideZap,
-  LucideAlertCircle,
+  LucideRadio,
 } from 'lucide-react-native';
-import { renderCategoryIcon } from '../components/CategoryManager';
 import { FlashList } from '@shopify/flash-list';
 import { useIsFocused, useNavigation, useRoute } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
@@ -42,6 +37,12 @@ import {
   Account,
 } from '../services/database';
 import { useTheme } from '../theme/ThemeProvider';
+import {
+  ScreenHeader, HeaderIconButton, Segmented, SignalRow, GroupLabel,
+  PillButton, StatBlock, EmptyState, SheetHandle, PrimaryButton, FieldLabel, TextField,
+} from '../components/Kit';
+import { AmountText, PulseDot, SectionLabel } from '../components/Signal';
+import { fonts } from '../theme/tokens';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -126,13 +127,26 @@ const countActiveFilters = (f: Filters): number => {
   return count;
 };
 
-const formatAmount = (amount: number, currency = '₹') =>
-  `${currency}${amount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+const fmtShortMoney = (n: number, currency = '₹') => {
+  if (n >= 100000) return `${currency}${(n / 100000).toFixed(1)}L`;
+  if (n >= 1000) return `${currency}${(n / 1000).toFixed(1)}k`;
+  return `${currency}${Math.round(n).toLocaleString('en-IN')}`;
+};
 
-
-const formatDateShort = (dateStr: string) => {
+/** Mono timeline group label: TODAY / YESTERDAY / MON 8 JUL */
+const dayLabel = (dateStr: string) => {
   const d = new Date(dateStr);
-  return `${d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} · ${d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`;
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return 'Today';
+  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  return d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
+};
+
+const timeOnly = (dateStr: string) => {
+  const d = new Date(dateStr);
+  return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
 };
 
 // ─── TransactionsScreen ───────────────────────────────────────────────────────
@@ -329,7 +343,6 @@ const TransactionsScreen = () => {
   };
 
   const activeFilterCount = countActiveFilters(filters);
-  const themedStyles = useMemo(() => createThemedStyles(colors), [colors]);
 
   // Memoize category lookup map to avoid O(n) find on every transaction row render
   const categoryMap = useMemo(() =>
@@ -358,641 +371,159 @@ const TransactionsScreen = () => {
     return '';
   };
 
-  // ─── Render helpers ──────────────────────────────────────────────────────
-
-  const amountColor = (item: Transaction) => {
-    if (item.type === 'credit') return colors.success;
+  // ── Signal semantics per row ──────────────────────────────────────────────
+  const amountKind = (item: Transaction): 'debit' | 'credit' | 'transfer' => {
+    if (item.type === 'credit') return 'credit';
     if (item.type === 'transfer') {
-      if (filters.accountId && item.toAccountId === filters.accountId) return colors.success;
-      if (filters.accountId && item.accountId === filters.accountId) return colors.primary;
-      return colors.warning;
+      if (filters.accountId && item.toAccountId === filters.accountId) return 'credit';
+      if (filters.accountId && item.accountId === filters.accountId) return 'debit';
+      return 'transfer';
     }
-    return colors.primary;
+    return 'debit';
   };
 
-  const amountPrefix = (item: Transaction) => {
-    if (item.type === 'credit') return '+';
-    if (item.type === 'transfer') {
-      if (filters.accountId && item.toAccountId === filters.accountId) return '+';
-      if (filters.accountId && item.accountId === filters.accountId) return '-';
-      return '⇄ ';
-    }
-    return '-';
-  };
-
-  const sourceIcon = (source?: string) => {
-    if (source === 'sms') return <LucideSmartphone color={colors.secondary} size={13} />;
-    if (source === 'manual') return <LucidePenLine color={colors.secondary} size={13} />;
-    if (source === 'auto') return <LucideZap color={colors.secondary} size={13} />;
+  const sourceGlyph = (source?: string) => {
+    if (source === 'sms') return <LucideSmartphone color={colors.muted} size={11} />;
+    if (source === 'manual') return <LucidePenLine color={colors.muted} size={11} />;
+    if (source === 'auto') return <LucideZap color={colors.muted} size={11} />;
     return null;
   };
 
-  // ─── Transaction Row ──────────────────────────────────────────────────────
+  // Date grouping only makes sense in chronological sorts
+  const grouped = filters.sort === 'newest' || filters.sort === 'oldest';
 
-  const renderItem = ({ item }: { item: Transaction }) => {
-    const cat = categoryMap.get(item.category);
+  // Flatten headers + rows into one heterogeneous list. Each FlashList cell then
+  // renders a single element (a header OR a row) — never a wrapper containing
+  // both — which is what FlashList v2's auto-measurement needs to size cells
+  // correctly. Wrapping a header and a row in one <View> was throwing off the
+  // measurement and causing the rows to render misaligned/overlapping.
+  type ListRow =
+    | { kind: 'header'; id: string; label: string }
+    | { kind: 'tx'; id: string; tx: Transaction };
+
+  const listData = useMemo<ListRow[]>(() => {
+    const out: ListRow[] = [];
+    let lastLabel = '';
+    transactions.forEach(tx => {
+      if (grouped) {
+        const label = dayLabel(tx.date);
+        if (label !== lastLabel) {
+          out.push({ kind: 'header', id: `h-${label}`, label });
+          lastLabel = label;
+        }
+      }
+      out.push({ kind: 'tx', id: `t-${tx.id}`, tx });
+    });
+    return out;
+  }, [transactions, grouped]);
+
+  // ─── Timeline row ─────────────────────────────────────────────────────────
+
+  const renderItem = ({ item }: { item: ListRow }) => {
+    if (item.kind === 'header') {
+      return <GroupLabel label={item.label} />;
+    }
+    const tx = item.tx;
+    const cat = categoryMap.get(tx.category);
+    const kind = amountKind(tx);
+    const nodeColor = kind === 'credit' ? colors.credit : kind === 'debit' ? colors.debit : colors.secondary;
+
     return (
-      <TouchableOpacity
-        onPress={() => openDetail(item)}
-        activeOpacity={0.7}
-        style={[themedStyles.txRow, { borderBottomColor: colors.border }]}
-      >
-        {/* Left icon */}
-        <View
-          style={[
-            themedStyles.txIcon,
-            { backgroundColor: cat?.color ? `${cat.color}20` : colors.translucent }
-          ]}
-        >
-          {renderCategoryIcon(cat?.icon ?? '📁', cat?.color || colors.secondary, 18)}
-        </View>
-
-        {/* Middle info */}
-        <View style={{ flex: 1, marginHorizontal: 12 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <ThemedText className="font-bold text-[15px]" numberOfLines={1} style={{ flex: 1 }}>
-              {item.merchant}
-            </ThemedText>
-            {item.isRecurring ? (
-              <LucideRepeat color={colors.accent} size={12} />
-            ) : null}
-            {!item.isConfirmed ? (
-              <LucideAlertCircle color={colors.warning} size={12} />
-            ) : null}
-          </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 3, gap: 5 }}>
-            {sourceIcon(item.source)}
-            <ThemedText type="secondary" className="text-xs flex-1" numberOfLines={1}>
-              {formatDateShort(item.date)} · {item.category}{getAccountLabel(item)}
-              {item.tags && item.tags.length > 0 ? ` · ${item.tags.map((t: string) => '#' + t).join(' ')}` : ''}
-            </ThemedText>
-          </View>
-        </View>
-        <ThemedText className="font-bold text-[15px]" style={{ color: amountColor(item) }}>
-          {amountPrefix(item)}{formatAmount(item.amount, currency)}
-        </ThemedText>
-      </TouchableOpacity>
+      <SignalRow
+        emoji={cat?.icon ?? '📁'}
+        iconColor={cat?.color || colors.secondary}
+        title={tx.merchant}
+        subtitle={`${timeOnly(tx.date)} · ${tx.category}${getAccountLabel(tx)}${tx.tags && tx.tags.length > 0 ? ` · ${tx.tags.map((t: string) => '#' + t).join(' ')}` : ''}`}
+        nodeColor={nodeColor}
+        badges={
+          <>
+            {sourceGlyph(tx.source)}
+            {tx.isRecurring ? <LucideRepeat color={colors.ai} size={11} /> : null}
+            {!tx.isConfirmed ? <PulseDot size={6} /> : null}
+          </>
+        }
+        right={
+          <AmountText
+            value={tx.amount}
+            kind={kind}
+            showSign={kind !== 'transfer'}
+            currency={currency}
+            masked={preferences.hideAmounts}
+            size={14}
+          />
+        }
+        onPress={() => openDetail(tx)}
+        rail={false}
+      />
     );
   };
-
-
-
-  const SectionLabel = ({ label }: { label: string }) => (
-    <ThemedText
-      type="secondary"
-      style={{ fontSize: 10, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8, marginTop: 16 }}
-    >
-      {label}
-    </ThemedText>
-  );
 
   // ─── Main render ──────────────────────────────────────────────────────────
 
   return (
     <ThemedSafeAreaView edges={['top', 'bottom']}>
-      <View style={themedStyles.header}>
-        {canGoBack && (
-          <TouchableOpacity
-            onPress={() => navigation.goBack()}
-            style={[themedStyles.iconBtn, { backgroundColor: colors.translucent, borderColor: colors.border }]}
-          >
-            <LucideChevronLeft color={colors.primary} size={22} />
-          </TouchableOpacity>
-        )}
-        <ThemedText className="text-xl font-bold flex-1" style={canGoBack ? { marginLeft: 12 } : undefined}>Transactions</ThemedText>
-      </View>
+      <ScreenHeader
+        eyebrow="Ledger"
+        title="Transactions"
+        onBack={canGoBack ? () => navigation.goBack() : undefined}
+        right={
+          <HeaderIconButton onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setShowFilters(true); }} tint={activeFilterCount > 0 ? colors.accent : undefined}>
+            <LucideSlidersHorizontal color={activeFilterCount > 0 ? colors.accent : colors.secondary} size={17} />
+            {activeFilterCount > 0 && (
+              <View style={{ position: 'absolute', top: -3, right: -3, backgroundColor: colors.accent, borderRadius: 99, minWidth: 15, height: 15, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3 }}>
+                <ThemedText font="signal" style={{ fontSize: 8, color: colors.background }}>{activeFilterCount}</ThemedText>
+              </View>
+            )}
+          </HeaderIconButton>
+        }
+      />
 
-      {/* ── Search bar ── */}
-      <View style={themedStyles.searchBar}>
-        <LucideSearch color={colors.muted} size={18} />
-        <TextInput
-          placeholder="Search merchants, categories, or tags…"
-          placeholderTextColor={colors.muted}
-          style={[themedStyles.searchInput, { color: colors.primary }]}
+      {/* ── Search ── */}
+      <View style={{ paddingHorizontal: 24, marginBottom: 10 }}>
+        <TextField
+          placeholder="Search merchants, categories, #tags…"
           value={search}
           onChangeText={setSearch}
           returnKeyType="search"
           autoCorrect={false}
+          leading={<LucideSearch color={colors.muted} size={16} />}
+          trailing={search.length > 0 ? (
+            <TouchableOpacity onPress={() => setSearch('')} hitSlop={8}>
+              <LucideX color={colors.muted} size={15} />
+            </TouchableOpacity>
+          ) : undefined}
         />
-        {search.length > 0 && (
-          <TouchableOpacity onPress={() => setSearch('')}>
-            <LucideX color={colors.muted} size={16} />
-          </TouchableOpacity>
-        )}
       </View>
 
-      {/* ── Quick Filter Bar ── */}
-      <View style={{ marginBottom: 4 }}>
-        <ScrollView 
-          horizontal 
-          showsHorizontalScrollIndicator={false} 
-          contentContainerStyle={themedStyles.quickFilterScroll}
-        >
-          {/* Advanced Filter Button */}
-          <TouchableOpacity
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              setShowFilters(true);
-            }}
-            style={[
-              themedStyles.quickFilterBtn,
-              {
-                backgroundColor: activeFilterCount > 0 ? `${colors.accent}15` : colors.surface,
-                borderColor: activeFilterCount > 0 ? colors.accent : colors.border,
-              }
-            ]}
-          >
-            <LucideSlidersHorizontal color={activeFilterCount > 0 ? colors.accent : colors.primary} size={14} />
-            <ThemedText 
-              className="font-bold text-xs ml-1.5" 
-              style={{ color: activeFilterCount > 0 ? colors.accent : colors.primary }}
-            >
-              Filters
-            </ThemedText>
-            {activeFilterCount > 0 && (
-              <View style={{ marginLeft: 6, backgroundColor: colors.accent, paddingHorizontal: 5, paddingVertical: 1.5, borderRadius: 99 }}>
-                <ThemedText style={{ color: '#FFF', fontSize: 9, fontWeight: '900' }}>{activeFilterCount}</ThemedText>
-              </View>
-            )}
-          </TouchableOpacity>
+      {/* ── Type segmented (underline style) ── */}
+      <Segmented
+        value={filters.type}
+        onChange={t => setFilters(f => ({ ...f, type: t }))}
+        options={[
+          { key: 'all', label: 'All' },
+          { key: 'debit', label: 'Out', color: colors.debit },
+          { key: 'credit', label: 'In', color: colors.credit },
+          { key: 'transfer', label: 'Moves', color: colors.secondary },
+        ]}
+      />
 
-          {/* Quick Chip: Expense */}
-          <TouchableOpacity
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              setFilters(f => ({ ...f, type: f.type === 'debit' ? 'all' : 'debit' }));
-            }}
-            style={[
-              themedStyles.quickFilterBtn,
-              {
-                backgroundColor: filters.type === 'debit' ? `${colors.danger}15` : colors.surface,
-                borderColor: filters.type === 'debit' ? colors.danger : colors.border,
-              }
-            ]}
-          >
-            <ThemedText 
-              className="font-bold text-xs" 
-              style={{ color: filters.type === 'debit' ? colors.danger : colors.secondary }}
-            >
-              Expense
-            </ThemedText>
-          </TouchableOpacity>
-
-          {/* Quick Chip: Income */}
-          <TouchableOpacity
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              setFilters(f => ({ ...f, type: f.type === 'credit' ? 'all' : 'credit' }));
-            }}
-            style={[
-              themedStyles.quickFilterBtn,
-              {
-                backgroundColor: filters.type === 'credit' ? `${colors.success}15` : colors.surface,
-                borderColor: filters.type === 'credit' ? colors.success : colors.border,
-              }
-            ]}
-          >
-            <ThemedText 
-              className="font-bold text-xs" 
-              style={{ color: filters.type === 'credit' ? colors.success : colors.secondary }}
-            >
-              Income
-            </ThemedText>
-          </TouchableOpacity>
-
-          {/* Quick Chip: This Month */}
-          <TouchableOpacity
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              setFilters(f => ({ ...f, datePreset: f.datePreset === 'month' ? 'all' : 'month' }));
-            }}
-            style={[
-              themedStyles.quickFilterBtn,
-              {
-                backgroundColor: filters.datePreset === 'month' ? `${colors.accent}15` : colors.surface,
-                borderColor: filters.datePreset === 'month' ? colors.accent : colors.border,
-              }
-            ]}
-          >
-            <ThemedText 
-              className="font-bold text-xs" 
-              style={{ color: filters.datePreset === 'month' ? colors.accent : colors.secondary }}
-            >
-              This Month
-            </ThemedText>
-          </TouchableOpacity>
-
-          {/* Quick Chip: Recurring */}
-          <TouchableOpacity
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              setFilters(f => ({ ...f, recurring: !f.recurring }));
-            }}
-            style={[
-              themedStyles.quickFilterBtn,
-              {
-                backgroundColor: filters.recurring ? `${colors.accent}15` : colors.surface,
-                borderColor: filters.recurring ? colors.accent : colors.border,
-              }
-            ]}
-          >
-            <LucideRepeat color={filters.recurring ? colors.accent : colors.secondary} size={11} />
-            <ThemedText 
-              className="font-bold text-xs ml-1" 
-              style={{ color: filters.recurring ? colors.accent : colors.secondary }}
-            >
-              Recurring
-            </ThemedText>
-          </TouchableOpacity>
-        </ScrollView>
+      {/* ── Totals strip ── */}
+      <View style={{ flexDirection: 'row', paddingHorizontal: 24, paddingVertical: 14, gap: 24, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+        <StatBlock label="Signals" value={`${stats.count}${hasMore ? '+' : ''}`} style={{ flex: 1 }} />
+        <StatBlock label="Out" value={preferences.hideAmounts ? '••••' : `−${fmtShortMoney(stats.expenses, currency)}`} color={colors.debit} style={{ flex: 1 }} />
+        <StatBlock label="In" value={preferences.hideAmounts ? '••••' : `+${fmtShortMoney(stats.income, currency)}`} color={colors.credit} style={{ flex: 1 }} />
       </View>
 
-      {/* ── Advanced Filters Modal ── */}
-      <Modal
-        visible={showFilters}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowFilters(false)}
-      >
-        <Pressable
-          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}
-          onPress={() => setShowFilters(false)}
-        >
-          <KeyboardAvoidingView 
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            style={{ maxHeight: '85%' }}
-          >
-            <Pressable
-              onPress={e => e.stopPropagation()}
-              style={[themedStyles.modalSheet, { backgroundColor: colors.surface, borderColor: colors.border }]}
-            >
-              {/* Header */}
-              <View style={[themedStyles.modalHeader, { borderBottomColor: colors.border }]}>
-                <View style={{ flex: 1 }}>
-                  <ThemedText className="font-bold text-lg">Filter Transactions</ThemedText>
-                  {activeFilterCount > 0 && (
-                    <ThemedText type="secondary" className="text-xs mt-0.5">
-                      {activeFilterCount} filter{activeFilterCount !== 1 ? 's' : ''} active
-                    </ThemedText>
-                  )}
-                </View>
-                {activeFilterCount > 0 && (
-                  <TouchableOpacity
-                    onPress={() => {
-                      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-                      setFilters(DEFAULT_FILTERS);
-                    }}
-                    style={{ marginRight: 16 }}
-                  >
-                    <ThemedText style={{ color: colors.danger, fontWeight: '700', fontSize: 13 }}>Reset All</ThemedText>
-                  </TouchableOpacity>
-                )}
-                <TouchableOpacity
-                  onPress={() => setShowFilters(false)}
-                  style={[themedStyles.closeBtn, { backgroundColor: colors.translucent }]}
-                >
-                  <LucideX color={colors.primary} size={18} />
-                </TouchableOpacity>
-              </View>
-
-              {/* Scrollable filters */}
-              <ScrollView 
-                showsVerticalScrollIndicator={false}
-                contentContainerStyle={{ padding: 20, paddingBottom: 120 }}
-              >
-                {/* Type */}
-                <SectionLabel label="Transaction Type" />
-                <View style={themedStyles.typeGrid}>
-                  {(['all', 'debit', 'credit', 'transfer'] as const).map(t => {
-                    const active = filters.type === t;
-                    const label = t === 'all' ? 'All' : t === 'debit' ? 'Expense' : t === 'credit' ? 'Income' : 'Transfer';
-                    const activeColor = t === 'debit' ? colors.danger : t === 'credit' ? colors.success : t === 'transfer' ? colors.warning : colors.accent;
-                    return (
-                      <TouchableOpacity
-                        key={t}
-                        onPress={() => setFilters(f => ({ ...f, type: t }))}
-                        style={[
-                          themedStyles.typeSegment,
-                          {
-                            backgroundColor: active ? `${activeColor}15` : colors.translucent,
-                            borderColor: active ? activeColor : 'transparent',
-                          }
-                        ]}
-                      >
-                        <ThemedText 
-                          className="font-bold text-xs" 
-                          style={{ color: active ? activeColor : colors.secondary }}
-                        >
-                          {label}
-                        </ThemedText>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-
-                {/* Date presets */}
-                <SectionLabel label="Date Preset" />
-                <View style={themedStyles.presetGrid}>
-                  {(
-                    [
-                      { id: 'all', label: 'All Time' },
-                      { id: 'today', label: 'Today' },
-                      { id: 'week', label: 'Last 7 Days' },
-                      { id: 'month', label: 'This Month' },
-                      { id: 'last_month', label: 'Last Month' },
-                      { id: 'custom', label: 'Custom' },
-                    ] as { id: DatePreset; label: string }[]
-                  ).map(item => (
-                    <TouchableOpacity
-                      key={item.id}
-                      onPress={() => setFilters(f => ({ ...f, datePreset: item.id }))}
-                      style={[
-                        themedStyles.gridChip,
-                        {
-                          backgroundColor: filters.datePreset === item.id ? `${colors.accent}15` : colors.translucent,
-                          borderColor: filters.datePreset === item.id ? colors.accent : 'transparent',
-                        }
-                      ]}
-                    >
-                      <ThemedText 
-                        className="font-bold text-xs" 
-                        style={{ color: filters.datePreset === item.id ? colors.accent : colors.secondary }}
-                      >
-                        {item.label}
-                      </ThemedText>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-
-                {/* Custom date range picker (if custom is selected) */}
-                {filters.datePreset === 'custom' && (
-                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-                    <View style={{ flex: 1 }}>
-                      <ThemedText type="secondary" style={{ fontSize: 10, fontWeight: 'bold', marginBottom: 4 }}>START DATE</ThemedText>
-                      <TextInput
-                        style={[themedStyles.dateInput, { color: colors.primary, borderColor: colors.border, backgroundColor: colors.translucent }]}
-                        placeholder="YYYY-MM-DD"
-                        placeholderTextColor={colors.muted}
-                        value={filters.customStart}
-                        onChangeText={v => setFilters(f => ({ ...f, customStart: v }))}
-                      />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <ThemedText type="secondary" style={{ fontSize: 10, fontWeight: 'bold', marginBottom: 4 }}>END DATE</ThemedText>
-                      <TextInput
-                        style={[themedStyles.dateInput, { color: colors.primary, borderColor: colors.border, backgroundColor: colors.translucent }]}
-                        placeholder="YYYY-MM-DD"
-                        placeholderTextColor={colors.muted}
-                        value={filters.customEnd}
-                        onChangeText={v => setFilters(f => ({ ...f, customEnd: v }))}
-                      />
-                    </View>
-                  </View>
-                )}
-
-                {/* Amount range */}
-                <SectionLabel label={`Amount Range (${currency})`} />
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                  <View style={{ flex: 1 }}>
-                    <ThemedText type="secondary" style={{ fontSize: 10, fontWeight: 'bold', marginBottom: 4 }}>MIN AMOUNT</ThemedText>
-                    <TextInput
-                      style={[themedStyles.dateInput, { color: colors.primary, borderColor: colors.border, backgroundColor: colors.translucent }]}
-                      placeholder="e.g. 100"
-                      placeholderTextColor={colors.muted}
-                      keyboardType="numeric"
-                      value={filters.minAmount}
-                      onChangeText={v => setFilters(f => ({ ...f, minAmount: v }))}
-                    />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <ThemedText type="secondary" style={{ fontSize: 10, fontWeight: 'bold', marginBottom: 4 }}>MAX AMOUNT</ThemedText>
-                    <TextInput
-                      style={[themedStyles.dateInput, { color: colors.primary, borderColor: colors.border, backgroundColor: colors.translucent }]}
-                      placeholder="e.g. 5000"
-                      placeholderTextColor={colors.muted}
-                      keyboardType="numeric"
-                      value={filters.maxAmount}
-                      onChangeText={v => setFilters(f => ({ ...f, maxAmount: v }))}
-                    />
-                  </View>
-                </View>
-
-                {/* Account */}
-                <SectionLabel label="Account" />
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-                  <TouchableOpacity
-                    onPress={() => setFilters(f => ({ ...f, accountId: null }))}
-                    style={[
-                      themedStyles.horizontalChip,
-                      {
-                        backgroundColor: filters.accountId === null ? `${colors.accent}15` : colors.translucent,
-                        borderColor: filters.accountId === null ? colors.accent : 'transparent',
-                      }
-                    ]}
-                  >
-                    <ThemedText className="font-bold text-xs" style={{ color: filters.accountId === null ? colors.accent : colors.secondary }}>All Accounts</ThemedText>
-                  </TouchableOpacity>
-                  {accounts.map(a => {
-                    const active = filters.accountId === a.id;
-                    const emoji = a.accountType === 'credit_card' ? '💳' : a.accountType === 'cash' ? '💵' : a.accountType === 'wallet' ? '👛' : '🏦';
-                    return (
-                      <TouchableOpacity
-                        key={a.id}
-                        onPress={() => setFilters(f => ({ ...f, accountId: f.accountId === a.id ? null : a.id }))}
-                        style={[
-                          themedStyles.horizontalChip,
-                          {
-                            backgroundColor: active ? `${colors.accent}15` : colors.translucent,
-                            borderColor: active ? colors.accent : 'transparent',
-                          }
-                        ]}
-                      >
-                        <ThemedText style={{ fontSize: 12, marginRight: 4 }}>{emoji}</ThemedText>
-                        <ThemedText className="font-bold text-xs" style={{ color: active ? colors.accent : colors.secondary }}>{a.name}</ThemedText>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
-
-                {/* Category */}
-                <SectionLabel label="Category" />
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-                  <TouchableOpacity
-                    onPress={() => setFilters(f => ({ ...f, categoryName: null }))}
-                    style={[
-                      themedStyles.horizontalChip,
-                      {
-                        backgroundColor: filters.categoryName === null ? `${colors.accent}15` : colors.translucent,
-                        borderColor: filters.categoryName === null ? colors.accent : 'transparent',
-                      }
-                    ]}
-                  >
-                    <ThemedText className="font-bold text-xs" style={{ color: filters.categoryName === null ? colors.accent : colors.secondary }}>All Categories</ThemedText>
-                  </TouchableOpacity>
-                  {categories.map(c => {
-                    const active = filters.categoryName === c.name;
-                    return (
-                      <TouchableOpacity
-                        key={c.id}
-                        onPress={() => setFilters(f => ({ ...f, categoryName: f.categoryName === c.name ? null : c.name }))}
-                        style={[
-                          themedStyles.horizontalChip,
-                          {
-                            backgroundColor: active ? `${c.color}20` : colors.translucent,
-                            borderColor: active ? c.color : 'transparent',
-                          }
-                        ]}
-                      >
-                        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: c.color, marginRight: 6 }} />
-                        <ThemedText className="font-bold text-xs" style={{ color: active ? colors.primary : colors.secondary }}>{c.name}</ThemedText>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
-
-                {/* Source */}
-                <SectionLabel label="Source" />
-                <View style={themedStyles.sourceGrid}>
-                  {(
-                    [
-                      { id: 'all', label: 'All Sources' },
-                      { id: 'sms', label: 'SMS' },
-                      { id: 'manual', label: 'Manual' },
-                      { id: 'auto', label: 'Auto' },
-                    ] as { id: SourceFilter; label: string }[]
-                  ).map(item => (
-                    <TouchableOpacity
-                      key={item.id}
-                      onPress={() => setFilters(f => ({ ...f, source: item.id }))}
-                      style={[
-                        themedStyles.gridChip,
-                        {
-                          backgroundColor: filters.source === item.id ? `${colors.accent}15` : colors.translucent,
-                          borderColor: filters.source === item.id ? colors.accent : 'transparent',
-                        }
-                      ]}
-                    >
-                      <ThemedText 
-                        className="font-bold text-xs" 
-                        style={{ color: filters.source === item.id ? colors.accent : colors.secondary }}
-                      >
-                        {item.label}
-                      </ThemedText>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-
-                {/* Sort order */}
-                <SectionLabel label="Sort By" />
-                <View style={themedStyles.presetGrid}>
-                  {(
-                    [
-                      { id: 'newest', label: 'Newest First' },
-                      { id: 'oldest', label: 'Oldest First' },
-                      { id: 'highest', label: 'Highest Amount' },
-                      { id: 'lowest', label: 'Lowest Amount' },
-                    ] as { id: SortOption; label: string }[]
-                  ).map(item => (
-                    <TouchableOpacity
-                      key={item.id}
-                      onPress={() => setFilters(f => ({ ...f, sort: item.id }))}
-                      style={[
-                        themedStyles.gridChip,
-                        {
-                          backgroundColor: filters.sort === item.id ? `${colors.accent}15` : colors.translucent,
-                          borderColor: filters.sort === item.id ? colors.accent : 'transparent',
-                        }
-                      ]}
-                    >
-                      <ThemedText 
-                        className="font-bold text-xs" 
-                        style={{ color: filters.sort === item.id ? colors.accent : colors.secondary }}
-                      >
-                        {item.label}
-                      </ThemedText>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-
-                {/* Toggles (Recurring) */}
-                <SectionLabel label="Special" />
-                <TouchableOpacity
-                  onPress={() => setFilters(f => ({ ...f, recurring: !f.recurring }))}
-                  style={[
-                    themedStyles.toggleRow,
-                    {
-                      backgroundColor: filters.recurring ? `${colors.accent}15` : colors.translucent,
-                      borderColor: filters.recurring ? colors.accent : 'transparent',
-                      marginBottom: 20,
-                    }
-                  ]}
-                >
-                  <LucideRepeat color={filters.recurring ? colors.accent : colors.secondary} size={16} />
-                  <ThemedText 
-                    className="font-bold text-xs ml-2" 
-                    style={{ color: filters.recurring ? colors.accent : colors.secondary }}
-                  >
-                    Recurring Transactions Only
-                  </ThemedText>
-                </TouchableOpacity>
-
-                {/* Spacer */}
-                <View style={{ height: 40 }} />
-              </ScrollView>
-
-              {/* Floating bottom Apply area */}
-              <View 
-                style={[
-                  themedStyles.modalFooter, 
-                  { 
-                    backgroundColor: colors.surface, 
-                    borderTopColor: colors.border,
-                  }
-                ]}
-              >
-                <TouchableOpacity
-                  onPress={() => {
-                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                    setShowFilters(false);
-                  }}
-                  style={[themedStyles.applyBtn, { backgroundColor: colors.accent }]}
-                >
-                  <LucideCheck color="#FFF" size={18} style={{ marginRight: 6 }} />
-                  <ThemedText className="font-bold" style={{ color: '#FFF' }}>
-                    Apply Filters {activeFilterCount > 0 ? `(${activeFilterCount})` : ''}
-                  </ThemedText>
-                </TouchableOpacity>
-              </View>
-            </Pressable>
-          </KeyboardAvoidingView>
-        </Pressable>
-      </Modal>
-
-      {/* ── Stats bar ── */}
-      <View style={[themedStyles.statsBar, { borderBottomColor: colors.border }]}>
-        <ThemedText type="secondary" className="text-xs">
-          {loading && transactions.length === 0
-            ? 'Calculating stats…'
-            : `${stats.count} transaction${stats.count !== 1 ? 's' : ''}${hasMore ? '+' : ''}`}
-        </ThemedText>
-        <View style={{ flexDirection: 'row', gap: 12 }}>
-          <ThemedText className="text-xs font-bold" style={{ color: colors.danger }}>
-            {`-${formatAmount(stats.expenses, currency)}`}
-          </ThemedText>
-          <ThemedText className="text-xs font-bold" style={{ color: colors.success }}>
-            {`+${formatAmount(stats.income, currency)}`}
-          </ThemedText>
-        </View>
-      </View>
-
-      {/* ── List ── */}
+      {/* ── Timeline list ── */}
       {loading && !refreshing ? (
         <ActivityIndicator color={colors.accent} style={{ marginTop: 48 }} />
       ) : (
         <FlashList
-          data={transactions}
+          data={listData}
           renderItem={renderItem}
-          keyExtractor={item => item.id.toString()}
+          keyExtractor={item => item.id}
+          getItemType={item => item.kind}
+          extraData={`${filters.accountId}-${filters.sort}-${preferences.hideAmounts}`}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -1001,8 +532,7 @@ const TransactionsScreen = () => {
               tintColor={colors.accent}
             />
           }
-
-          contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 32 }}
+          contentContainerStyle={{ paddingBottom: 32 }}
           onEndReached={() => {
             if (hasMore && !loadingMore && !loading) {
               fetchTransactions(search, filters, false);
@@ -1010,18 +540,13 @@ const TransactionsScreen = () => {
           }}
           onEndReachedThreshold={0.3}
           ListEmptyComponent={
-            <MotiView
-              from={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              style={{ alignItems: 'center', paddingTop: 80 }}
-            >
-              <LucideSearch color={colors.muted} size={48} />
-              <ThemedText type="secondary" className="mt-4 text-center">
-                {search.length > 0 || activeFilterCount > 0
-                  ? 'No transactions match your filters.'
-                  : 'No transactions yet.'}
-              </ThemedText>
-            </MotiView>
+            <EmptyState
+              icon={<LucideRadio color={colors.muted} size={44} />}
+              title="No signals here"
+              subtitle={search.length > 0 || activeFilterCount > 0
+                ? 'Nothing matches this search or filter set. Try widening the net.'
+                : 'Confirmed transactions will appear on this timeline.'}
+            />
           }
           ListFooterComponent={
             loadingMore ? (
@@ -1029,195 +554,256 @@ const TransactionsScreen = () => {
             ) : hasMore && transactions.length > 0 ? (
               <TouchableOpacity
                 onPress={() => fetchTransactions(search, filters, false)}
-                style={[themedStyles.loadMoreBtn, { borderColor: colors.border }]}
+                style={{ alignItems: 'center', paddingVertical: 16 }}
               >
-                <ThemedText type="secondary" className="text-sm">Load More</ThemedText>
+                <SectionLabel color={colors.accent}>Load more ↓</SectionLabel>
               </TouchableOpacity>
             ) : null
           }
         />
       )}
 
+      {/* ── Filter sheet ── */}
+      <Modal
+        visible={showFilters}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowFilters(false)}
+      >
+        <Pressable
+          style={{ flex: 1, backgroundColor: 'rgba(4,10,11,0.6)', justifyContent: 'flex-end' }}
+          onPress={() => setShowFilters(false)}
+        >
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={{ maxHeight: '85%' }}
+          >
+            <Pressable
+              onPress={e => e.stopPropagation()}
+              style={{
+                backgroundColor: colors.background,
+                borderTopLeftRadius: 28,
+                borderTopRightRadius: 28,
+                borderWidth: 1,
+                borderColor: colors.border,
+                maxHeight: '100%',
+              }}
+            >
+              <SheetHandle
+                title="Tune the signal"
+                onClose={() => setShowFilters(false)}
+                right={activeFilterCount > 0 ? (
+                  <TouchableOpacity
+                    onPress={() => {
+                      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                      setFilters(DEFAULT_FILTERS);
+                    }}
+                  >
+                    <SectionLabel color={colors.danger}>Reset</SectionLabel>
+                  </TouchableOpacity>
+                ) : undefined}
+              />
+
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 24 }}
+              >
+                {/* Date presets */}
+                <FieldLabel style={{ marginTop: 14 }}>Window</FieldLabel>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                  {(
+                    [
+                      { id: 'all', label: 'All time' },
+                      { id: 'today', label: 'Today' },
+                      { id: 'week', label: '7 days' },
+                      { id: 'month', label: 'This month' },
+                      { id: 'last_month', label: 'Last month' },
+                      { id: 'custom', label: 'Custom' },
+                    ] as { id: DatePreset; label: string }[]
+                  ).map(item => (
+                    <PillButton
+                      key={item.id}
+                      label={item.label}
+                      active={filters.datePreset === item.id}
+                      onPress={() => setFilters(f => ({ ...f, datePreset: item.id }))}
+                    />
+                  ))}
+                </View>
+
+                {filters.datePreset === 'custom' && (
+                  <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+                    <View style={{ flex: 1 }}>
+                      <FieldLabel>From</FieldLabel>
+                      <TextField
+                        placeholder="YYYY-MM-DD"
+                        value={filters.customStart}
+                        onChangeText={v => setFilters(f => ({ ...f, customStart: v }))}
+                        style={{ fontFamily: fonts.signal, fontSize: 13 }}
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <FieldLabel>To</FieldLabel>
+                      <TextField
+                        placeholder="YYYY-MM-DD"
+                        value={filters.customEnd}
+                        onChangeText={v => setFilters(f => ({ ...f, customEnd: v }))}
+                        style={{ fontFamily: fonts.signal, fontSize: 13 }}
+                      />
+                    </View>
+                  </View>
+                )}
+
+                {/* Amount range */}
+                <FieldLabel style={{ marginTop: 20 }}>Amount range ({currency})</FieldLabel>
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                  <View style={{ flex: 1 }}>
+                    <TextField
+                      placeholder="min"
+                      keyboardType="numeric"
+                      value={filters.minAmount}
+                      onChangeText={v => setFilters(f => ({ ...f, minAmount: v }))}
+                      style={{ fontFamily: fonts.signal, fontSize: 13 }}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <TextField
+                      placeholder="max"
+                      keyboardType="numeric"
+                      value={filters.maxAmount}
+                      onChangeText={v => setFilters(f => ({ ...f, maxAmount: v }))}
+                      style={{ fontFamily: fonts.signal, fontSize: 13 }}
+                    />
+                  </View>
+                </View>
+
+                {/* Account */}
+                <FieldLabel style={{ marginTop: 20 }}>Account</FieldLabel>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                  <PillButton
+                    label="All"
+                    active={filters.accountId === null}
+                    onPress={() => setFilters(f => ({ ...f, accountId: null }))}
+                  />
+                  {accounts.map(a => (
+                    <PillButton
+                      key={a.id}
+                      label={a.name}
+                      active={filters.accountId === a.id}
+                      onPress={() => setFilters(f => ({ ...f, accountId: f.accountId === a.id ? null : a.id }))}
+                    />
+                  ))}
+                </ScrollView>
+
+                {/* Category */}
+                <FieldLabel style={{ marginTop: 20 }}>Category</FieldLabel>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                  <PillButton
+                    label="All"
+                    active={filters.categoryName === null}
+                    onPress={() => setFilters(f => ({ ...f, categoryName: null }))}
+                  />
+                  {categories.map(c => (
+                    <PillButton
+                      key={c.id}
+                      label={c.name}
+                      color={c.color}
+                      active={filters.categoryName === c.name}
+                      onPress={() => setFilters(f => ({ ...f, categoryName: f.categoryName === c.name ? null : c.name }))}
+                    />
+                  ))}
+                </ScrollView>
+
+                {/* Tag */}
+                {tagsList.length > 0 && (
+                  <>
+                    <FieldLabel style={{ marginTop: 20 }}>Tag</FieldLabel>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                      <PillButton
+                        label="All"
+                        active={filters.tagValue === null}
+                        onPress={() => setFilters(f => ({ ...f, tagValue: null }))}
+                      />
+                      {tagsList.map(t => (
+                        <PillButton
+                          key={t}
+                          label={`#${t}`}
+                          color={colors.ai}
+                          active={filters.tagValue === t}
+                          onPress={() => setFilters(f => ({ ...f, tagValue: f.tagValue === t ? null : t }))}
+                        />
+                      ))}
+                    </ScrollView>
+                  </>
+                )}
+
+                {/* Source */}
+                <FieldLabel style={{ marginTop: 20 }}>Source</FieldLabel>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                  {(
+                    [
+                      { id: 'all', label: 'All' },
+                      { id: 'sms', label: 'SMS' },
+                      { id: 'manual', label: 'Manual' },
+                      { id: 'auto', label: 'Auto' },
+                    ] as { id: SourceFilter; label: string }[]
+                  ).map(item => (
+                    <PillButton
+                      key={item.id}
+                      label={item.label}
+                      active={filters.source === item.id}
+                      onPress={() => setFilters(f => ({ ...f, source: item.id }))}
+                    />
+                  ))}
+                </View>
+
+                {/* Sort */}
+                <FieldLabel style={{ marginTop: 20 }}>Order</FieldLabel>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                  {(
+                    [
+                      { id: 'newest', label: 'Newest' },
+                      { id: 'oldest', label: 'Oldest' },
+                      { id: 'highest', label: 'Biggest' },
+                      { id: 'lowest', label: 'Smallest' },
+                    ] as { id: SortOption; label: string }[]
+                  ).map(item => (
+                    <PillButton
+                      key={item.id}
+                      label={item.label}
+                      active={filters.sort === item.id}
+                      onPress={() => setFilters(f => ({ ...f, sort: item.id }))}
+                    />
+                  ))}
+                </View>
+
+                {/* Recurring toggle */}
+                <FieldLabel style={{ marginTop: 20 }}>Special</FieldLabel>
+                <PillButton
+                  label="Recurring only"
+                  icon={<LucideRepeat color={filters.recurring ? colors.ai : colors.secondary} size={12} />}
+                  color={colors.ai}
+                  active={filters.recurring}
+                  onPress={() => setFilters(f => ({ ...f, recurring: !f.recurring }))}
+                  style={{ alignSelf: 'flex-start' }}
+                />
+
+                <View style={{ height: 24 }} />
+
+                <PrimaryButton
+                  label={activeFilterCount > 0 ? `Apply · ${activeFilterCount} active` : 'Apply'}
+                  onPress={() => {
+                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                    setShowFilters(false);
+                  }}
+                  style={{ marginBottom: Platform.OS === 'ios' ? 20 : 8 }}
+                />
+              </ScrollView>
+            </Pressable>
+          </KeyboardAvoidingView>
+        </Pressable>
+      </Modal>
     </ThemedSafeAreaView>
   );
 };
-
-// ─── Styles ───────────────────────────────────────────────────────────────────
-
-const createThemedStyles = (colors: any) =>
-  StyleSheet.create({
-    header: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 20,
-      paddingTop: 8,
-      paddingBottom: 12,
-    },
-    iconBtn: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderWidth: 1,
-    },
-    badge: {
-      position: 'absolute',
-      top: -4,
-      right: -4,
-      minWidth: 16,
-      height: 16,
-      borderRadius: 8,
-      alignItems: 'center',
-      justifyContent: 'center',
-      paddingHorizontal: 3,
-    },
-    searchBar: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      marginHorizontal: 20,
-      marginBottom: 12,
-      paddingHorizontal: 14,
-      paddingVertical: 10,
-      borderRadius: 14,
-      backgroundColor: colors.surface,
-      borderWidth: 1,
-      borderColor: colors.border,
-      gap: 10,
-    },
-    searchInput: {
-      flex: 1,
-      fontSize: 15,
-      padding: 0,
-    },
-    quickFilterScroll: {
-      paddingHorizontal: 20,
-      paddingBottom: 16,
-      gap: 8,
-      flexDirection: 'row',
-    },
-    quickFilterBtn: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 14,
-      paddingVertical: 8,
-      borderRadius: 99,
-      borderWidth: 1,
-    },
-    modalSheet: {
-      borderTopLeftRadius: 24,
-      borderTopRightRadius: 24,
-      borderWidth: 1,
-      maxHeight: '100%',
-    },
-    modalHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 20,
-      paddingVertical: 18,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-    },
-    closeBtn: {
-      width: 32,
-      height: 32,
-      borderRadius: 16,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    typeGrid: {
-      flexDirection: 'row',
-      gap: 8,
-    },
-    typeSegment: {
-      flex: 1,
-      alignItems: 'center',
-      justifyContent: 'center',
-      paddingVertical: 12,
-      borderRadius: 12,
-      borderWidth: 1,
-    },
-    presetGrid: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 8,
-    },
-    sourceGrid: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 8,
-    },
-    gridChip: {
-      paddingHorizontal: 16,
-      paddingVertical: 10,
-      borderRadius: 12,
-      borderWidth: 1,
-      minWidth: '28%',
-      flexGrow: 1,
-      alignItems: 'center',
-    },
-    horizontalChip: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 14,
-      paddingVertical: 10,
-      borderRadius: 12,
-      borderWidth: 1,
-    },
-    toggleRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      padding: 14,
-      borderRadius: 12,
-      borderWidth: 1,
-    },
-    modalFooter: {
-      paddingHorizontal: 20,
-      paddingTop: 12,
-      paddingBottom: Platform.OS === 'ios' ? 28 : 16,
-      borderTopWidth: StyleSheet.hairlineWidth,
-    },
-    applyBtn: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      paddingVertical: 14,
-      borderRadius: 14,
-    },
-    dateInput: {
-      fontSize: 13,
-      paddingHorizontal: 10,
-      paddingVertical: 10,
-      borderRadius: 10,
-      borderWidth: 1,
-    },
-    statsBar: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      paddingHorizontal: 20,
-      paddingVertical: 8,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-    },
-    txRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingVertical: 14,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-    },
-    txIcon: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    loadMoreBtn: {
-      alignItems: 'center',
-      paddingVertical: 14,
-      marginTop: 8,
-      borderRadius: 12,
-      borderWidth: 1,
-    },
-  });
 
 export default TransactionsScreen;

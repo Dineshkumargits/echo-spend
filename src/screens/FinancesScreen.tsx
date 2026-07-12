@@ -23,6 +23,8 @@ import { useTheme } from '../theme/ThemeProvider';
 import { useStore } from '../store/useStore';
 import * as Haptics from 'expo-haptics';
 import { notify } from '../utils/notify';
+import { SectionLabel } from '../components/Signal';
+import { fonts, withAlpha } from '../theme/tokens';
 
 // ─── Quick-action modal ─────────────────────────────────────────────────────
 interface QuickActionState {
@@ -189,7 +191,7 @@ const QuickActionModal = ({
 
 // ─── Main Screen ────────────────────────────────────────────────────────────
 
-export const FinancesScreen = ({ navigation }: any) => {
+export const FinancesScreen = ({ navigation, route }: any) => {
   const { colors, isDark } = useTheme();
   const { preferences } = useStore();
   const isFocused = useIsFocused();
@@ -206,10 +208,33 @@ export const FinancesScreen = ({ navigation }: any) => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [quickAction, setQuickAction] = useState<QuickActionState | null>(null);
+  const [highlightedId, setHighlightedId] = useState<number | null>(null);
 
   useEffect(() => {
     if (isFocused) loadData();
   }, [isFocused]);
+
+  useEffect(() => {
+    if (isFocused && route.params?.initialTab) {
+      const tab = route.params.initialTab;
+      if (TABS.includes(tab)) {
+        setActiveTab(tab);
+        const index = TABS.indexOf(tab);
+        setTimeout(() => {
+          pagerRef.current?.setPage(index);
+        }, 100);
+
+        if (route.params.highlightId !== undefined) {
+          setHighlightedId(route.params.highlightId);
+          setTimeout(() => {
+            setHighlightedId(null);
+          }, 2000);
+        }
+
+        navigation.setParams({ initialTab: undefined, highlightId: undefined });
+      }
+    }
+  }, [isFocused, route.params?.initialTab, route.params?.highlightId]);
 
   const loadData = async () => {
     setLoading(true);
@@ -336,10 +361,16 @@ export const FinancesScreen = ({ navigation }: any) => {
             : null;
           const debitAcc = accountName(sub.debitAccountId);
 
+          const isHighlighted = highlightedId === sub.id;
+
           return (
             <TouchableOpacity
               key={sub.id}
-              style={[styles.card, isUrgent && { borderColor: `${colors.danger}50` }]}
+              style={[
+                styles.card,
+                isUrgent && { borderColor: `${colors.danger}50` },
+                isHighlighted && { borderColor: colors.accent, borderWidth: 2, shadowColor: colors.accent, shadowOpacity: 0.3, shadowRadius: 10, elevation: 8 }
+              ]}
               onPress={() => navigation.navigate('AddSubscription', { subscriptionToEdit: sub })}
               activeOpacity={0.8}
             >
@@ -428,18 +459,18 @@ export const FinancesScreen = ({ navigation }: any) => {
     return (
       <MotiView from={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 1.05 }}>
         {goals.length > 0 && (
-          <View style={[styles.summaryCard, { backgroundColor: '#34C75912', borderColor: '#34C75930' }]}>
+          <View style={[styles.summaryCard, { backgroundColor: withAlpha(colors.credit, '12'), borderColor: withAlpha(colors.credit, '30') }]}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-              <LucideTarget color="#34C759" size={18} />
+              <LucideTarget color={colors.credit} size={18} />
               <View>
                 <ThemedText style={{ fontSize: 11, color: colors.secondary, textTransform: 'uppercase', fontWeight: 'bold' }}>Total Saved</ThemedText>
-                <ThemedText style={{ fontWeight: 'bold', fontSize: 22, color: '#34C759' }}>
+                <ThemedText style={{ fontWeight: 'bold', fontSize: 22, color: colors.credit }}>
                   {preferences.currency}{totalSaved.toLocaleString('en-IN')}
                 </ThemedText>
               </View>
               <View style={{ marginLeft: 'auto', alignItems: 'flex-end' }}>
                 <ThemedText style={{ fontSize: 10, color: colors.secondary }}>of {preferences.currency}{totalTarget.toLocaleString('en-IN')}</ThemedText>
-                <ThemedText style={{ fontSize: 10, color: '#34C759', fontWeight: 'bold' }}>
+                <ThemedText style={{ fontSize: 10, color: colors.credit, fontWeight: 'bold' }}>
                   {totalTarget > 0 ? Math.round((totalSaved / totalTarget) * 100) : 0}% overall
                 </ThemedText>
               </View>
@@ -457,16 +488,21 @@ export const FinancesScreen = ({ navigation }: any) => {
             ? Math.ceil(remaining / monthsLeft)
             : null;
 
+          const isHighlighted = highlightedId === goal.id;
+
           return (
             <TouchableOpacity
               key={goal.id}
-              style={styles.card}
+              style={[
+                styles.card,
+                isHighlighted && { borderColor: colors.accent, borderWidth: 2, shadowColor: colors.accent, shadowOpacity: 0.3, shadowRadius: 10, elevation: 8 }
+              ]}
               activeOpacity={0.8}
               onPress={() => navigation.navigate('AddGoal', { goalToEdit: goal })}
             >
               <View style={styles.cardHeader}>
-                <View style={[styles.iconContainer, { backgroundColor: '#34C75915' }]}>
-                  <LucideTarget color="#34C759" size={20} />
+                <View style={[styles.iconContainer, { backgroundColor: withAlpha(colors.credit, '15') }]}>
+                  <LucideTarget color={colors.credit} size={20} />
                 </View>
                 <View style={{ flex: 1 }}>
                   <ThemedText style={{ fontWeight: 'bold', fontSize: 16 }}>{goal.name}</ThemedText>
@@ -485,7 +521,7 @@ export const FinancesScreen = ({ navigation }: any) => {
                 </View>
               </View>
 
-              {renderProgressBar(goal.currentAmount, goal.targetAmount, '#34C759')}
+              {renderProgressBar(goal.currentAmount, goal.targetAmount, colors.credit)}
 
               <View style={[styles.cardFooter, { marginTop: 12 }]}>
                 <View>
@@ -495,7 +531,7 @@ export const FinancesScreen = ({ navigation }: any) => {
                       : 'No deadline'}
                   </ThemedText>
                   {goal.monthlyContribution && (
-                    <ThemedText style={{ fontSize: 10, color: '#34C759' }}>
+                    <ThemedText style={{ fontSize: 10, color: colors.credit }}>
                       Plan: {preferences.currency}{goal.monthlyContribution.toLocaleString('en-IN')}/mo
                     </ThemedText>
                   )}
@@ -506,10 +542,10 @@ export const FinancesScreen = ({ navigation }: any) => {
                   )}
                 </View>
                 <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                  <ThemedText style={{ color: '#34C759', fontSize: 11, fontWeight: 'bold' }}>{pct}% ACHIEVED</ThemedText>
+                  <ThemedText style={{ color: colors.credit, fontSize: 11, fontWeight: 'bold' }}>{pct}% ACHIEVED</ThemedText>
                   {/* Add Money button */}
                   <TouchableOpacity
-                    style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#34C75920', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 }}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: withAlpha(colors.credit, '20'), paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 }}
                     onPress={() => {
                       Haptics.selectionAsync();
                       setQuickAction({
@@ -517,13 +553,13 @@ export const FinancesScreen = ({ navigation }: any) => {
                         id: goal.id,
                         label: `Add to "${goal.name}"`,
                         defaultAmount: goal.monthlyContribution ?? 500,
-                        accentColor: '#34C759',
+                        accentColor: colors.credit,
                         accountId: goal.linkedAccountId,
                       });
                     }}
                   >
-                    <LucidePlus color="#34C759" size={12} />
-                    <ThemedText style={{ color: '#34C759', fontWeight: 'bold', fontSize: 11 }}>Add Money</ThemedText>
+                    <LucidePlus color={colors.credit} size={12} />
+                    <ThemedText style={{ color: colors.credit, fontWeight: 'bold', fontSize: 11 }}>Add Money</ThemedText>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -607,10 +643,16 @@ export const FinancesScreen = ({ navigation }: any) => {
     const remainingEmis = loan.emiAmount > 0 ? Math.ceil(loan.remainingAmount / loan.emiAmount) : null;
     const isLent = loan.type === 'lent';
 
+    const isHighlighted = highlightedId === loan.id;
+
     return (
       <TouchableOpacity
         key={loan.id}
-        style={[styles.card, isUrgent && { borderColor: `${colors.danger}50` }]}
+        style={[
+          styles.card,
+          isUrgent && { borderColor: `${colors.danger}50` },
+          isHighlighted && { borderColor: colors.accent, borderWidth: 2, shadowColor: colors.accent, shadowOpacity: 0.3, shadowRadius: 10, elevation: 8 }
+        ]}
         activeOpacity={0.8}
         onPress={() => navigation.navigate('AddLoan', { loanToEdit: loan })}
       >
@@ -914,16 +956,16 @@ export const FinancesScreen = ({ navigation }: any) => {
   const styles = StyleSheet.create({
     container: { flex: 1, paddingHorizontal: 24 },
     header: { marginTop: 24, marginBottom: 24 },
-    tabBar: { flexDirection: 'row', backgroundColor: colors.translucent, borderRadius: 14, padding: 4, marginBottom: 24 },
-    tabItem: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 10 },
-    activeTab: { backgroundColor: colors.surface, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 3, elevation: 2 },
+    tabBar: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: colors.border, marginBottom: 20 },
+    tabItem: { flex: 1, paddingVertical: 12, alignItems: 'center', borderBottomWidth: 2, borderBottomColor: 'transparent', marginBottom: -1 },
+    activeTab: { borderBottomColor: colors.accent },
     card: { backgroundColor: colors.surface, borderRadius: 20, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: colors.border },
     cardHeader: { flexDirection: 'row', gap: 12, alignItems: 'center' },
-    iconContainer: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+    iconContainer: { width: 44, height: 44, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
     cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12 },
     emptyContainer: { alignItems: 'center', justifyContent: 'center', marginTop: 60 },
-    emptyIcon: { width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
-    fab: { position: 'absolute', bottom: 32, right: 24, width: 64, height: 64, borderRadius: 32, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', shadowColor: colors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 10, elevation: 6 },
+    emptyIcon: { width: 80, height: 80, borderRadius: 24, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
+    fab: { position: 'absolute', bottom: 32, right: 24, width: 64, height: 64, borderRadius: 32, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center', shadowColor: colors.accent, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.35, shadowRadius: 10, elevation: 6 },
     summaryCard: { borderRadius: 16, padding: 16, marginBottom: 16, borderWidth: 1 },
   });
 
@@ -931,8 +973,8 @@ export const FinancesScreen = ({ navigation }: any) => {
     <ThemedSafeAreaView>
       <View style={styles.container}>
         <View style={styles.header}>
-          <ThemedText style={{ fontSize: 12, color: colors.secondary, textTransform: 'uppercase', letterSpacing: 2 }}>Financial Hub</ThemedText>
-          <ThemedText style={{ fontSize: 28, fontWeight: 'bold' }}>Commitments</ThemedText>
+          <SectionLabel>Commitments</SectionLabel>
+          <ThemedText style={{ fontFamily: fonts.displayBold, fontSize: 30, letterSpacing: -0.5, marginTop: 2 }}>Money</ThemedText>
         </View>
 
         <View style={styles.tabBar}>
@@ -946,7 +988,10 @@ export const FinancesScreen = ({ navigation }: any) => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               }}
             >
-              <ThemedText style={{ fontSize: 11, fontWeight: 'bold', color: activeTab === tab ? colors.primary : colors.secondary }}>
+              <ThemedText
+                font="signal"
+                style={{ fontSize: 10, letterSpacing: 1, textTransform: 'uppercase', color: activeTab === tab ? colors.primary : colors.secondary }}
+              >
                 {tab === 'subs' ? 'Subs' : tab === 'goals' ? 'Goals' : tab === 'loans' ? 'Loans' : tab === 'cards' ? 'Cards' : 'Splits'}
               </ThemedText>
             </TouchableOpacity>
@@ -1018,7 +1063,7 @@ export const FinancesScreen = ({ navigation }: any) => {
               navigation.navigate(screen);
             }}
           >
-            <LucidePlus color={isDark ? '#000' : '#FFF'} size={32} />
+            <LucidePlus color={colors.onAccent} size={32} />
           </TouchableOpacity>
         )}
       </View>

@@ -3,46 +3,30 @@ import { View, useColorScheme, Appearance } from 'react-native';
 import { useStore } from '../store/useStore';
 import { useColorScheme as useTailwindColorScheme } from 'nativewind';
 
+import { buildColors, getPalette, darkColors, fonts, typeScale, spacing, radius, motion } from './tokens';
+
 interface ThemeContextValue {
   theme: 'dark' | 'light';
   isDark: boolean;
+  themeId: string;
   colors: typeof darkColors;
+  fonts: typeof fonts;
+  typeScale: typeof typeScale;
+  spacing: typeof spacing;
+  radius: typeof radius;
+  motion: typeof motion;
 }
-
-const darkColors = {
-  background: '#000000',
-  surface: '#1C1C1E',
-  surfaceElevated: '#2C2C2E',
-  primary: '#FFFFFF',
-  secondary: '#8E8E93',
-  muted: '#48484A',
-  accent: '#0A84FF',
-  success: '#30D158',
-  warning: '#FF9500',
-  danger: '#FF453A',
-  border: 'rgba(255,255,255,0.1)',
-  translucent: 'rgba(255,255,255,0.05)',
-};
-
-const lightColors: typeof darkColors = {
-  background: '#F2F2F7',
-  surface: '#FFFFFF',
-  surfaceElevated: '#F2F2F7',
-  primary: '#000000',
-  secondary: '#6C6C70',
-  muted: '#D1D1D6',
-  accent: '#007AFF',
-  success: '#34C759',
-  warning: '#FF9500',
-  danger: '#FF3B30',
-  border: 'rgba(0,0,0,0.1)',
-  translucent: 'rgba(0,0,0,0.05)',
-};
 
 const ThemeContext = createContext<ThemeContextValue>({
   theme: 'dark',
   isDark: true,
+  themeId: 'echo',
   colors: darkColors,
+  fonts,
+  typeScale,
+  spacing,
+  radius,
+  motion,
 });
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -69,7 +53,13 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [preferences.theme, currentScheme, reactNativeScheme]);
 
   const isDark = resolvedTheme === 'dark';
-  const colors = isDark ? darkColors : lightColors;
+  const themeId = preferences.themeId || 'echo';
+
+  // Resolve the selected curated pack + mode into semantic colors.
+  const colors = useMemo(
+    () => buildColors(getPalette(themeId, resolvedTheme)),
+    [themeId, resolvedTheme]
+  );
 
   // Sync Tailwind (NativeWind) with our theme state
   useEffect(() => {
@@ -77,9 +67,9 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [isDark]);
 
   return (
-    <ThemeContext.Provider value={{ theme: resolvedTheme, isDark, colors }}>
-      <View 
-        key={resolvedTheme} // Force re-render of base view on theme change
+    <ThemeContext.Provider value={{ theme: resolvedTheme, isDark, themeId, colors, fonts, typeScale, spacing, radius, motion }}>
+      <View
+        key={`${themeId}-${resolvedTheme}`} // Force re-render of base view on theme change
         style={{ flex: 1, backgroundColor: colors.background }}
       >
         {children}

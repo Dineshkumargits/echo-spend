@@ -59,6 +59,8 @@ import {
   PendingSplitMember,
 } from "../services/database";
 import { useTheme } from "../theme/ThemeProvider";
+import { SectionLabel } from "../components/Signal";
+import { fonts, withAlpha } from "../theme/tokens";
 import { useStore } from "../store/useStore";
 import {
   useCategoryManager,
@@ -156,18 +158,18 @@ export const EntityLinker = ({
         {/* Subscription chip or Split Repayment chip */}
         {txType === "credit" ? (
           <TouchableOpacity
-            style={chipStyle(!!selectedSplitMember, "#BF5AF2")}
+            style={chipStyle(!!selectedSplitMember, colors.violet)}
             onPress={() => (splitMembers.length > 0 ? toggle("split") : null)}
             disabled={splitMembers.length === 0}
             activeOpacity={0.7}
           >
             <LucideUsers
-              color={selectedSplitMember ? "#BF5AF2" : colors.secondary}
+              color={selectedSplitMember ? colors.violet : colors.secondary}
               size={14}
             />
             <ThemedText
               style={{
-                color: selectedSplitMember ? "#BF5AF2" : colors.secondary,
+                color: selectedSplitMember ? colors.violet : colors.secondary,
                 fontSize: 12,
                 fontWeight: "bold",
                 flex: 1,
@@ -189,17 +191,17 @@ export const EntityLinker = ({
           </TouchableOpacity>
         ) : (
           <TouchableOpacity
-            style={chipStyle(!!selectedSub, "#5AC8FA")}
+            style={chipStyle(!!selectedSub, colors.credit)}
             onPress={() => toggle("sub")}
             activeOpacity={0.7}
           >
             <LucideRepeat
-              color={selectedSub ? "#5AC8FA" : colors.secondary}
+              color={selectedSub ? colors.credit : colors.secondary}
               size={14}
             />
             <ThemedText
               style={{
-                color: selectedSub ? "#5AC8FA" : colors.secondary,
+                color: selectedSub ? colors.credit : colors.secondary,
                 fontSize: 12,
                 fontWeight: "bold",
                 flex: 1,
@@ -218,17 +220,17 @@ export const EntityLinker = ({
 
         {/* Goal chip */}
         <TouchableOpacity
-          style={chipStyle(!!selectedGoal, "#34C759")}
+          style={chipStyle(!!selectedGoal, colors.credit)}
           onPress={() => toggle("goal")}
           activeOpacity={0.7}
         >
           <LucideTarget
-            color={selectedGoal ? "#34C759" : colors.secondary}
+            color={selectedGoal ? colors.credit : colors.secondary}
             size={14}
           />
           <ThemedText
             style={{
-              color: selectedGoal ? "#34C759" : colors.secondary,
+              color: selectedGoal ? colors.credit : colors.secondary,
               fontSize: 12,
               fontWeight: "bold",
               flex: 1,
@@ -246,17 +248,17 @@ export const EntityLinker = ({
 
         {/* Loan chip */}
         <TouchableOpacity
-          style={chipStyle(!!selectedLoan, "#FF9500")}
+          style={chipStyle(!!selectedLoan, colors.debit)}
           onPress={() => toggle("loan")}
           activeOpacity={0.7}
         >
           <LucideLandmark
-            color={selectedLoan ? "#FF9500" : colors.secondary}
+            color={selectedLoan ? colors.debit : colors.secondary}
             size={14}
           />
           <ThemedText
             style={{
-              color: selectedLoan ? "#FF9500" : colors.secondary,
+              color: selectedLoan ? colors.debit : colors.secondary,
               fontSize: 12,
               fontWeight: "bold",
               flex: 1,
@@ -280,7 +282,7 @@ export const EntityLinker = ({
             backgroundColor: colors.surface,
             borderRadius: 14,
             borderWidth: 1,
-            borderColor: "#5AC8FA40",
+            borderColor: withAlpha(colors.credit, '40'),
             marginBottom: 8,
             overflow: "hidden",
           }}
@@ -321,9 +323,9 @@ export const EntityLinker = ({
               });
             }}
           >
-            <LucidePlus color="#5AC8FA" size={15} />
+            <LucidePlus color={colors.credit} size={15} />
             <ThemedText
-              style={{ fontWeight: "bold", color: "#5AC8FA", fontSize: 13 }}
+              style={{ fontWeight: "bold", color: colors.credit, fontSize: 13 }}
             >
               Create new subscription...
             </ThemedText>
@@ -339,7 +341,7 @@ export const EntityLinker = ({
                 borderBottomWidth: 1,
                 borderBottomColor: colors.border,
                 backgroundColor:
-                  selectedSub === sub.id ? "#5AC8FA12" : "transparent",
+                  selectedSub === sub.id ? withAlpha(colors.credit, '12') : "transparent",
               }}
               onPress={() => {
                 onSub(sub.id);
@@ -347,14 +349,14 @@ export const EntityLinker = ({
               }}
             >
               <LucideRepeat
-                color={selectedSub === sub.id ? "#5AC8FA" : colors.secondary}
+                color={selectedSub === sub.id ? colors.credit : colors.secondary}
                 size={15}
               />
               <View style={{ flex: 1 }}>
                 <ThemedText
                   style={{
                     fontWeight: "bold",
-                    color: selectedSub === sub.id ? "#5AC8FA" : colors.primary,
+                    color: selectedSub === sub.id ? colors.credit : colors.primary,
                   }}
                 >
                   {sub.name}
@@ -378,7 +380,7 @@ export const EntityLinker = ({
                 </ThemedText>
               </View>
               {selectedSub === sub.id && (
-                <LucideCheck color="#5AC8FA" size={15} />
+                <LucideCheck color={colors.credit} size={15} />
               )}
             </TouchableOpacity>
           ))}
@@ -392,7 +394,7 @@ export const EntityLinker = ({
             backgroundColor: colors.surface,
             borderRadius: 14,
             borderWidth: 1,
-            borderColor: "#BF5AF240",
+            borderColor: withAlpha(colors.violet, '40'),
             marginBottom: 8,
             overflow: "hidden",
           }}
@@ -426,7 +428,7 @@ export const EntityLinker = ({
                   borderBottomColor: colors.border,
                   backgroundColor:
                     selectedSplitMember === member.memberId
-                      ? "#BF5AF212"
+                      ? withAlpha(colors.violet, '12')
                       : "transparent",
                 }}
                 onPress={() => {
@@ -437,7 +439,7 @@ export const EntityLinker = ({
                 <LucideUsers
                   color={
                     selectedSplitMember === member.memberId
-                      ? "#BF5AF2"
+                      ? colors.violet
                       : colors.secondary
                   }
                   size={15}
@@ -448,7 +450,7 @@ export const EntityLinker = ({
                       fontWeight: "bold",
                       color:
                         selectedSplitMember === member.memberId
-                          ? "#BF5AF2"
+                          ? colors.violet
                           : colors.primary,
                     }}
                   >
@@ -461,7 +463,7 @@ export const EntityLinker = ({
                   </ThemedText>
                 </View>
                 {selectedSplitMember === member.memberId && (
-                  <LucideCheck color="#BF5AF2" size={15} />
+                  <LucideCheck color={colors.violet} size={15} />
                 )}
               </TouchableOpacity>
             );
@@ -476,7 +478,7 @@ export const EntityLinker = ({
             backgroundColor: colors.surface,
             borderRadius: 14,
             borderWidth: 1,
-            borderColor: "#34C75940",
+            borderColor: withAlpha(colors.credit, '40'),
             marginBottom: 8,
             overflow: "hidden",
           }}
@@ -517,9 +519,9 @@ export const EntityLinker = ({
               });
             }}
           >
-            <LucidePlus color="#34C759" size={15} />
+            <LucidePlus color={colors.credit} size={15} />
             <ThemedText
-              style={{ fontWeight: "bold", color: "#34C759", fontSize: 13 }}
+              style={{ fontWeight: "bold", color: colors.credit, fontSize: 13 }}
             >
               Create new goal...
             </ThemedText>
@@ -540,7 +542,7 @@ export const EntityLinker = ({
                   borderBottomWidth: 1,
                   borderBottomColor: colors.border,
                   backgroundColor:
-                    selectedGoal === goal.id ? "#34C75912" : "transparent",
+                    selectedGoal === goal.id ? withAlpha(colors.credit, '12') : "transparent",
                 }}
                 onPress={() => {
                   onGoal(goal.id);
@@ -549,7 +551,7 @@ export const EntityLinker = ({
               >
                 <LucideTarget
                   color={
-                    selectedGoal === goal.id ? "#34C759" : colors.secondary
+                    selectedGoal === goal.id ? colors.credit : colors.secondary
                   }
                   size={15}
                 />
@@ -558,7 +560,7 @@ export const EntityLinker = ({
                     style={{
                       fontWeight: "bold",
                       color:
-                        selectedGoal === goal.id ? "#34C759" : colors.primary,
+                        selectedGoal === goal.id ? colors.credit : colors.primary,
                     }}
                   >
                     {goal.name}
@@ -570,7 +572,7 @@ export const EntityLinker = ({
                   </ThemedText>
                 </View>
                 {selectedGoal === goal.id && (
-                  <LucideCheck color="#34C759" size={15} />
+                  <LucideCheck color={colors.credit} size={15} />
                 )}
               </TouchableOpacity>
             );
@@ -585,7 +587,7 @@ export const EntityLinker = ({
             backgroundColor: colors.surface,
             borderRadius: 14,
             borderWidth: 1,
-            borderColor: "#FF950040",
+            borderColor: withAlpha(colors.debit, '40'),
             marginBottom: 8,
             overflow: "hidden",
           }}
@@ -620,9 +622,9 @@ export const EntityLinker = ({
               setOpenPicker(null);
             }}
           >
-            <LucidePlus color="#FF9500" size={15} />
+            <LucidePlus color={colors.debit} size={15} />
             <ThemedText
-              style={{ fontWeight: "bold", color: "#FF9500", fontSize: 13 }}
+              style={{ fontWeight: "bold", color: colors.debit, fontSize: 13 }}
             >
               {txType === "credit"
                 ? "Mark as new loan borrowed (Borrowing)..."
@@ -658,7 +660,7 @@ export const EntityLinker = ({
                   borderBottomWidth: 1,
                   borderBottomColor: colors.border,
                   backgroundColor:
-                    selectedLoan === loan.id ? "#FF950012" : "transparent",
+                    selectedLoan === loan.id ? withAlpha(colors.debit, '12') : "transparent",
                 }}
                 onPress={() => {
                   onLoan(loan.id);
@@ -666,7 +668,7 @@ export const EntityLinker = ({
                 }}
               >
                 <LucideLandmark
-                  color={selectedLoan === loan.id ? "#FF9500" : colors.secondary}
+                  color={selectedLoan === loan.id ? colors.debit : colors.secondary}
                   size={15}
                 />
                 <View style={{ flex: 1 }}>
@@ -674,7 +676,7 @@ export const EntityLinker = ({
                     style={{
                       fontWeight: "bold",
                       color:
-                        selectedLoan === loan.id ? "#FF9500" : colors.primary,
+                        selectedLoan === loan.id ? colors.debit : colors.primary,
                     }}
                   >
                     {loan.lender}
@@ -689,7 +691,7 @@ export const EntityLinker = ({
                   </ThemedText>
                 </View>
                 {selectedLoan === loan.id && (
-                  <LucideCheck color="#FF9500" size={15} />
+                  <LucideCheck color={colors.debit} size={15} />
                 )}
               </TouchableOpacity>
             ));
@@ -704,14 +706,14 @@ export const EntityLinker = ({
             flexDirection: "row",
             alignItems: "center",
             gap: 8,
-            backgroundColor: "#5AC8FA10",
+            backgroundColor: withAlpha(colors.credit, '10'),
             borderRadius: 10,
             padding: 10,
             marginBottom: 6,
           }}
         >
-          <LucideRepeat color="#5AC8FA" size={13} />
-          <ThemedText style={{ fontSize: 12, color: "#5AC8FA", flex: 1 }}>
+          <LucideRepeat color={colors.credit} size={13} />
+          <ThemedText style={{ fontSize: 12, color: colors.credit, flex: 1 }}>
             Linked to {selectedSubObj.name} subscription. Payment will advance
             next due date.
             {selectedSubObj.splitEnabled ? " Split will be auto-created." : ""}
@@ -724,14 +726,14 @@ export const EntityLinker = ({
             flexDirection: "row",
             alignItems: "center",
             gap: 8,
-            backgroundColor: "#BF5AF210",
+            backgroundColor: withAlpha(colors.violet, '10'),
             borderRadius: 10,
             padding: 10,
             marginBottom: 6,
           }}
         >
-          <LucideUsers color="#BF5AF2" size={13} />
-          <ThemedText style={{ fontSize: 12, color: "#BF5AF2", flex: 1 }}>
+          <LucideUsers color={colors.violet} size={13} />
+          <ThemedText style={{ fontSize: 12, color: colors.violet, flex: 1 }}>
             Linked to split repayment for "{selectedSplitMemberObj.splitTitle}"
             from {selectedSplitMemberObj.memberName}.
           </ThemedText>
@@ -743,14 +745,14 @@ export const EntityLinker = ({
             flexDirection: "row",
             alignItems: "center",
             gap: 8,
-            backgroundColor: "#34C75910",
+            backgroundColor: withAlpha(colors.credit, '10'),
             borderRadius: 10,
             padding: 10,
             marginBottom: 6,
           }}
         >
-          <LucideTarget color="#34C759" size={13} />
-          <ThemedText style={{ fontSize: 12, color: "#34C759", flex: 1 }}>
+          <LucideTarget color={colors.credit} size={13} />
+          <ThemedText style={{ fontSize: 12, color: colors.credit, flex: 1 }}>
             Linked to "{selectedGoalObj.name}" goal. Amount will be added to
             goal progress.
           </ThemedText>
@@ -762,14 +764,14 @@ export const EntityLinker = ({
             flexDirection: "row",
             alignItems: "center",
             gap: 8,
-            backgroundColor: "#FF950010",
+            backgroundColor: withAlpha(colors.debit, '10'),
             borderRadius: 10,
             padding: 10,
             marginBottom: 6,
           }}
         >
-          <LucideLandmark color="#FF9500" size={13} />
-          <ThemedText style={{ fontSize: 12, color: "#FF9500", flex: 1 }}>
+          <LucideLandmark color={colors.debit} size={13} />
+          <ThemedText style={{ fontSize: 12, color: colors.debit, flex: 1 }}>
             Linked to {selectedLoanObj.lender} loan. Payment will reduce
             remaining balance.
           </ThemedText>
@@ -1365,48 +1367,48 @@ export const AddTransactionScreen = ({ navigation: navProp, route }: any) => {
       >
         <View style={themedStyles.content}>
           <View style={themedStyles.header}>
-            <ThemedText className="text-2xl font-bold">
-              New Transaction
-            </ThemedText>
-            <TouchableOpacity onPress={() => navigation.goBack()}>
-              <LucideX color={colors.secondary} size={24} />
+            <View>
+              <SectionLabel>Emit signal</SectionLabel>
+              <ThemedText style={{ fontFamily: fonts.displayBold, fontSize: 26, letterSpacing: -0.5, marginTop: 2 }}>
+                New transaction
+              </ThemedText>
+            </View>
+            <TouchableOpacity
+              onPress={() => navigation.goBack()}
+              style={{ width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.translucent }}
+            >
+              <LucideX color={colors.secondary} size={19} />
             </TouchableOpacity>
           </View>
 
-          {/* Type toggle */}
-          <View
-            style={[
-              themedStyles.typeToggle,
-              { backgroundColor: colors.translucent },
-            ]}
-          >
-            {(["debit", "credit", "transfer"] as const).map((t) => (
-              <TouchableOpacity
-                key={t}
-                onPress={() => setType(t)}
-                style={[
-                  themedStyles.typeBtn,
-                  type === t && {
-                    backgroundColor: colors.surface,
-                    borderColor: colors.border,
-                    borderWidth: 1,
-                  },
-                ]}
-              >
-                <ThemedText
-                  className="text-xs font-bold"
-                  style={{
-                    color: type === t ? colors.primary : colors.secondary,
-                  }}
+          {/* Type — underline segmented, signal colored */}
+          <View style={themedStyles.typeToggle}>
+            {(["debit", "credit", "transfer"] as const).map((t) => {
+              const active = type === t;
+              const segColor = t === "debit" ? colors.debit : t === "credit" ? colors.credit : colors.secondary;
+              return (
+                <TouchableOpacity
+                  key={t}
+                  onPress={() => setType(t)}
+                  style={[
+                    themedStyles.typeBtn,
+                    active && { borderBottomColor: segColor },
+                  ]}
                 >
-                  {t === "debit"
-                    ? "EXPENSE"
-                    : t === "transfer"
-                      ? "TRANSFER"
-                      : "INCOME"}
-                </ThemedText>
-              </TouchableOpacity>
-            ))}
+                  <ThemedText
+                    font="signal"
+                    style={{
+                      fontSize: 11,
+                      letterSpacing: 1.4,
+                      textTransform: 'uppercase',
+                      color: active ? colors.primary : colors.secondary,
+                    }}
+                  >
+                    {t === "debit" ? "Out" : t === "transfer" ? "Move" : "In"}
+                  </ThemedText>
+                </TouchableOpacity>
+              );
+            })}
           </View>
 
           <ScrollView
@@ -1435,10 +1437,10 @@ export const AddTransactionScreen = ({ navigation: navProp, route }: any) => {
                     {
                       color:
                         type === "transfer"
-                          ? colors.warning
+                          ? colors.primary
                           : type === "credit"
-                            ? colors.success
-                            : colors.accent,
+                            ? colors.credit
+                            : colors.debit,
                     },
                     errors.amount && { borderBottomColor: colors.danger },
                   ]}
@@ -2207,15 +2209,22 @@ export const AddTransactionScreen = ({ navigation: navProp, route }: any) => {
               disabled={!isValid || saving}
             >
               {saving ? (
-                <ActivityIndicator color="#FFFFFF" size="small" />
+                <ActivityIndicator color={colors.onAccent} size="small" />
               ) : (
                 <>
-                  <LucideCheck color="#FFFFFF" size={22} />
+                  <LucideCheck color={colors.onAccent} size={19} />
                   <ThemedText
-                    className="font-bold text-lg ml-2"
-                    style={{ color: "#FFFFFF" }}
+                    font="signal"
+                    style={{
+                      fontFamily: fonts.signalBold,
+                      fontSize: 13,
+                      letterSpacing: 1.4,
+                      textTransform: 'uppercase',
+                      marginLeft: 8,
+                      color: colors.onAccent,
+                    }}
                   >
-                    Save Transaction
+                    Save transaction
                   </ThemedText>
                 </>
               )}
@@ -2238,38 +2247,41 @@ const createThemedStyles = (colors: any, isDark: boolean) =>
     },
     typeToggle: {
       flexDirection: "row",
-      borderRadius: 50,
-      padding: 4,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
       marginBottom: 24,
     },
     typeBtn: {
       flex: 1,
-      paddingVertical: 11,
-      borderRadius: 50,
+      paddingVertical: 12,
       alignItems: "center",
+      borderBottomWidth: 2,
+      borderBottomColor: "transparent",
+      marginBottom: -1,
     },
     field: { marginBottom: 24 },
     label: {
-      fontSize: 11,
+      fontFamily: fonts.signal,
+      fontSize: 10,
       marginBottom: 8,
       textTransform: "uppercase",
-      letterSpacing: 1,
-      fontWeight: "bold",
+      letterSpacing: 2,
     },
     amountInput: {
-      fontSize: 40,
-      fontWeight: "bold",
+      fontFamily: fonts.signalBold,
+      fontSize: 46,
+      fontVariant: ["tabular-nums"],
       paddingVertical: 10,
       borderBottomWidth: 1,
       borderBottomColor: "transparent",
     },
     merchantInput: {
+      fontFamily: fonts.textMedium,
       fontSize: 18,
       borderBottomWidth: 1,
       paddingVertical: 12,
-      fontWeight: "500",
     },
-    notesInput: { fontSize: 15, borderBottomWidth: 1, paddingVertical: 10 },
+    notesInput: { fontFamily: fonts.text, fontSize: 15, borderBottomWidth: 1, paddingVertical: 10 },
     categorySquare: {
       width: 80,
       height: 80,
@@ -2324,14 +2336,14 @@ const createThemedStyles = (colors: any, isDark: boolean) =>
     emojiCircle: {
       width: 44,
       height: 44,
-      borderRadius: 22,
+      borderRadius: 13,
       alignItems: "center",
       justifyContent: "center",
       marginRight: 12,
     },
     saveButton: {
-      height: 60,
-      borderRadius: 16,
+      height: 58,
+      borderRadius: 14,
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "center",

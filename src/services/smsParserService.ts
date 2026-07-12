@@ -653,7 +653,11 @@ export const SmsParserService = {
     // Regex is only used as a structural supplement (date, balance, account).
     // We never skip AI just because regex was confident — regex can tie-break
     // incorrectly on SMSes that contain both "credited" and "debited" words.
-    const modelLoaded = AIModelManager.isModelLoaded();
+    let modelLoaded = AIModelManager.isModelLoaded();
+    if (!modelLoaded && await AIModelManager.isModelDownloaded() && AIModelManager.isDeviceCompatible()) {
+      console.log('[SmsParserService] Model is downloaded but not loaded. Initializing model on-demand...');
+      modelLoaded = await AIModelManager.initModel();
+    }
     if (modelLoaded) {
       try {
         const llmResult = await parseWithLLM(

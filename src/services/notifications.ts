@@ -43,20 +43,20 @@ export const NotificationService = {
         name: 'Transactions',
         importance: Notifications.AndroidImportance.HIGH,
         vibrationPattern: [0, 200, 100, 200],
-        lightColor: '#0A84FF',
+        lightColor: '#FFB454',
       });
       // 'alerts' channel is used for global budget and error notifications (MAX importance)
       await Notifications.setNotificationChannelAsync('alerts', {
         name: 'Budget & Alerts',
         importance: Notifications.AndroidImportance.MAX,
         vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#FF9500',
+        lightColor: '#FFB454',
       });
       // 'budget' channel is used for per-category budget notifications (DEFAULT importance)
       await Notifications.setNotificationChannelAsync('budget', {
         name: 'Budget Alerts',
         importance: Notifications.AndroidImportance.DEFAULT,
-        lightColor: '#FF9500',
+        lightColor: '#FFB454',
       });
       await Notifications.setNotificationChannelAsync('digest', {
         name: 'Weekly Digest',

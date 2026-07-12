@@ -1,6 +1,9 @@
-import { ThemedSafeAreaView, ThemedText } from '../components/ThemedSafeAreaView';
-import React, { useEffect, useState } from 'react';
-import * as Notifications from 'expo-notifications';
+import {
+  ThemedSafeAreaView,
+  ThemedText,
+} from "../components/ThemedSafeAreaView";
+import React, { useEffect, useState } from "react";
+import * as Notifications from "expo-notifications";
 import {
   View,
   ScrollView,
@@ -15,8 +18,8 @@ import {
   NativeModules,
   AppState,
   PermissionsAndroid,
-} from 'react-native';
-import { MotiView } from 'moti';
+} from "react-native";
+import { MotiView } from "moti";
 import {
   LucideCloudSync,
   LucideDownload,
@@ -27,6 +30,7 @@ import {
   LucideSun,
   LucideMoon,
   LucideMonitor,
+  LucideCheck,
   LucideRefreshCcw,
   LucideShield,
   LucideWallet,
@@ -45,21 +49,30 @@ import {
   LucideX,
   LucideSparkles,
   LucideLightbulb,
-} from 'lucide-react-native';
-import * as Haptics from 'expo-haptics';
-import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
-import Constants from 'expo-constants';
-import { notify } from '../utils/notify';
-import { useStore } from '../store/useStore';
-import { SyncService } from '../services/sync';
-import { resetAllData, getLastSyncAttempt, SyncAttemptLog } from '../services/database';
-import { useBiometric } from '../hooks/useBiometric';
-import { useTheme } from '../theme/ThemeProvider';
-import { registerBackgroundTasks } from '../services/backgroundTasks';
-import { NotificationService } from '../services/notifications';
-import { AIModelManager } from '../services/aiModelManager';
-import DateTimePicker from '@react-native-community/datetimepicker';
-import { TourGuideModal } from '../components/TourGuideModal';
+} from "lucide-react-native";
+import * as Haptics from "expo-haptics";
+import {
+  GoogleSignin,
+  statusCodes,
+} from "@react-native-google-signin/google-signin";
+import Constants from "expo-constants";
+import { notify } from "../utils/notify";
+import { useStore } from "../store/useStore";
+import { SyncService } from "../services/sync";
+import {
+  resetAllData,
+  getLastSyncAttempt,
+  SyncAttemptLog,
+} from "../services/database";
+import { useBiometric } from "../hooks/useBiometric";
+import { useTheme } from "../theme/ThemeProvider";
+import { registerBackgroundTasks } from "../services/backgroundTasks";
+import { NotificationService } from "../services/notifications";
+import { AIModelManager } from "../services/aiModelManager";
+import DateTimePicker from "@react-native-community/datetimepicker";
+import { TourGuideModal } from "../components/TourGuideModal";
+import { SectionLabel } from "../components/Signal";
+import { fonts, THEMES, themeSwatches } from "../theme/tokens";
 
 const extra = Constants.expoConfig?.extra ?? {};
 
@@ -67,7 +80,7 @@ GoogleSignin.configure({
   webClientId: extra.googleWebClientId,
   iosClientId: extra.googleIosClientId,
   offlineAccess: true,
-  scopes: ['https://www.googleapis.com/auth/drive.appdata'],
+  scopes: ["https://www.googleapis.com/auth/drive.appdata"],
 });
 
 const SettingsScreen = ({ navigation }: any) => {
@@ -77,6 +90,7 @@ const SettingsScreen = ({ navigation }: any) => {
     googleUser,
     isSyncing,
     setTheme,
+    setThemeId,
     setSyncSchedule,
     setSyncTime,
     setGoogleUser,
@@ -99,22 +113,24 @@ const SettingsScreen = ({ navigation }: any) => {
     toggleAutoSmsScan,
   } = useStore();
 
-  const aiModelStatus = useStore(s => s.aiModelStatus);
-  const aiModelProgress = useStore(s => s.aiModelProgress);
-  const aiModelError = useStore(s => s.aiModelError);
+  const aiModelStatus = useStore((s) => s.aiModelStatus);
+  const aiModelProgress = useStore((s) => s.aiModelProgress);
+  const aiModelError = useStore((s) => s.aiModelError);
 
   const { BackgroundOptimizationModule } = NativeModules;
 
   const [isBatteryOptimized, setIsBatteryOptimized] = useState(true);
   const [isExactAlarmAllowed, setIsExactAlarmAllowed] = useState(true);
   const [isNotificationGranted, setIsNotificationGranted] = useState(true);
-  const [lastSyncAttempt, setLastSyncAttempt] = useState<SyncAttemptLog | null>(null);
+  const [lastSyncAttempt, setLastSyncAttempt] = useState<SyncAttemptLog | null>(
+    null,
+  );
 
   const loadLastSyncAttempt = async () => {
     try {
       setLastSyncAttempt(await getLastSyncAttempt());
     } catch (e) {
-      console.warn('[Settings] Failed to load last sync attempt:', e);
+      console.warn("[Settings] Failed to load last sync attempt:", e);
     }
   };
 
@@ -122,20 +138,22 @@ const SettingsScreen = ({ navigation }: any) => {
     // Check notification permission (all platforms)
     try {
       const { status } = await Notifications.getPermissionsAsync();
-      setIsNotificationGranted(status === 'granted');
+      setIsNotificationGranted(status === "granted");
     } catch (e) {
-      console.warn('[Settings] Failed to check notification permission:', e);
+      console.warn("[Settings] Failed to check notification permission:", e);
     }
 
-    if (Platform.OS !== 'android' || !BackgroundOptimizationModule) return;
+    if (Platform.OS !== "android" || !BackgroundOptimizationModule) return;
     try {
-      const ignoring = await BackgroundOptimizationModule.isIgnoringBatteryOptimizations();
+      const ignoring =
+        await BackgroundOptimizationModule.isIgnoringBatteryOptimizations();
       setIsBatteryOptimized(!ignoring);
 
-      const alarmAllowed = await BackgroundOptimizationModule.isExactAlarmAllowed();
+      const alarmAllowed =
+        await BackgroundOptimizationModule.isExactAlarmAllowed();
       setIsExactAlarmAllowed(alarmAllowed);
     } catch (e) {
-      console.warn('[Settings] Failed to check background permissions:', e);
+      console.warn("[Settings] Failed to check background permissions:", e);
     }
   };
 
@@ -143,9 +161,9 @@ const SettingsScreen = ({ navigation }: any) => {
     checkBackgroundPermissions();
     loadLastSyncAttempt();
 
-    if (Platform.OS === 'android') {
-      const subscription = AppState.addEventListener('change', (nextState) => {
-        if (nextState === 'active') {
+    if (Platform.OS === "android") {
+      const subscription = AppState.addEventListener("change", (nextState) => {
+        if (nextState === "active") {
           checkBackgroundPermissions();
           loadLastSyncAttempt();
         }
@@ -159,17 +177,21 @@ const SettingsScreen = ({ navigation }: any) => {
     if (!BackgroundOptimizationModule) {
       Alert.alert(
         "Rebuild Required",
-        "We've added native Android code to handle background tasks and SMS listening. Please stop your current run and execute 'yarn android' in your terminal to compile the new native features."
+        "We've added native Android code to handle background tasks and SMS listening. Please stop your current run and execute 'yarn android' in your terminal to compile the new native features.",
       );
       return;
     }
     try {
-      const isIgnoringNow = await BackgroundOptimizationModule.isIgnoringBatteryOptimizations();
+      const isIgnoringNow =
+        await BackgroundOptimizationModule.isIgnoringBatteryOptimizations();
       if (isIgnoringNow) {
-        Alert.alert("Already Allowed", "Echo Spend is already whitelisted from battery optimizations.");
+        Alert.alert(
+          "Already Allowed",
+          "Echo Spend is already whitelisted from battery optimizations.",
+        );
         return;
       }
-      
+
       Alert.alert(
         "Disable Battery Optimization",
         "Android restricts network and background task execution for battery-saving. To run cloud backups and scan SMS instantly, allow Echo Spend to run unrestricted in the background.",
@@ -179,9 +201,9 @@ const SettingsScreen = ({ navigation }: any) => {
             text: "Request Whitelist",
             onPress: async () => {
               await BackgroundOptimizationModule.requestIgnoreBatteryOptimizations();
-            }
-          }
-        ]
+            },
+          },
+        ],
       );
     } catch (e: any) {
       notify.error("Failed to request battery whitelisting", e?.message);
@@ -193,14 +215,18 @@ const SettingsScreen = ({ navigation }: any) => {
     if (!BackgroundOptimizationModule) {
       Alert.alert(
         "Rebuild Required",
-        "We've added native Android code to handle background tasks and SMS listening. Please stop your current run and execute 'yarn android' in your terminal to compile the new native features."
+        "We've added native Android code to handle background tasks and SMS listening. Please stop your current run and execute 'yarn android' in your terminal to compile the new native features.",
       );
       return;
     }
     try {
-      const isAllowedNow = await BackgroundOptimizationModule.isExactAlarmAllowed();
+      const isAllowedNow =
+        await BackgroundOptimizationModule.isExactAlarmAllowed();
       if (isAllowedNow) {
-        Alert.alert("Already Allowed", "Echo Spend already has exact alarm scheduling permissions.");
+        Alert.alert(
+          "Already Allowed",
+          "Echo Spend already has exact alarm scheduling permissions.",
+        );
         return;
       }
 
@@ -213,26 +239,29 @@ const SettingsScreen = ({ navigation }: any) => {
             text: "Open Settings",
             onPress: async () => {
               await BackgroundOptimizationModule.openExactAlarmSettings();
-            }
-          }
-        ]
+            },
+          },
+        ],
       );
     } catch (e: any) {
       notify.error("Failed to open exact alarm settings", e?.message);
     }
   };
 
-  const handleSyncScheduleChange = async (schedule: 'none' | 'daily' | 'weekly') => {
+  const handleSyncScheduleChange = async (
+    schedule: "none" | "daily" | "weekly",
+  ) => {
     triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
-    if (schedule === 'none') {
-      setSyncSchedule('none');
+    if (schedule === "none") {
+      setSyncSchedule("none");
       setTimeout(() => registerBackgroundTasks(), 0);
       return;
     }
 
-    if (Platform.OS === 'android' && BackgroundOptimizationModule) {
+    if (Platform.OS === "android" && BackgroundOptimizationModule) {
       try {
-        const alarmAllowed = await BackgroundOptimizationModule.isExactAlarmAllowed();
+        const alarmAllowed =
+          await BackgroundOptimizationModule.isExactAlarmAllowed();
         if (!alarmAllowed) {
           Alert.alert(
             "Precision Alarm Recommendation",
@@ -243,7 +272,7 @@ const SettingsScreen = ({ navigation }: any) => {
                 onPress: () => {
                   setSyncSchedule(schedule);
                   setTimeout(() => registerBackgroundTasks(), 0);
-                }
+                },
               },
               {
                 text: "Open Settings",
@@ -251,14 +280,14 @@ const SettingsScreen = ({ navigation }: any) => {
                   setSyncSchedule(schedule);
                   setTimeout(() => registerBackgroundTasks(), 0);
                   await BackgroundOptimizationModule.openExactAlarmSettings();
-                }
-              }
-            ]
+                },
+              },
+            ],
           );
           return;
         }
       } catch (e) {
-        console.warn('[Settings] Failed to check exact alarm permission:', e);
+        console.warn("[Settings] Failed to check exact alarm permission:", e);
       }
     }
 
@@ -275,9 +304,10 @@ const SettingsScreen = ({ navigation }: any) => {
     }
 
     const proceedWithSmsScanEnable = async () => {
-      if (Platform.OS === 'android' && BackgroundOptimizationModule) {
+      if (Platform.OS === "android" && BackgroundOptimizationModule) {
         try {
-          const ignoring = await BackgroundOptimizationModule.isIgnoringBatteryOptimizations();
+          const ignoring =
+            await BackgroundOptimizationModule.isIgnoringBatteryOptimizations();
           if (!ignoring) {
             Alert.alert(
               "Recommended Setting",
@@ -289,7 +319,7 @@ const SettingsScreen = ({ navigation }: any) => {
                   onPress: () => {
                     toggleAutoSmsScan();
                     setTimeout(() => registerBackgroundTasks(), 0);
-                  }
+                  },
                 },
                 {
                   text: "Set Unrestricted",
@@ -297,18 +327,21 @@ const SettingsScreen = ({ navigation }: any) => {
                     try {
                       await BackgroundOptimizationModule.requestIgnoreBatteryOptimizations();
                     } catch (err) {
-                      console.warn('[Settings] Failed to request battery optimization bypass:', err);
+                      console.warn(
+                        "[Settings] Failed to request battery optimization bypass:",
+                        err,
+                      );
                     }
                     toggleAutoSmsScan();
                     setTimeout(() => registerBackgroundTasks(), 0);
-                  }
-                }
-              ]
+                  },
+                },
+              ],
             );
             return;
           }
         } catch (e) {
-          console.warn('[Settings] Failed to check battery optimization:', e);
+          console.warn("[Settings] Failed to check battery optimization:", e);
         }
       }
 
@@ -316,9 +349,11 @@ const SettingsScreen = ({ navigation }: any) => {
       setTimeout(() => registerBackgroundTasks(), 0);
     };
 
-    if (Platform.OS === 'android') {
+    if (Platform.OS === "android") {
       try {
-        const hasSmsPerm = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_SMS);
+        const hasSmsPerm = await PermissionsAndroid.check(
+          PermissionsAndroid.PERMISSIONS.READ_SMS,
+        );
         if (!hasSmsPerm) {
           Alert.alert(
             "SMS Transaction Scanning",
@@ -329,34 +364,44 @@ const SettingsScreen = ({ navigation }: any) => {
                 style: "cancel",
                 onPress: () => {
                   // Do nothing
-                }
+                },
               },
               {
                 text: "Agree & Enable",
                 onPress: async () => {
                   try {
-                    const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.READ_SMS, {
-                      title: 'SMS Permission Required',
-                      message: 'Echo Spend needs permission to read financial SMS messages to automatically scan transactions.',
-                      buttonPositive: 'Grant',
-                      buttonNegative: 'Cancel',
-                    });
+                    const granted = await PermissionsAndroid.request(
+                      PermissionsAndroid.PERMISSIONS.READ_SMS,
+                      {
+                        title: "SMS Permission Required",
+                        message:
+                          "Echo Spend needs permission to read financial SMS messages to automatically scan transactions.",
+                        buttonPositive: "Grant",
+                        buttonNegative: "Cancel",
+                      },
+                    );
                     if (granted === PermissionsAndroid.RESULTS.GRANTED) {
                       await proceedWithSmsScanEnable();
                     } else {
-                      Alert.alert('Permission Denied', 'Echo Spend cannot auto-scan transactions without SMS permissions.');
+                      Alert.alert(
+                        "Permission Denied",
+                        "Echo Spend cannot auto-scan transactions without SMS permissions.",
+                      );
                     }
                   } catch (e) {
-                    console.warn('[Settings] Failed to request SMS permission:', e);
+                    console.warn(
+                      "[Settings] Failed to request SMS permission:",
+                      e,
+                    );
                   }
-                }
-              }
-            ]
+                },
+              },
+            ],
           );
           return;
         }
       } catch (e) {
-        console.warn('[Settings] Failed to check SMS permission:', e);
+        console.warn("[Settings] Failed to check SMS permission:", e);
         return;
       }
     }
@@ -366,23 +411,25 @@ const SettingsScreen = ({ navigation }: any) => {
 
   const checkNotificationPermission = async (featureName: string) => {
     try {
-      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      const { status: existingStatus } =
+        await Notifications.getPermissionsAsync();
       let finalStatus = existingStatus;
-      if (existingStatus !== 'granted') {
+      if (existingStatus !== "granted") {
         const { status } = await Notifications.requestPermissionsAsync();
         finalStatus = status;
       }
 
-      if (finalStatus !== 'granted') {
+      if (finalStatus !== "granted") {
         Alert.alert(
           "Notification Permission Required",
-          `To receive ${featureName}, Echo Spend needs permission to show notifications. Please enable notifications in your system settings.`
+          `To receive ${featureName}, Echo Spend needs permission to show notifications. Please enable notifications in your system settings.`,
         );
         return false;
       }
 
-      if (Platform.OS === 'android' && BackgroundOptimizationModule) {
-        const alarmAllowed = await BackgroundOptimizationModule.isExactAlarmAllowed();
+      if (Platform.OS === "android" && BackgroundOptimizationModule) {
+        const alarmAllowed =
+          await BackgroundOptimizationModule.isExactAlarmAllowed();
         if (!alarmAllowed) {
           Alert.alert(
             "Precision Alarm Recommendation",
@@ -393,16 +440,19 @@ const SettingsScreen = ({ navigation }: any) => {
                 text: "Open Settings",
                 onPress: async () => {
                   await BackgroundOptimizationModule.openExactAlarmSettings();
-                }
-              }
-            ]
+                },
+              },
+            ],
           );
         }
       }
 
       return true;
     } catch (e) {
-      console.warn(`[Settings] Failed to check/request permission for ${featureName}:`, e);
+      console.warn(
+        `[Settings] Failed to check/request permission for ${featureName}:`,
+        e,
+      );
       return false;
     }
   };
@@ -415,7 +465,9 @@ const SettingsScreen = ({ navigation }: any) => {
       return;
     }
 
-    const hasPerm = await checkNotificationPermission("daily expense reminders");
+    const hasPerm = await checkNotificationPermission(
+      "daily expense reminders",
+    );
     if (!hasPerm) return;
 
     toggleDailyReminder();
@@ -460,18 +512,26 @@ const SettingsScreen = ({ navigation }: any) => {
 
     toggleWeeklyDigest();
   };
-  
-  const { colors, isDark } = useTheme();
-  
-  const [aiModelSize, setAiModelSize] = useState<string>('');
-  
-  const [thresholdInput, setThresholdInput] = useState((preferences?.autoApproveThreshold ?? 100).toString());
-  const [budgetInput, setBudgetInput] = useState((preferences?.monthlyBudget ?? 50000).toString());
+
+  const { colors, isDark, themeId } = useTheme();
+
+  const [aiModelSize, setAiModelSize] = useState<string>("");
+
+  const [thresholdInput, setThresholdInput] = useState(
+    (preferences?.autoApproveThreshold ?? 100).toString(),
+  );
+  const [budgetInput, setBudgetInput] = useState(
+    (preferences?.monthlyBudget ?? 50000).toString(),
+  );
   const [showTimePicker, setShowTimePicker] = useState(false);
-  const [salaryDayInput, setSalaryDayInput] = useState((preferences?.salaryDay ?? 1).toString());
-  
-  const [autoLockInput, setAutoLockInput] = useState((preferences?.autoLockMinutes ?? 5).toString());
-  const [expectedModelSize, setExpectedModelSize] = useState<string>('~1.2 GB');
+  const [salaryDayInput, setSalaryDayInput] = useState(
+    (preferences?.salaryDay ?? 1).toString(),
+  );
+
+  const [autoLockInput, setAutoLockInput] = useState(
+    (preferences?.autoLockMinutes ?? 5).toString(),
+  );
+  const [expectedModelSize, setExpectedModelSize] = useState<string>("~1.2 GB");
   const [loadingExpectedSize, setLoadingExpectedSize] = useState<boolean>(true);
 
   useEffect(() => {
@@ -485,11 +545,11 @@ const SettingsScreen = ({ navigation }: any) => {
 
   useEffect(() => {
     checkSupport();
-    if (preferences.syncSchedule !== 'none' && googleUser) {
+    if (preferences.syncSchedule !== "none" && googleUser) {
       registerBackgroundTasks();
     }
     // Check AI model size on disk
-    AIModelManager.getModelSizeOnDisk().then(size => {
+    AIModelManager.getModelSizeOnDisk().then((size) => {
       if (size > 0) setAiModelSize(`${(size / (1024 * 1024)).toFixed(0)} MB`);
     });
   }, [aiModelStatus]);
@@ -517,27 +577,27 @@ const SettingsScreen = ({ navigation }: any) => {
     try {
       await GoogleSignin.hasPlayServices();
       const result = await GoogleSignin.signIn();
-      
-      if (result.type === 'success') {
+
+      if (result.type === "success") {
         const { user } = result.data;
         const tokens = await GoogleSignin.getTokens();
 
         setGoogleUser({
-          name: user.name || 'Google User',
+          name: user.name || "Google User",
           email: user.email,
           photo: user.photo ?? undefined,
           accessToken: tokens.accessToken,
-          refreshToken: 'native_sdk_managed',
+          refreshToken: "native_sdk_managed",
           expiresAt: Date.now() + 3600 * 1000,
         });
 
-        notify.success('Cloud Account Linked!');
+        notify.success("Cloud Account Linked!");
         triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
       }
     } catch (error: any) {
       if (error.code !== statusCodes.SIGN_IN_CANCELLED) {
-        console.error('[Auth] Native Error:', error);
-        notify.error('Native Auth Failed', error.message);
+        console.error("[Auth] Native Error:", error);
+        notify.error("Native Auth Failed", error.message);
       }
     }
   };
@@ -551,37 +611,37 @@ const SettingsScreen = ({ navigation }: any) => {
     triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
     const success = await SyncService.syncToGoogleDrive();
     if (success) {
-      notify.success('Synced to Google Drive');
+      notify.success("Synced to Google Drive");
     } else {
-      notify.error('Sync failed. Check your connection.');
+      notify.error("Sync failed. Check your connection.");
     }
   };
 
   const handleRestoreFromDrive = () => {
     if (!googleUser) {
-       notify.info('Please link your Google account first');
-       return;
+      notify.info("Please link your Google account first");
+      return;
     }
 
     Alert.alert(
-      'Restore from Google Drive',
-      'This will replace ALL local data with the Drive backup. Continue?',
+      "Restore from Google Drive",
+      "This will replace ALL local data with the Drive backup. Continue?",
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: "Cancel", style: "cancel" },
         {
-          text: 'Restore Now',
-          style: 'destructive',
+          text: "Restore Now",
+          style: "destructive",
           onPress: async () => {
             const ok = await SyncService.restoreFromGoogleDrive();
             if (ok) {
-              notify.success('Data Restored Successfully');
+              notify.success("Data Restored Successfully");
               triggerHaptic(Haptics.ImpactFeedbackStyle.Heavy);
             } else {
-              notify.error('Restore failed');
+              notify.error("Restore failed");
             }
           },
         },
-      ]
+      ],
     );
   };
 
@@ -592,22 +652,22 @@ const SettingsScreen = ({ navigation }: any) => {
   const getDateTimeObject = (timeStr: string): Date => {
     const date = new Date();
     try {
-      const [hoursStr, minutesStr] = timeStr.split(':');
+      const [hoursStr, minutesStr] = timeStr.split(":");
       date.setHours(parseInt(hoursStr, 10), parseInt(minutesStr, 10), 0, 0);
     } catch {}
     return date;
   };
 
   const handleTimePickerChange = (event: any, selectedDate?: Date) => {
-    if (Platform.OS === 'android') {
+    if (Platform.OS === "android") {
       setShowTimePicker(false);
     }
-    if (selectedDate && event.type !== 'dismissed') {
-      const hours = selectedDate.getHours().toString().padStart(2, '0');
-      const minutes = selectedDate.getMinutes().toString().padStart(2, '0');
+    if (selectedDate && event.type !== "dismissed") {
+      const hours = selectedDate.getHours().toString().padStart(2, "0");
+      const minutes = selectedDate.getMinutes().toString().padStart(2, "0");
       const timeStr = `${hours}:${minutes}`;
       setSyncTime(timeStr);
-      notify.success('Sync time updated');
+      notify.success("Sync time updated");
       registerBackgroundTasks();
     }
   };
@@ -616,7 +676,7 @@ const SettingsScreen = ({ navigation }: any) => {
     const val = parseFloat(budgetInput);
     if (!isNaN(val)) {
       setMonthlyBudget(val);
-      notify.success('Budget updated');
+      notify.success("Budget updated");
     } else {
       setBudgetInput(preferences.monthlyBudget.toString());
     }
@@ -626,7 +686,7 @@ const SettingsScreen = ({ navigation }: any) => {
     const val = parseFloat(thresholdInput);
     if (!isNaN(val)) {
       setAutoApproveThreshold(val);
-      notify.success('Threshold updated');
+      notify.success("Threshold updated");
     } else {
       setThresholdInput(preferences.autoApproveThreshold.toString());
     }
@@ -636,7 +696,7 @@ const SettingsScreen = ({ navigation }: any) => {
     const val = parseInt(salaryDayInput);
     if (!isNaN(val) && val >= 1 && val <= 31) {
       setSalaryDay(val);
-      notify.success('Financial cycle updated');
+      notify.success("Financial cycle updated");
     } else {
       setSalaryDayInput(preferences.salaryDay.toString());
     }
@@ -646,7 +706,7 @@ const SettingsScreen = ({ navigation }: any) => {
     const val = parseInt(autoLockInput);
     if (!isNaN(val) && val >= 1 && val <= 60) {
       setAutoLockMinutes(val);
-      notify.success('Auto-lock delay updated');
+      notify.success("Auto-lock delay updated");
     } else {
       setAutoLockInput(preferences.autoLockMinutes.toString());
     }
@@ -655,10 +715,10 @@ const SettingsScreen = ({ navigation }: any) => {
   const handleBiometricToggle = async () => {
     if (!preferences.biometricLock) {
       if (!isSupported) {
-        Alert.alert('Biometric Error', 'Hardware not available.');
+        Alert.alert("Biometric Error", "Hardware not available.");
         return;
       }
-      const ok = await authenticate('Confirm to enable');
+      const ok = await authenticate("Confirm to enable");
       if (!ok) return;
     }
     toggleBiometricLock();
@@ -666,243 +726,534 @@ const SettingsScreen = ({ navigation }: any) => {
 
   const handleLogout = () => {
     const alertMessage = googleUser
-      ? 'This will PERMANENTLY delete all local transactions, accounts, and settings.\n\nIMPORTANT: Please ensure you have synced your data to Google Drive before proceeding, as this local data cannot be recovered once deleted.\n\nAre you absolutely sure?'
-      : 'This will PERMANENTLY delete all local transactions, accounts, and settings.\n\nSince you are in local-only mode, your data is not backed up to the cloud and cannot be recovered once deleted.\n\nAre you absolutely sure?';
+      ? "This will PERMANENTLY delete all local transactions, accounts, and settings.\n\nIMPORTANT: Please ensure you have synced your data to Google Drive before proceeding, as this local data cannot be recovered once deleted.\n\nAre you absolutely sure?"
+      : "This will PERMANENTLY delete all local transactions, accounts, and settings.\n\nSince you are in local-only mode, your data is not backed up to the cloud and cannot be recovered once deleted.\n\nAre you absolutely sure?";
 
     Alert.alert(
-      googleUser ? 'Logout & Wipe Data' : 'Reset App & Wipe Data',
+      googleUser ? "Logout & Wipe Data" : "Reset App & Wipe Data",
       alertMessage,
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: "Cancel", style: "cancel" },
         {
-          text: googleUser ? 'Logout & Delete Everything' : 'Reset & Delete Everything',
-          style: 'destructive',
+          text: googleUser
+            ? "Logout & Delete Everything"
+            : "Reset & Delete Everything",
+          style: "destructive",
           onPress: async () => {
             try {
               // 1. Sign out of Google if linked
               if (googleUser) {
                 await GoogleSignin.signOut();
               }
-              
+
               // 2. Wipe the SQLite database (includes categories/settings)
               await resetAllData();
-              
+
               // 3. Clear all persisted store state and SecureStore
               await fullLogout();
-              
-              notify.success(googleUser ? 'Logged out and data wiped' : 'App reset and data wiped');
+
+              notify.success(
+                googleUser
+                  ? "Logged out and data wiped"
+                  : "App reset and data wiped",
+              );
               triggerHaptic(Haptics.ImpactFeedbackStyle.Heavy);
             } catch (error) {
-              console.error('Logout failed', error);
-              notify.error('Logout failed partially');
+              console.error("Logout failed", error);
+              notify.error("Logout failed partially");
             }
           },
         },
-      ]
+      ],
     );
   };
 
-  const alertsBlocked = !isNotificationGranted || (Platform.OS === 'android' && !isExactAlarmAllowed);
+  const alertsBlocked =
+    !isNotificationGranted ||
+    (Platform.OS === "android" && !isExactAlarmAllowed);
 
   const Section = ({ title }: { title: string }) => (
-    <ThemedText type="secondary" className="text-xs uppercase tracking-widest mb-3 mt-6 ml-1">{title}</ThemedText>
+    <SectionLabel style={{ marginTop: 26, marginBottom: 10, marginLeft: 4 }}>
+      {title}
+    </SectionLabel>
   );
 
   const Row = ({ icon, label, sub, right, onPress, danger }: any) => (
     <TouchableOpacity
       onPress={onPress}
       disabled={!onPress}
-      className={`flex-row items-center px-4 py-4 ${onPress ? 'active:opacity-70' : ''}`}
-      style={{ borderBottomWidth: 1, borderBottomColor: colors.border }}
+      className={`flex-row items-center px-4 py-3.5 ${onPress ? "active:opacity-70" : ""}`}
+      style={{
+        borderBottomWidth: 1,
+        borderBottomColor: colors.border,
+        gap: 13,
+      }}
     >
-      <View className="w-8 items-center mr-3">{icon}</View>
-      <View className="flex-1">
-        <ThemedText className="font-medium" style={{ color: danger ? colors.danger : colors.primary }}>{label}</ThemedText>
-        {sub && <ThemedText type="secondary" className="text-xs mt-0.5" numberOfLines={1}>{sub}</ThemedText>}
+      <View
+        style={{
+          width: 36,
+          height: 36,
+          borderRadius: 11,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: danger ? colors.alertSoft : colors.translucent,
+        }}
+      >
+        {icon}
       </View>
-      {right ?? (onPress && <LucideChevronRight color={colors.secondary} size={16} />)}
+      <View className="flex-1">
+        <ThemedText
+          style={{
+            fontFamily: fonts.textSemibold,
+            fontSize: 15,
+            color: danger ? colors.danger : colors.primary,
+          }}
+        >
+          {label}
+        </ThemedText>
+        {sub && (
+          <ThemedText
+            type="secondary"
+            className="text-xs mt-0.5"
+            numberOfLines={2}
+          >
+            {sub}
+          </ThemedText>
+        )}
+      </View>
+      {right ??
+        (onPress && <LucideChevronRight color={colors.muted} size={15} />)}
     </TouchableOpacity>
   );
 
   return (
     <ThemedSafeAreaView>
-        <KeyboardAvoidingView
-          style={{ flex: 1 }}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+      >
+        <ScrollView
+          className="flex-1 px-6"
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: 100 }}
         >
-        <ScrollView className="flex-1 px-6" showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
-        <MotiView from={{ opacity: 0, translateY: -20 }} animate={{ opacity: 1, translateY: 0 }} className="mt-6 mb-2">
-          <ThemedText type="secondary" className="text-sm uppercase tracking-widest">Settings</ThemedText>
-          <ThemedText className="text-3xl font-bold">Preferences</ThemedText>
-        </MotiView>
+          <MotiView
+            from={{ opacity: 0, translateY: -20 }}
+            animate={{ opacity: 1, translateY: 0 }}
+            className="mt-6 mb-2"
+          >
+            <SectionLabel>Profile & Controls</SectionLabel>
+            <ThemedText
+              style={{
+                fontFamily: fonts.displayBold,
+                fontSize: 30,
+                letterSpacing: -0.5,
+                marginTop: 2,
+              }}
+            >
+              More
+            </ThemedText>
+            {googleUser && (
+              <ThemedText
+                font="signal"
+                type="secondary"
+                style={{ fontSize: 10, letterSpacing: 0.5, marginTop: 6 }}
+                numberOfLines={1}
+              >
+                {googleUser.email}
+              </ThemedText>
+            )}
+          </MotiView>
 
-        {/* ── Google Cloud Sync ── */}
-        <Section title="Google Cloud Sync" />
-        <View className="rounded-apple-md overflow-hidden" style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
-          {!googleUser ? (
-            <Row
-              icon={<LucideUserCircle color={colors.secondary} size={20} />}
-              label="Link Google Cloud"
-              sub="Secure your data with daily Drive backups"
-              onPress={handleGoogleSignIn}
-              right={<View className="bg-accent px-3 py-1 rounded-full"><ThemedText className="text-[10px] font-bold text-white">CONNECT</ThemedText></View>}
-            />
-          ) : (
-            <>
+          {/* ── Google Cloud Sync ── */}
+          <Section title="Google Cloud Sync" />
+          <View
+            className="rounded-apple-md overflow-hidden"
+            style={{
+              backgroundColor: colors.surface,
+              borderWidth: 1,
+              borderColor: colors.border,
+            }}
+          >
+            {!googleUser ? (
               <Row
-                icon={<LucideCloudSync color={colors.success} size={20} />}
-                label={googleUser.name}
-                sub={googleUser.email}
-                right={<TouchableOpacity onPress={handleLogout}><LucideLogOut color={colors.danger} size={18} /></TouchableOpacity>}
+                icon={<LucideUserCircle color={colors.secondary} size={20} />}
+                label="Link Google Cloud"
+                sub="Secure your data with daily Drive backups"
+                onPress={handleGoogleSignIn}
+                right={
+                  <View className="px-3 py-1 rounded-full" style={{ backgroundColor: colors.accent }}>
+                    <ThemedText
+                      className="text-[10px] font-bold"
+                      style={{ color: colors.onAccent }}
+                    >
+                      CONNECT
+                    </ThemedText>
+                  </View>
+                }
               />
-              <Row
-                icon={<LucideRefreshCcw color={colors.accent} size={18} />}
-                label="Manual Backup"
-                sub={lastSynced ? `Last: ${new Date(lastSynced).toLocaleString('en-IN')}` : 'Never synced'}
-                onPress={handleSyncNow}
-                right={isSyncing ? <ActivityIndicator size="small" color={colors.accent} /> : <ThemedText className="text-xs font-bold" style={{ color: colors.accent }}>SYNC NOW</ThemedText>}
-              />
-              {preferences.syncSchedule !== 'none' && (
+            ) : (
+              <>
                 <Row
-                  icon={<LucideAlertTriangle color={lastSyncAttempt?.outcome === 'failure' ? colors.danger : colors.secondary} size={18} />}
-                  label="Last Automatic Attempt"
-                  sub={
-                    lastSyncAttempt
-                      ? `${new Date(lastSyncAttempt.timestamp).toLocaleString('en-IN')} · ${lastSyncAttempt.outcome}${lastSyncAttempt.reason ? ` (${lastSyncAttempt.reason})` : ''} · via ${lastSyncAttempt.source}`
-                      : 'No automatic attempt recorded yet — the scheduled alarm may not be firing on this device'
+                  icon={<LucideCloudSync color={colors.success} size={20} />}
+                  label={googleUser.name}
+                  sub={googleUser.email}
+                  right={
+                    <TouchableOpacity onPress={handleLogout}>
+                      <LucideLogOut color={colors.danger} size={18} />
+                    </TouchableOpacity>
                   }
                 />
-              )}
-              <Row icon={<LucideTimer color={colors.primary} size={18} />} label="Sync Schedule" sub={`Frequency: ${preferences.syncSchedule}`} />
-              <View className="flex-row p-1" style={{ backgroundColor: colors.translucent }}>
-                {(['none', 'daily', 'weekly'] as const).map(s => (
-                  <TouchableOpacity
-                    key={s}
-                    onPress={() => handleSyncScheduleChange(s)}
-                    style={[{ flex: 1, padding: 8, alignItems: 'center', borderRadius: 8 }, preferences.syncSchedule === s && { backgroundColor: colors.surface, elevation: 1 }]}
-                  >
-                    <ThemedText style={{ fontSize: 10, fontWeight: 'bold', color: preferences.syncSchedule === s ? colors.primary : colors.secondary }}>{s.toUpperCase()}</ThemedText>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              {preferences.syncSchedule !== 'none' && (
-                <View className="p-4 border-t" style={{ borderTopColor: colors.border }}>
-                   <ThemedText type="secondary" className="text-[10px] uppercase font-bold mb-2">Sync Time (Auto)</ThemedText>
-                   <TouchableOpacity 
-                     onPress={() => { setShowTimePicker(true); Haptics.selectionAsync(); }} 
-                     className="bg-border flex-row justify-between items-center p-3 rounded-apple-sm"
-                     activeOpacity={0.7}
-                   >
-                     <ThemedText className="font-bold text-sm" style={{ color: colors.primary }}>
-                       {formatDisplayTime(preferences.syncTime)}
-                     </ThemedText>
-                     <ThemedText className="text-xs font-bold" style={{ color: colors.accent }}>SELECT TIME</ThemedText>
-                   </TouchableOpacity>
-                   {showTimePicker && (
-                     <View style={Platform.OS === 'ios' ? { backgroundColor: colors.surface, borderRadius: 14, overflow: 'hidden', marginTop: 12, borderWidth: 1, borderColor: colors.border } : undefined}>
-                       <DateTimePicker
-                         value={getDateTimeObject(preferences.syncTime)}
-                         mode="time"
-                         is24Hour={true}
-                         display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                         onChange={handleTimePickerChange}
-                         themeVariant={isDark ? 'dark' : 'light'}
-                       />
-                       {Platform.OS === 'ios' && (
-                         <TouchableOpacity onPress={() => setShowTimePicker(false)} style={{ borderTopWidth: 1, borderTopColor: colors.border, padding: 12, alignItems: 'center' }}>
-                           <ThemedText style={{ color: colors.accent, fontWeight: 'bold' }}>Done</ThemedText>
-                         </TouchableOpacity>
-                       )}
-                     </View>
-                   )}
+                <Row
+                  icon={<LucideRefreshCcw color={colors.accent} size={18} />}
+                  label="Manual Backup"
+                  sub={
+                    lastSynced
+                      ? `Last: ${new Date(lastSynced).toLocaleString("en-IN")}`
+                      : "Never synced"
+                  }
+                  onPress={handleSyncNow}
+                  right={
+                    isSyncing ? (
+                      <ActivityIndicator size="small" color={colors.accent} />
+                    ) : (
+                      <ThemedText
+                        className="text-xs font-bold"
+                        style={{ color: colors.accent }}
+                      >
+                        SYNC NOW
+                      </ThemedText>
+                    )
+                  }
+                />
+                {preferences.syncSchedule !== "none" &&
+                  googleUser?.email === "dineshkumar.invests@gmail.com" && (
+                    <Row
+                      icon={
+                        <LucideAlertTriangle
+                          color={
+                            lastSyncAttempt?.outcome === "failure"
+                              ? colors.danger
+                              : colors.secondary
+                          }
+                          size={18}
+                        />
+                      }
+                      label="Last Automatic Attempt"
+                      sub={
+                        lastSyncAttempt
+                          ? `${new Date(lastSyncAttempt.timestamp).toLocaleString("en-IN")} · ${lastSyncAttempt.outcome}${lastSyncAttempt.reason ? ` (${lastSyncAttempt.reason})` : ""} · via ${lastSyncAttempt.source}`
+                          : "No automatic attempt recorded yet — the scheduled alarm may not be firing on this device"
+                      }
+                    />
+                  )}
+                <Row
+                  icon={<LucideTimer color={colors.primary} size={18} />}
+                  label="Sync Schedule"
+                  sub={`Frequency: ${preferences.syncSchedule}`}
+                />
+                <View
+                  className="flex-row p-1"
+                  style={{ backgroundColor: colors.translucent }}
+                >
+                  {(["none", "daily", "weekly"] as const).map((s) => (
+                    <TouchableOpacity
+                      key={s}
+                      onPress={() => handleSyncScheduleChange(s)}
+                      style={[
+                        {
+                          flex: 1,
+                          padding: 8,
+                          alignItems: "center",
+                          borderRadius: 8,
+                        },
+                        preferences.syncSchedule === s && {
+                          backgroundColor: colors.surface,
+                          elevation: 1,
+                        },
+                      ]}
+                    >
+                      <ThemedText
+                        style={{
+                          fontSize: 10,
+                          fontWeight: "bold",
+                          color:
+                            preferences.syncSchedule === s
+                              ? colors.primary
+                              : colors.secondary,
+                        }}
+                      >
+                        {s.toUpperCase()}
+                      </ThemedText>
+                    </TouchableOpacity>
+                  ))}
                 </View>
-              )}
-            </>
-          )}
-          <Row icon={<LucideDownload color={colors.primary} size={20} />} label="Restore Data" sub="Replace local data with Drive backup" onPress={handleRestoreFromDrive} />
-        </View>
+                {preferences.syncSchedule !== "none" && (
+                  <View
+                    className="p-4 border-t"
+                    style={{ borderTopColor: colors.border }}
+                  >
+                    <ThemedText
+                      type="secondary"
+                      className="text-[10px] uppercase font-bold mb-2"
+                    >
+                      Sync Time (Auto)
+                    </ThemedText>
+                    <TouchableOpacity
+                      onPress={() => {
+                        setShowTimePicker(true);
+                        Haptics.selectionAsync();
+                      }}
+                      className="bg-border flex-row justify-between items-center p-3 rounded-apple-sm"
+                      activeOpacity={0.7}
+                    >
+                      <ThemedText
+                        className="font-bold text-sm"
+                        style={{ color: colors.primary }}
+                      >
+                        {formatDisplayTime(preferences.syncTime)}
+                      </ThemedText>
+                      <ThemedText
+                        className="text-xs font-bold"
+                        style={{ color: colors.accent }}
+                      >
+                        SELECT TIME
+                      </ThemedText>
+                    </TouchableOpacity>
+                    {showTimePicker && (
+                      <View
+                        style={
+                          Platform.OS === "ios"
+                            ? {
+                                backgroundColor: colors.surface,
+                                borderRadius: 14,
+                                overflow: "hidden",
+                                marginTop: 12,
+                                borderWidth: 1,
+                                borderColor: colors.border,
+                              }
+                            : undefined
+                        }
+                      >
+                        <DateTimePicker
+                          value={getDateTimeObject(preferences.syncTime)}
+                          mode="time"
+                          is24Hour={true}
+                          display={
+                            Platform.OS === "ios" ? "spinner" : "default"
+                          }
+                          onChange={handleTimePickerChange}
+                          themeVariant={isDark ? "dark" : "light"}
+                        />
+                        {Platform.OS === "ios" && (
+                          <TouchableOpacity
+                            onPress={() => setShowTimePicker(false)}
+                            style={{
+                              borderTopWidth: 1,
+                              borderTopColor: colors.border,
+                              padding: 12,
+                              alignItems: "center",
+                            }}
+                          >
+                            <ThemedText
+                              style={{
+                                color: colors.accent,
+                                fontWeight: "bold",
+                              }}
+                            >
+                              Done
+                            </ThemedText>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    )}
+                  </View>
+                )}
+              </>
+            )}
+            <Row
+              icon={<LucideDownload color={colors.primary} size={20} />}
+              label="Restore Data"
+              sub="Replace local data with Drive backup"
+              onPress={handleRestoreFromDrive}
+            />
+          </View>
 
-        {/* ── Privacy & Security ── */}
-        <Section title="Privacy & Security" />
-        <View className="rounded-apple-md overflow-hidden" style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
-          <Row
-            icon={<LucideEyeOff color={colors.primary} size={18} />}
-            label="Mask Amount Values"
-            sub="Asterisks (****) on Dashboard"
-            right={<Switch value={preferences.hideAmounts} onValueChange={toggleHideAmounts} trackColor={{ true: colors.success }} />}
-          />
-          <Row
-            icon={<LucideShield color={colors.primary} size={20} />}
-            label="Biometric Lock"
-            sub="Authenticate on app launch"
-            right={<Switch value={preferences.biometricLock} onValueChange={handleBiometricToggle} trackColor={{ true: colors.success }} />}
-          />
-          {preferences.biometricLock && (
-            <View className="p-4 border-t" style={{ borderTopColor: colors.border }}>
-              <ThemedText type="secondary" className="text-[10px] uppercase font-bold mb-2">Auto-lock After (minutes, 1–60)</ThemedText>
+          {/* ── Privacy & Security ── */}
+          <Section title="Privacy & Security" />
+          <View
+            className="rounded-apple-md overflow-hidden"
+            style={{
+              backgroundColor: colors.surface,
+              borderWidth: 1,
+              borderColor: colors.border,
+            }}
+          >
+            <Row
+              icon={<LucideEyeOff color={colors.primary} size={18} />}
+              label="Mask Amount Values"
+              sub="Asterisks (****) on Dashboard"
+              right={
+                <Switch
+                  value={preferences.hideAmounts}
+                  onValueChange={toggleHideAmounts}
+                  trackColor={{ true: colors.success }}
+                />
+              }
+            />
+            <Row
+              icon={<LucideShield color={colors.primary} size={20} />}
+              label="Biometric Lock"
+              sub="Authenticate on app launch"
+              right={
+                <Switch
+                  value={preferences.biometricLock}
+                  onValueChange={handleBiometricToggle}
+                  trackColor={{ true: colors.success }}
+                />
+              }
+            />
+            {preferences.biometricLock && (
+              <View
+                className="p-4 border-t"
+                style={{ borderTopColor: colors.border }}
+              >
+                <ThemedText
+                  type="secondary"
+                  className="text-[10px] uppercase font-bold mb-2"
+                >
+                  Auto-lock After (minutes, 1–60)
+                </ThemedText>
+                <View className="flex-row gap-2">
+                  <TextInput
+                    className="bg-border flex-1 p-2 rounded-apple-sm font-bold"
+                    style={{ color: colors.primary }}
+                    value={autoLockInput}
+                    onChangeText={setAutoLockInput}
+                    onBlur={handleSaveAutoLock}
+                    keyboardType="numeric"
+                  />
+                  <TouchableOpacity
+                    onPress={handleSaveAutoLock}
+                    className="px-4 justify-center rounded-apple-sm" style={{ backgroundColor: colors.accent }}
+                  >
+                    <ThemedText
+                      className="font-bold text-xs"
+                      style={{ color: colors.onAccent }}
+                    >
+                      SET
+                    </ThemedText>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+          </View>
+
+          {/* ── Interaction & Experience ── */}
+          <Section title="Experience" />
+          <View
+            className="rounded-apple-md overflow-hidden"
+            style={{
+              backgroundColor: colors.surface,
+              borderWidth: 1,
+              borderColor: colors.border,
+            }}
+          >
+            <Row
+              icon={<LucideZap color={colors.primary} size={18} />}
+              label="Haptic Feedback"
+              sub="Vibrate on actions"
+              right={
+                <Switch
+                  value={preferences.hapticsEnabled}
+                  onValueChange={toggleHaptics}
+                  trackColor={{ true: colors.success }}
+                />
+              }
+            />
+            <Row
+              icon={<LucideLayout color={colors.primary} size={18} />}
+              label="Startup Screen"
+              sub={`Opens to: ${preferences.defaultLaunchScreen}`}
+            />
+            <View
+              className="flex-row p-1"
+              style={{ backgroundColor: colors.translucent }}
+            >
+              {(["Dashboard", "SmartInbox"] as const).map((screen) => (
+                <TouchableOpacity
+                  key={screen}
+                  onPress={() => setLaunchScreen(screen)}
+                  style={[
+                    {
+                      flex: 1,
+                      padding: 8,
+                      alignItems: "center",
+                      borderRadius: 8,
+                    },
+                    preferences.defaultLaunchScreen === screen && {
+                      backgroundColor: colors.surface,
+                      elevation: 1,
+                    },
+                  ]}
+                >
+                  <ThemedText
+                    style={{
+                      fontSize: 10,
+                      fontWeight: "bold",
+                      color:
+                        preferences.defaultLaunchScreen === screen
+                          ? colors.primary
+                          : colors.secondary,
+                    }}
+                  >
+                    {screen.replace("Smart", "").toUpperCase()}
+                  </ThemedText>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Row
+              icon={<LucideSparkles color={colors.accent} size={18} />}
+              label="Echo Spend Tour Guide"
+              sub="Explore all features and power-user tips"
+              onPress={() => {
+                triggerHaptic();
+                setShowTour(true);
+              }}
+            />
+            <Row
+              icon={<LucideLightbulb color={colors.primary} size={18} />}
+              label="Tips & Tricks"
+              sub="Unlock and configure the app's full potential"
+              onPress={() => {
+                triggerHaptic();
+                navigation.navigate("Tips");
+              }}
+            />
+          </View>
+
+          {/* ── Financial Cycle ── */}
+          <Section title="Financial Planning" />
+          <View
+            className="rounded-apple-md overflow-hidden"
+            style={{
+              backgroundColor: colors.surface,
+              borderWidth: 1,
+              borderColor: colors.border,
+            }}
+          >
+            <View className="p-4">
+              <View className="flex-row items-center mb-2">
+                <LucideWallet
+                  color={colors.primary}
+                  size={20}
+                  className="mr-3"
+                />
+                <ThemedText className="font-medium">Monthly Budget</ThemedText>
+              </View>
               <View className="flex-row gap-2">
                 <TextInput
                   className="bg-border flex-1 p-2 rounded-apple-sm font-bold"
-                  style={{ color: colors.primary }}
-                  value={autoLockInput}
-                  onChangeText={setAutoLockInput}
-                  onBlur={handleSaveAutoLock}
-                  keyboardType="numeric"
-                />
-                <TouchableOpacity onPress={handleSaveAutoLock} className="bg-accent px-4 justify-center rounded-apple-sm">
-                  <ThemedText className="text-white font-bold text-xs">SET</ThemedText>
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
-        </View>
-
-        {/* ── Interaction & Experience ── */}
-        <Section title="Experience" />
-        <View className="rounded-apple-md overflow-hidden" style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
-          <Row
-            icon={<LucideZap color={colors.primary} size={18} />}
-            label="Haptic Feedback"
-            sub="Vibrate on actions"
-            right={<Switch value={preferences.hapticsEnabled} onValueChange={toggleHaptics} trackColor={{ true: colors.success }} />}
-          />
-          <Row icon={<LucideLayout color={colors.primary} size={18} />} label="Startup Screen" sub={`Opens to: ${preferences.defaultLaunchScreen}`} />
-          <View className="flex-row p-1" style={{ backgroundColor: colors.translucent }}>
-            {(['Dashboard', 'SmartInbox'] as const).map(screen => (
-              <TouchableOpacity 
-                key={screen} 
-                onPress={() => setLaunchScreen(screen)} 
-                style={[{ flex: 1, padding: 8, alignItems: 'center', borderRadius: 8 }, preferences.defaultLaunchScreen === screen && { backgroundColor: colors.surface, elevation: 1 }]}
-              >
-                <ThemedText style={{ fontSize: 10, fontWeight: 'bold', color: preferences.defaultLaunchScreen === screen ? colors.primary : colors.secondary }}>{screen.replace('Smart', '').toUpperCase()}</ThemedText>
-              </TouchableOpacity>
-            ))}
-          </View>
-          <Row
-            icon={<LucideSparkles color={colors.accent} size={18} />}
-            label="Echo Spend Tour Guide"
-            sub="Explore all features and power-user tips"
-            onPress={() => { triggerHaptic(); setShowTour(true); }}
-          />
-          <Row
-            icon={<LucideLightbulb color={colors.primary} size={18} />}
-            label="Tips & Tricks"
-            sub="Unlock and configure the app's full potential"
-            onPress={() => { triggerHaptic(); navigation.navigate('Tips'); }}
-          />
-        </View>
-
-        {/* ── Financial Cycle ── */}
-        <Section title="Financial Planning" />
-        <View className="rounded-apple-md overflow-hidden" style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
-          <View className="p-4">
-             <View className="flex-row items-center mb-2">
-                <LucideWallet color={colors.primary} size={20} className="mr-3"/>
-                <ThemedText className="font-medium">Monthly Budget</ThemedText>
-             </View>
-             <View className="flex-row gap-2">
-                <TextInput 
-                  className="bg-border flex-1 p-2 rounded-apple-sm font-bold" 
                   style={{ color: colors.primary }}
                   value={budgetInput}
                   onChangeText={setBudgetInput}
@@ -910,398 +1261,826 @@ const SettingsScreen = ({ navigation }: any) => {
                   keyboardType="numeric"
                   placeholder="0.00"
                 />
-                <TouchableOpacity onPress={handleSaveBudget} className="bg-accent px-4 justify-center rounded-apple-sm"><ThemedText className="text-white font-bold text-xs">SAVE</ThemedText></TouchableOpacity>
-             </View>
-          </View>
-          <View className="p-4 border-t" style={{ borderTopColor: colors.border }}>
-             <View className="flex-row items-center mb-2">
-                <LucideTimer color={colors.primary} size={20} className="mr-3"/>
-                <ThemedText className="font-medium">Salary Day (1-31)</ThemedText>
-             </View>
-             <View className="flex-row gap-2">
-                <TextInput 
-                  className="bg-border flex-1 p-2 rounded-apple-sm font-bold" 
+                <TouchableOpacity
+                  onPress={handleSaveBudget}
+                  className="px-4 justify-center rounded-apple-sm" style={{ backgroundColor: colors.accent }}
+                >
+                  <ThemedText
+                    className="font-bold text-xs"
+                    style={{ color: colors.onAccent }}
+                  >
+                    SAVE
+                  </ThemedText>
+                </TouchableOpacity>
+              </View>
+            </View>
+            <View
+              className="p-4 border-t"
+              style={{ borderTopColor: colors.border }}
+            >
+              <View className="flex-row items-center mb-2">
+                <LucideTimer
+                  color={colors.primary}
+                  size={20}
+                  className="mr-3"
+                />
+                <ThemedText className="font-medium">
+                  Salary Day (1-31)
+                </ThemedText>
+              </View>
+              <View className="flex-row gap-2">
+                <TextInput
+                  className="bg-border flex-1 p-2 rounded-apple-sm font-bold"
                   style={{ color: colors.primary }}
                   value={salaryDayInput}
                   onChangeText={setSalaryDayInput}
                   onBlur={handleSaveSalaryDay}
                   keyboardType="numeric"
                 />
-                <TouchableOpacity onPress={handleSaveSalaryDay} className="bg-accent px-4 justify-center rounded-apple-sm"><ThemedText className="text-white font-bold text-xs">SET</ThemedText></TouchableOpacity>
-             </View>
-             <ThemedText type="secondary" className="text-[10px] mt-2">Adjusts when your monthly spend resets.</ThemedText>
-          </View>
-        </View>
-
-        {/* ── Categorization ── */}
-        <Section title="Organization" />
-        <View className="rounded-apple-md overflow-hidden" style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
-          <Row icon={<LucideTag color={colors.primary} size={20} />} label="Manage Categories" sub="Icons, colors and sub-groups" onPress={() => navigation.navigate('Categories')} />
-        </View>
-
-        {/* ── Alerts & Reminders ── */}
-        <Section title="Alerts & Reminders" />
-        <View className="rounded-apple-md overflow-hidden" style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
-
-          {/* ── Permission Status Banner ── */}
-          {alertsBlocked && (
-            <View style={{ padding: 16, backgroundColor: `${colors.warning}12`, borderBottomWidth: 1, borderBottomColor: colors.border }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
-                <LucideAlertTriangle color={colors.warning} size={16} />
-                <ThemedText style={{ fontWeight: '700', fontSize: 13, marginLeft: 8 }}>Permissions Required</ThemedText>
+                <TouchableOpacity
+                  onPress={handleSaveSalaryDay}
+                  className="px-4 justify-center rounded-apple-sm" style={{ backgroundColor: colors.accent }}
+                >
+                  <ThemedText
+                    className="font-bold text-xs"
+                    style={{ color: colors.onAccent }}
+                  >
+                    SET
+                  </ThemedText>
+                </TouchableOpacity>
               </View>
-              <ThemedText type="secondary" style={{ fontSize: 11, lineHeight: 16, marginBottom: 12 }}>
-                To deliver alerts and reminders precisely at the right time, Echo Spend needs the following permissions:
+              <ThemedText type="secondary" className="text-[10px] mt-2">
+                Adjusts when your monthly spend resets.
               </ThemedText>
-
-              {!isNotificationGranted && (
-                <TouchableOpacity
-                  onPress={async () => {
-                    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
-                    const { status } = await Notifications.requestPermissionsAsync();
-                    if (status === 'granted') {
-                      setIsNotificationGranted(true);
-                    } else {
-                      Alert.alert(
-                        'Notifications Blocked',
-                        'Echo Spend needs notification permissions to deliver alerts. Since the permission was previously denied, please enable it manually in your device settings.',
-                        [
-                          { text: 'Cancel', style: 'cancel' },
-                          { text: 'Open Settings', onPress: () => Linking.openSettings() },
-                        ]
-                      );
-                    }
-                  }}
-                  activeOpacity={0.7}
-                  style={{
-                    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-                    padding: 12, borderRadius: 10, marginBottom: 8,
-                    backgroundColor: colors.surface, borderWidth: 1, borderColor: `${colors.danger}30`,
-                  }}
-                >
-                  <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
-                    <View style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: `${colors.danger}15`, alignItems: 'center', justifyContent: 'center' }}>
-                      <LucideBell color={colors.danger} size={16} />
-                    </View>
-                    <View style={{ marginLeft: 10, flex: 1 }}>
-                      <ThemedText style={{ fontWeight: '600', fontSize: 12 }}>Notifications</ThemedText>
-                      <ThemedText type="secondary" style={{ fontSize: 10 }}>Show alert banners, badges & sounds</ThemedText>
-                    </View>
-                  </View>
-                  <View style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: colors.accent }}>
-                    <ThemedText style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>ENABLE</ThemedText>
-                  </View>
-                </TouchableOpacity>
-              )}
-
-              {Platform.OS === 'android' && !isExactAlarmAllowed && (
-                <TouchableOpacity
-                  onPress={async () => {
-                    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
-                    if (BackgroundOptimizationModule) {
-                      await BackgroundOptimizationModule.openExactAlarmSettings();
-                    }
-                  }}
-                  activeOpacity={0.7}
-                  style={{
-                    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-                    padding: 12, borderRadius: 10,
-                    backgroundColor: colors.surface, borderWidth: 1, borderColor: `${colors.danger}30`,
-                  }}
-                >
-                  <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
-                    <View style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: `${colors.danger}15`, alignItems: 'center', justifyContent: 'center' }}>
-                      <LucideTimer color={colors.danger} size={16} />
-                    </View>
-                    <View style={{ marginLeft: 10, flex: 1 }}>
-                      <ThemedText style={{ fontWeight: '600', fontSize: 12 }}>Alarms & Reminders</ThemedText>
-                      <ThemedText type="secondary" style={{ fontSize: 10 }}>Precise scheduling at exact times</ThemedText>
-                    </View>
-                  </View>
-                  <View style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: colors.accent }}>
-                    <ThemedText style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>ENABLE</ThemedText>
-                  </View>
-                </TouchableOpacity>
-              )}
             </View>
-          )}
+          </View>
 
-          <Row
-            icon={<LucideBell color={alertsBlocked ? colors.secondary : colors.primary} size={20} />}
-            label="Budget Alerts"
-            sub={alertsBlocked ? "⚠ Enable permissions above to activate" : undefined}
-            right={<Switch value={preferences.budgetAlerts} onValueChange={(val) => handleBudgetAlertsToggle(val)} trackColor={{ true: colors.success }} />}
-          />
-          <Row
-            icon={<LucideBrain color={alertsBlocked ? colors.secondary : colors.primary} size={20} />}
-            label="Daily Expense Reminder"
-            sub={alertsBlocked ? "⚠ Enable permissions above to activate" : "9:00 PM reminder to record spends"}
-            right={
-              <Switch 
-                value={preferences.dailyReminder} 
-                onValueChange={(val) => handleDailyReminderToggle(val)} 
-                trackColor={{ true: colors.success }} 
-              />
-            }
-          />
-          <Row
-            icon={<LucideRefreshCcw color={alertsBlocked ? colors.secondary : colors.primary} size={20} />}
-            label="Bill Reminders"
-            sub={alertsBlocked ? "⚠ Enable permissions above to activate" : undefined}
-            right={<Switch value={preferences.recurringAlerts} onValueChange={(val) => handleRecurringAlertsToggle(val)} trackColor={{ true: colors.success }} />}
-          />
-          <Row
-            icon={<LucideDownload color={alertsBlocked ? colors.secondary : colors.primary} size={20} />}
-            label="Weekly Digest"
-            sub={alertsBlocked ? "⚠ Enable permissions above to activate" : undefined}
-            right={<Switch value={preferences.weeklyDigest} onValueChange={(val) => handleWeeklyDigestToggle(val)} trackColor={{ true: colors.success }} />}
-          />
-        </View>
-
-        {/* ── Appearance ── */}
-        <Section title="Aesthetics" />
-        <View className="rounded-apple-md overflow-hidden" style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
-          {['dark', 'light', 'system'].map(v => (
-            <Row 
-              key={v}
-              icon={v === 'dark' ? <LucideMoon size={18} color={colors.primary}/> : v === 'light' ? <LucideSun size={18} color={colors.primary}/> : <LucideMonitor size={18} color={colors.primary}/>}
-              label={v.charAt(0).toUpperCase() + v.slice(1)} 
-              onPress={() => setTheme(v as any)} 
-              right={preferences.theme === v ? <View className="w-2 h-2 rounded-full bg-accent"/> : null} 
-            />
-          ))}
-        </View>
-
-        {/* ── Automation ── */}
-        <Section title="Automation" />
-        <View className="rounded-apple-md overflow-hidden" style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
-          <Row
-            icon={<LucideBrain color={colors.primary} size={20} />}
-            label="Auto-approve Small Spends"
-            sub={`Threshold: ${preferences.currency}${preferences.autoApproveThreshold}`}
-            right={<Switch value={preferences.autoApproveSmallSpends} onValueChange={toggleAutoApprove} trackColor={{ true: colors.success }} />}
-          />
-          <Row
-            icon={<LucideZap color={colors.primary} size={20} />}
-            label="Auto-detect via SMS"
-            sub="Detect bank SMS and notify you instantly"
-            right={
-              <Switch
-                value={preferences.autoSmsScan}
-                onValueChange={(val) => handleAutoSmsScanToggle(val)}
-                trackColor={{ true: colors.success }}
-              />
-            }
-          />
-          {preferences.autoSmsScan && Platform.OS === 'android' && (
+          {/* ── Categorization ── */}
+          <Section title="Organization" />
+          <View
+            className="rounded-apple-md overflow-hidden"
+            style={{
+              backgroundColor: colors.surface,
+              borderWidth: 1,
+              borderColor: colors.border,
+            }}
+          >
             <Row
-              icon={<LucideAlertTriangle color={colors.warning} size={18} />}
-              label="Troubleshoot Background Runs"
-              sub="Guide to keep background scans alive on your device"
-              onPress={() => {
-                Linking.openURL('https://dontkillmyapp.com').catch(() => {
-                  notify.error("Could not open troubleshooting URL");
-                });
-              }}
-              right={<LucideChevronRight color={colors.secondary} size={14} />}
+              icon={<LucideTag color={colors.primary} size={20} />}
+              label="Manage Categories"
+              sub="Icons, colors and sub-groups"
+              onPress={() => navigation.navigate("Categories")}
             />
-          )}
-          {preferences.autoApproveSmallSpends && (
-            <View className="p-4 border-t" style={{ borderTopColor: colors.border }}>
-               <ThemedText type="secondary" className="text-[10px] uppercase font-bold mb-2">Threshold Amount ({preferences.currency})</ThemedText>
-               <View className="flex-row gap-2">
-                 <TextInput 
-                    className="bg-border flex-1 p-2 rounded-apple-sm font-bold" 
+          </View>
+
+          {/* ── Alerts & Reminders ── */}
+          <Section title="Alerts & Reminders" />
+          <View
+            className="rounded-apple-md overflow-hidden"
+            style={{
+              backgroundColor: colors.surface,
+              borderWidth: 1,
+              borderColor: colors.border,
+            }}
+          >
+            {/* ── Permission Status Banner ── */}
+            {alertsBlocked && (
+              <View
+                style={{
+                  padding: 16,
+                  backgroundColor: `${colors.warning}12`,
+                  borderBottomWidth: 1,
+                  borderBottomColor: colors.border,
+                }}
+              >
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    marginBottom: 6,
+                  }}
+                >
+                  <LucideAlertTriangle color={colors.warning} size={16} />
+                  <ThemedText
+                    style={{ fontWeight: "700", fontSize: 13, marginLeft: 8 }}
+                  >
+                    Permissions Required
+                  </ThemedText>
+                </View>
+                <ThemedText
+                  type="secondary"
+                  style={{ fontSize: 11, lineHeight: 16, marginBottom: 12 }}
+                >
+                  To deliver alerts and reminders precisely at the right time,
+                  Echo Spend needs the following permissions:
+                </ThemedText>
+
+                {!isNotificationGranted && (
+                  <TouchableOpacity
+                    onPress={async () => {
+                      triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+                      const { status } =
+                        await Notifications.requestPermissionsAsync();
+                      if (status === "granted") {
+                        setIsNotificationGranted(true);
+                      } else {
+                        Alert.alert(
+                          "Notifications Blocked",
+                          "Echo Spend needs notification permissions to deliver alerts. Since the permission was previously denied, please enable it manually in your device settings.",
+                          [
+                            { text: "Cancel", style: "cancel" },
+                            {
+                              text: "Open Settings",
+                              onPress: () => Linking.openSettings(),
+                            },
+                          ],
+                        );
+                      }
+                    }}
+                    activeOpacity={0.7}
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: 12,
+                      borderRadius: 10,
+                      marginBottom: 8,
+                      backgroundColor: colors.surface,
+                      borderWidth: 1,
+                      borderColor: `${colors.danger}30`,
+                    }}
+                  >
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        flex: 1,
+                      }}
+                    >
+                      <View
+                        style={{
+                          width: 32,
+                          height: 32,
+                          borderRadius: 8,
+                          backgroundColor: `${colors.danger}15`,
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        <LucideBell color={colors.danger} size={16} />
+                      </View>
+                      <View style={{ marginLeft: 10, flex: 1 }}>
+                        <ThemedText style={{ fontWeight: "600", fontSize: 12 }}>
+                          Notifications
+                        </ThemedText>
+                        <ThemedText type="secondary" style={{ fontSize: 10 }}>
+                          Show alert banners, badges & sounds
+                        </ThemedText>
+                      </View>
+                    </View>
+                    <View
+                      style={{
+                        paddingHorizontal: 12,
+                        paddingVertical: 6,
+                        borderRadius: 8,
+                        backgroundColor: colors.accent,
+                      }}
+                    >
+                      <ThemedText
+                        style={{
+                          color: "#fff",
+                          fontSize: 10,
+                          fontWeight: "700",
+                        }}
+                      >
+                        ENABLE
+                      </ThemedText>
+                    </View>
+                  </TouchableOpacity>
+                )}
+
+                {Platform.OS === "android" && !isExactAlarmAllowed && (
+                  <TouchableOpacity
+                    onPress={async () => {
+                      triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+                      if (BackgroundOptimizationModule) {
+                        await BackgroundOptimizationModule.openExactAlarmSettings();
+                      }
+                    }}
+                    activeOpacity={0.7}
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: 12,
+                      borderRadius: 10,
+                      backgroundColor: colors.surface,
+                      borderWidth: 1,
+                      borderColor: `${colors.danger}30`,
+                    }}
+                  >
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        flex: 1,
+                      }}
+                    >
+                      <View
+                        style={{
+                          width: 32,
+                          height: 32,
+                          borderRadius: 8,
+                          backgroundColor: `${colors.danger}15`,
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        <LucideTimer color={colors.danger} size={16} />
+                      </View>
+                      <View style={{ marginLeft: 10, flex: 1 }}>
+                        <ThemedText style={{ fontWeight: "600", fontSize: 12 }}>
+                          Alarms & Reminders
+                        </ThemedText>
+                        <ThemedText type="secondary" style={{ fontSize: 10 }}>
+                          Precise scheduling at exact times
+                        </ThemedText>
+                      </View>
+                    </View>
+                    <View
+                      style={{
+                        paddingHorizontal: 12,
+                        paddingVertical: 6,
+                        borderRadius: 8,
+                        backgroundColor: colors.accent,
+                      }}
+                    >
+                      <ThemedText
+                        style={{
+                          color: "#fff",
+                          fontSize: 10,
+                          fontWeight: "700",
+                        }}
+                      >
+                        ENABLE
+                      </ThemedText>
+                    </View>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
+
+            <Row
+              icon={
+                <LucideBell
+                  color={alertsBlocked ? colors.secondary : colors.primary}
+                  size={20}
+                />
+              }
+              label="Budget Alerts"
+              sub={
+                alertsBlocked
+                  ? "⚠ Enable permissions above to activate"
+                  : undefined
+              }
+              right={
+                <Switch
+                  value={preferences.budgetAlerts}
+                  onValueChange={(val) => handleBudgetAlertsToggle(val)}
+                  trackColor={{ true: colors.success }}
+                />
+              }
+            />
+            <Row
+              icon={
+                <LucideBrain
+                  color={alertsBlocked ? colors.secondary : colors.primary}
+                  size={20}
+                />
+              }
+              label="Daily Expense Reminder"
+              sub={
+                alertsBlocked
+                  ? "⚠ Enable permissions above to activate"
+                  : "9:00 PM reminder to record spends"
+              }
+              right={
+                <Switch
+                  value={preferences.dailyReminder}
+                  onValueChange={(val) => handleDailyReminderToggle(val)}
+                  trackColor={{ true: colors.success }}
+                />
+              }
+            />
+            <Row
+              icon={
+                <LucideRefreshCcw
+                  color={alertsBlocked ? colors.secondary : colors.primary}
+                  size={20}
+                />
+              }
+              label="Bill Reminders"
+              sub={
+                alertsBlocked
+                  ? "⚠ Enable permissions above to activate"
+                  : undefined
+              }
+              right={
+                <Switch
+                  value={preferences.recurringAlerts}
+                  onValueChange={(val) => handleRecurringAlertsToggle(val)}
+                  trackColor={{ true: colors.success }}
+                />
+              }
+            />
+            <Row
+              icon={
+                <LucideDownload
+                  color={alertsBlocked ? colors.secondary : colors.primary}
+                  size={20}
+                />
+              }
+              label="Weekly Digest"
+              sub={
+                alertsBlocked
+                  ? "⚠ Enable permissions above to activate"
+                  : undefined
+              }
+              right={
+                <Switch
+                  value={preferences.weeklyDigest}
+                  onValueChange={(val) => handleWeeklyDigestToggle(val)}
+                  trackColor={{ true: colors.success }}
+                />
+              }
+            />
+          </View>
+
+          {/* ── Appearance ── */}
+          <Section title="Theme" />
+          <View className="flex-row flex-wrap justify-between">
+            {THEMES.map((t) => {
+              const sw = themeSwatches(t, isDark ? "dark" : "light");
+              const selected = themeId === t.id;
+              return (
+                <TouchableOpacity
+                  key={t.id}
+                  activeOpacity={0.85}
+                  onPress={() => setThemeId(t.id)}
+                  style={{
+                    width: "48.5%",
+                    marginBottom: 12,
+                    borderRadius: 16,
+                    borderWidth: selected ? 2 : 1,
+                    borderColor: selected ? sw.accent : colors.border,
+                    backgroundColor: sw.bg,
+                    padding: 12,
+                    overflow: "hidden",
+                  }}
+                >
+                  {/* Mini preview: a surface bar + swatch dots */}
+                  <View
+                    style={{
+                      height: 34,
+                      borderRadius: 9,
+                      backgroundColor: sw.surface,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      paddingHorizontal: 8,
+                      gap: 6,
+                    }}
+                  >
+                    <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: sw.accent }} />
+                    <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: sw.credit }} />
+                    <View
+                      style={{
+                        flex: 1,
+                        height: 5,
+                        borderRadius: 3,
+                        backgroundColor: sw.text,
+                        opacity: 0.35,
+                      }}
+                    />
+                  </View>
+                  <View className="flex-row items-center justify-between" style={{ marginTop: 10 }}>
+                    <View style={{ flex: 1 }}>
+                      <ThemedText
+                        font="display"
+                        style={{ color: sw.text, fontSize: 15 }}
+                        numberOfLines={1}
+                      >
+                        {t.name}
+                      </ThemedText>
+                      <ThemedText
+                        style={{ color: sw.text, opacity: 0.55, fontSize: 11, marginTop: 1 }}
+                        numberOfLines={1}
+                      >
+                        {t.blurb}
+                      </ThemedText>
+                    </View>
+                    {selected && (
+                      <View
+                        style={{
+                          width: 20,
+                          height: 20,
+                          borderRadius: 10,
+                          backgroundColor: sw.accent,
+                          alignItems: "center",
+                          justifyContent: "center",
+                          marginLeft: 6,
+                        }}
+                      >
+                        <LucideCheck size={13} color={sw.bg} strokeWidth={3} />
+                      </View>
+                    )}
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <Section title="Appearance" />
+          <View
+            className="rounded-apple-md overflow-hidden"
+            style={{
+              backgroundColor: colors.surface,
+              borderWidth: 1,
+              borderColor: colors.border,
+            }}
+          >
+            {["dark", "light", "system"].map((v) => (
+              <Row
+                key={v}
+                icon={
+                  v === "dark" ? (
+                    <LucideMoon size={18} color={colors.primary} />
+                  ) : v === "light" ? (
+                    <LucideSun size={18} color={colors.primary} />
+                  ) : (
+                    <LucideMonitor size={18} color={colors.primary} />
+                  )
+                }
+                label={v.charAt(0).toUpperCase() + v.slice(1)}
+                onPress={() => setTheme(v as any)}
+                right={
+                  preferences.theme === v ? (
+                    <View className="w-2 h-2 rounded-full" style={{ backgroundColor: colors.accent }} />
+                  ) : null
+                }
+              />
+            ))}
+          </View>
+
+          {/* ── Automation ── */}
+          <Section title="Automation" />
+          <View
+            className="rounded-apple-md overflow-hidden"
+            style={{
+              backgroundColor: colors.surface,
+              borderWidth: 1,
+              borderColor: colors.border,
+            }}
+          >
+            <Row
+              icon={<LucideBrain color={colors.primary} size={20} />}
+              label="Auto-approve Small Spends"
+              sub={`Threshold: ${preferences.currency}${preferences.autoApproveThreshold}`}
+              right={
+                <Switch
+                  value={preferences.autoApproveSmallSpends}
+                  onValueChange={toggleAutoApprove}
+                  trackColor={{ true: colors.success }}
+                />
+              }
+            />
+            <Row
+              icon={<LucideZap color={colors.primary} size={20} />}
+              label="Auto-detect via SMS"
+              sub="Detect bank SMS and notify you instantly"
+              right={
+                <Switch
+                  value={preferences.autoSmsScan}
+                  onValueChange={(val) => handleAutoSmsScanToggle(val)}
+                  trackColor={{ true: colors.success }}
+                />
+              }
+            />
+            {preferences.autoSmsScan && Platform.OS === "android" && (
+              <Row
+                icon={<LucideAlertTriangle color={colors.warning} size={18} />}
+                label="Troubleshoot Background Runs"
+                sub="Guide to keep background scans alive on your device"
+                onPress={() => {
+                  Linking.openURL("https://dontkillmyapp.com").catch(() => {
+                    notify.error("Could not open troubleshooting URL");
+                  });
+                }}
+                right={
+                  <LucideChevronRight color={colors.secondary} size={14} />
+                }
+              />
+            )}
+            {preferences.autoApproveSmallSpends && (
+              <View
+                className="p-4 border-t"
+                style={{ borderTopColor: colors.border }}
+              >
+                <ThemedText
+                  type="secondary"
+                  className="text-[10px] uppercase font-bold mb-2"
+                >
+                  Threshold Amount ({preferences.currency})
+                </ThemedText>
+                <View className="flex-row gap-2">
+                  <TextInput
+                    className="bg-border flex-1 p-2 rounded-apple-sm font-bold"
                     style={{ color: colors.primary }}
                     value={thresholdInput}
                     onChangeText={setThresholdInput}
                     onBlur={handleSaveThreshold}
                     keyboardType="numeric"
-                 />
-                 <TouchableOpacity onPress={handleSaveThreshold} className="bg-accent px-4 justify-center rounded-apple-sm"><ThemedText className="text-white font-bold text-xs">SET</ThemedText></TouchableOpacity>
-               </View>
-            </View>
-          )}
-        </View>
-
-        {/* ── Echo AI ── */}
-        <Section title="Echo AI" />
-        <View className="rounded-apple-md overflow-hidden" style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
-          {!AIModelManager.isDeviceCompatible() ? (
-            /* Low RAM Compatibility Warning */
-            <>
-              <Row
-                icon={<LucideAlertTriangle color={colors.danger} size={20} />}
-                label="Echo AI Incompatible"
-                sub="Your device has less than 2GB of total RAM. On-device Echo AI is disabled to prevent crashes."
-              />
-              <View style={{ padding: 12, borderTopWidth: 1, borderTopColor: colors.border }}>
-                <ThemedText type="secondary" className="text-xs">
-                  Echo Spend will fall back to high-performance local regex parsing. No action is required.
-                </ThemedText>
+                  />
+                  <TouchableOpacity
+                    onPress={handleSaveThreshold}
+                    className="px-4 justify-center rounded-apple-sm" style={{ backgroundColor: colors.accent }}
+                  >
+                    <ThemedText
+                      className="font-bold text-xs"
+                      style={{ color: colors.onAccent }}
+                    >
+                      SET
+                    </ThemedText>
+                  </TouchableOpacity>
+                </View>
               </View>
-            </>
-          ) : aiModelStatus === 'not_downloaded' ? (
-            /* Model not downloaded — show download prompt */
-            <>
-              <Row
-                icon={<LucideAlertTriangle color={colors.warning} size={20} />}
-                label="Echo AI Not Installed"
-                sub="Smart SMS parsing is using basic mode"
-              />
-              <TouchableOpacity
-                onPress={() => {
-                  triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
-                  navigation.navigate('AIModelSetup');
-                }}
-                style={{
-                  flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-                  gap: 8, paddingVertical: 12, margin: 12, borderRadius: 12,
-                  backgroundColor: colors.accent,
-                }}
-              >
-                {loadingExpectedSize ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <LucideDownload color="#fff" size={16} />
-                )}
-                <ThemedText style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>
-                  Download Echo AI {loadingExpectedSize ? '...' : `(${expectedModelSize})`}
-                </ThemedText>
-              </TouchableOpacity>
-            </>
-          ) : aiModelStatus === 'downloading' ? (
-            /* Downloading */
-            <>
-              <TouchableOpacity
-                onPress={() => {
-                  triggerHaptic();
-                  navigation.navigate('AIModelSetup');
-                }}
-              >
-                <Row
-                  icon={<LucideDownload color={colors.accent} size={20} />}
-                  label="Downloading Echo AI..."
-                  sub={`${aiModelProgress}% complete • Tap to view progress`}
-                />
-              </TouchableOpacity>
-            </>
-          ) : aiModelStatus === 'error' ? (
-            /* Error */
-            <>
-              <TouchableOpacity
-                onPress={() => {
-                  triggerHaptic();
-                  navigation.navigate('AIModelSetup');
-                }}
-              >
+            )}
+          </View>
+
+          {/* ── Echo AI ── */}
+          <Section title="Echo AI" />
+          <View
+            className="rounded-apple-md overflow-hidden"
+            style={{
+              backgroundColor: colors.surface,
+              borderWidth: 1,
+              borderColor: colors.border,
+            }}
+          >
+            {!AIModelManager.isDeviceCompatible() ? (
+              /* Low RAM Compatibility Warning */
+              <>
                 <Row
                   icon={<LucideAlertTriangle color={colors.danger} size={20} />}
-                  label="Echo AI Download Failed"
-                  sub="Tap to retry or cancel setup"
+                  label="Echo AI Incompatible"
+                  sub="Your device has less than 2GB of total RAM. On-device Echo AI is disabled to prevent crashes."
                 />
-              </TouchableOpacity>
-            </>
-          ) : (
-            /* Model is downloaded/ready */
-            <>
-              <Row
-                icon={<LucideCpu color={colors.success} size={20} />}
-                label="Echo AI"
-                sub={`Local Engine • ${aiModelSize || expectedModelSize} • ${aiModelStatus === 'ready' ? 'Active' : 'Ready'}`}
-                right={
-                  <View style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: `${colors.success}20` }}>
-                    <ThemedText style={{ fontSize: 10, fontWeight: '700', color: colors.success }}>
-                      {aiModelStatus === 'ready' ? 'ACTIVE' : 'READY'}
-                    </ThemedText>
-                  </View>
-                }
-              />
-              <Row
-                icon={<LucideTrash2 color={colors.danger} size={18} />}
-                label="Delete Echo AI"
-                sub={`Free up ${aiModelSize || expectedModelSize} of storage`}
-                onPress={() => {
-                  Alert.alert(
-                    'Delete Echo AI?',
-                    `Without the Echo AI, SMS analysis will use basic pattern matching which is less accurate for unusual transactions.\n\nYou'll need to re-download ${expectedModelSize} later to restore Echo AI features.`,
-                    [
-                      { text: 'Keep Echo AI', style: 'cancel' },
-                      {
-                        text: 'Delete Echo AI',
-                        style: 'destructive',
-                        onPress: async () => {
-                           await AIModelManager.deleteModel();
-                           setAiModelSize('');
-                           notify.info('Echo AI deleted', 'Using basic SMS parsing mode');
-                           triggerHaptic(Haptics.ImpactFeedbackStyle.Heavy);
+                <View
+                  style={{
+                    padding: 12,
+                    borderTopWidth: 1,
+                    borderTopColor: colors.border,
+                  }}
+                >
+                  <ThemedText type="secondary" className="text-xs">
+                    Echo Spend will fall back to high-performance local regex
+                    parsing. No action is required.
+                  </ThemedText>
+                </View>
+              </>
+            ) : aiModelStatus === "not_downloaded" ? (
+              /* Model not downloaded — show download prompt */
+              <>
+                <Row
+                  icon={
+                    <LucideAlertTriangle color={colors.warning} size={20} />
+                  }
+                  label="Echo AI Not Installed"
+                  sub="Smart SMS parsing is using basic mode"
+                />
+                <TouchableOpacity
+                  onPress={() => {
+                    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+                    navigation.navigate("AIModelSetup");
+                  }}
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 8,
+                    paddingVertical: 12,
+                    margin: 12,
+                    borderRadius: 12,
+                    backgroundColor: colors.accent,
+                  }}
+                >
+                  {loadingExpectedSize ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <LucideDownload color="#fff" size={16} />
+                  )}
+                  <ThemedText
+                    style={{ color: "#fff", fontWeight: "700", fontSize: 13 }}
+                  >
+                    Download Echo AI{" "}
+                    {loadingExpectedSize ? "..." : `(${expectedModelSize})`}
+                  </ThemedText>
+                </TouchableOpacity>
+              </>
+            ) : aiModelStatus === "downloading" ? (
+              /* Downloading */
+              <>
+                <TouchableOpacity
+                  onPress={() => {
+                    triggerHaptic();
+                    navigation.navigate("AIModelSetup");
+                  }}
+                >
+                  <Row
+                    icon={<LucideDownload color={colors.accent} size={20} />}
+                    label="Downloading Echo AI..."
+                    sub={`${aiModelProgress}% complete • Tap to view progress`}
+                  />
+                </TouchableOpacity>
+              </>
+            ) : aiModelStatus === "error" ? (
+              /* Error */
+              <>
+                <TouchableOpacity
+                  onPress={() => {
+                    triggerHaptic();
+                    navigation.navigate("AIModelSetup");
+                  }}
+                >
+                  <Row
+                    icon={
+                      <LucideAlertTriangle color={colors.danger} size={20} />
+                    }
+                    label="Echo AI Download Failed"
+                    sub="Tap to retry or cancel setup"
+                  />
+                </TouchableOpacity>
+              </>
+            ) : (
+              /* Model is downloaded/ready */
+              <>
+                <Row
+                  icon={<LucideCpu color={colors.success} size={20} />}
+                  label="Echo AI"
+                  sub={`Local Engine • ${aiModelSize || expectedModelSize} • ${aiModelStatus === "ready" ? "Active" : "Ready"}`}
+                  right={
+                    <View
+                      style={{
+                        paddingHorizontal: 8,
+                        paddingVertical: 4,
+                        borderRadius: 6,
+                        backgroundColor: `${colors.success}20`,
+                      }}
+                    >
+                      <ThemedText
+                        style={{
+                          fontSize: 10,
+                          fontWeight: "700",
+                          color: colors.success,
+                        }}
+                      >
+                        {aiModelStatus === "ready" ? "ACTIVE" : "READY"}
+                      </ThemedText>
+                    </View>
+                  }
+                />
+                <Row
+                  icon={<LucideTrash2 color={colors.danger} size={18} />}
+                  label="Delete Echo AI"
+                  sub={`Free up ${aiModelSize || expectedModelSize} of storage`}
+                  onPress={() => {
+                    Alert.alert(
+                      "Delete Echo AI?",
+                      `Without the Echo AI, SMS analysis will use basic pattern matching which is less accurate for unusual transactions.\n\nYou'll need to re-download ${expectedModelSize} later to restore Echo AI features.`,
+                      [
+                        { text: "Keep Echo AI", style: "cancel" },
+                        {
+                          text: "Delete Echo AI",
+                          style: "destructive",
+                          onPress: async () => {
+                            await AIModelManager.deleteModel();
+                            setAiModelSize("");
+                            notify.info(
+                              "Echo AI deleted",
+                              "Using basic SMS parsing mode",
+                            );
+                            triggerHaptic(Haptics.ImpactFeedbackStyle.Heavy);
+                          },
                         },
-                      },
-                    ]
-                  );
-                }}
+                      ],
+                    );
+                  }}
+                />
+              </>
+            )}
+          </View>
+
+          <Section title="Data & Privacy" />
+          <View
+            className="rounded-apple-md overflow-hidden mb-24"
+            style={{
+              backgroundColor: colors.surface,
+              borderWidth: 1,
+              borderColor: colors.border,
+            }}
+          >
+            <Row
+              icon={<LucideDownload color={colors.primary} size={20} />}
+              label="Export to CSV"
+              onPress={() => SyncService.exportToCSV()}
+            />
+            {!googleUser && (
+              <Row
+                icon={<LucideLogOut color={colors.danger} size={18} />}
+                label="Reset App & Wipe Data"
+                onPress={handleLogout}
+                danger
               />
+            )}
+          </View>
+
+          {/* ── Developer Testing ── (Hidden in Release) */}
+          {__DEV__ && (
+            <>
+              <Section title="Developer Testing" />
+              <View
+                className="rounded-apple-md overflow-hidden mb-24"
+                style={{
+                  backgroundColor: colors.surface,
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                }}
+              >
+                <Row
+                  icon={<LucideZap color={colors.accent} size={20} />}
+                  label="Test Transaction Notification"
+                  sub="Single transaction deep-link to SmartInbox"
+                  onPress={() =>
+                    NotificationService.notifyNewTransaction(
+                      1250,
+                      "Starbucks",
+                      "Food",
+                    )
+                  }
+                />
+                <Row
+                  icon={<LucideZap color={colors.accent} size={20} />}
+                  label="Test Batch Notification"
+                  sub="Multiple transactions deep-link to SmartInbox"
+                  onPress={() =>
+                    NotificationService.notifyBatchTransactions(
+                      3,
+                      4500,
+                      "Zomato",
+                    )
+                  }
+                />
+                <Row
+                  icon={<LucideBell color={colors.warning} size={20} />}
+                  label="Test Budget Alert"
+                  sub="80% utilization deep-link to Home"
+                  onPress={() =>
+                    NotificationService.notifyBudgetAlert(
+                      42000,
+                      50000,
+                      preferences.currency,
+                    )
+                  }
+                />
+                <Row
+                  icon={<LucideLayout color={colors.primary} size={20} />}
+                  label="Test Weekly Digest"
+                  sub="Summary deep-link to Analytics"
+                  onPress={() =>
+                    NotificationService.notifyWeeklyDigest(
+                      15400,
+                      "Shopping",
+                      preferences.currency,
+                    )
+                  }
+                />
+                <Row
+                  icon={<LucideBell color={colors.accent} size={20} />}
+                  label="Test Daily Reminder"
+                  sub="Immediate test of 9PM check-in msg"
+                  onPress={() => {
+                    NotificationService.scheduleLocalNotification(
+                      "Daily Expense Check-in",
+                      "Don't forget to add today's expenses! Tap to open Echo Spend.",
+                      "alerts",
+                      { screen: "Home" },
+                    );
+                  }}
+                />
+              </View>
             </>
           )}
-        </View>
-
-        <Section title="Data & Privacy" />
-        <View className="rounded-apple-md overflow-hidden mb-24" style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
-          <Row icon={<LucideDownload color={colors.primary} size={20} />} label="Export to CSV" onPress={() => SyncService.exportToCSV()} />
-          {!googleUser && (
-            <Row icon={<LucideLogOut color={colors.danger} size={18} />} label="Reset App & Wipe Data" onPress={handleLogout} danger />
-          )}
-        </View>
-
-        {/* ── Developer Testing ── (Hidden in Release) */}
-        {__DEV__ && (
-          <>
-            <Section title="Developer Testing" />
-            <View className="rounded-apple-md overflow-hidden mb-24" style={{ backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
-               <Row 
-                 icon={<LucideZap color={colors.accent} size={20} />} 
-                 label="Test Transaction Notification" 
-                 sub="Single transaction deep-link to SmartInbox" 
-                 onPress={() => NotificationService.notifyNewTransaction(1250, 'Starbucks', 'Food')} 
-               />
-               <Row 
-                 icon={<LucideZap color={colors.accent} size={20} />} 
-                 label="Test Batch Notification" 
-                 sub="Multiple transactions deep-link to SmartInbox" 
-                 onPress={() => NotificationService.notifyBatchTransactions(3, 4500, 'Zomato')} 
-               />
-               <Row 
-                 icon={<LucideBell color={colors.warning} size={20} />} 
-                 label="Test Budget Alert" 
-                 sub="80% utilization deep-link to Home" 
-                 onPress={() => NotificationService.notifyBudgetAlert(42000, 50000, preferences.currency)} 
-               />
-               <Row 
-                 icon={<LucideLayout color={colors.primary} size={20} />} 
-                 label="Test Weekly Digest" 
-                 sub="Summary deep-link to Analytics" 
-                 onPress={() => NotificationService.notifyWeeklyDigest(15400, 'Shopping', preferences.currency)} 
-               />
-               <Row 
-                 icon={<LucideBell color={colors.accent} size={20} />} 
-                 label="Test Daily Reminder" 
-                 sub="Immediate test of 9PM check-in msg" 
-                 onPress={() => {
-                   NotificationService.scheduleLocalNotification(
-                     'Daily Expense Check-in',
-                     "Don't forget to add today's expenses! Tap to open Echo Spend.",
-                     'alerts',
-                     { screen: 'Home' }
-                   );
-                 }} 
-               />
-            </View>
-          </>
-        )}
-
-
-      </ScrollView>
-      <TourGuideModal visible={showTour} onClose={() => setShowTour(false)} />
+        </ScrollView>
+        <TourGuideModal visible={showTour} onClose={() => setShowTour(false)} />
       </KeyboardAvoidingView>
     </ThemedSafeAreaView>
   );

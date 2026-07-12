@@ -3,7 +3,7 @@ import { AppRegistry, Platform, NativeModules } from 'react-native';
 import App from './App';
 import { processIncomingSms } from './src/services/backgroundTasks';
 import { SyncService } from './src/services/sync';
-import { setLastSyncTimeInDb, logSyncAttempt } from './src/services/database';
+import { initDatabase, setLastSyncTimeInDb, logSyncAttempt } from './src/services/database';
 import { useStore } from './src/store/useStore';
 import { NotificationService } from './src/services/notifications';
 
@@ -17,6 +17,7 @@ registerRootComponent(App);
 AppRegistry.registerHeadlessTask('SmsHeadlessTask', () => async (taskData: any) => {
   const { body, date } = taskData;
   if (body && date) {
+    await initDatabase();
     await processIncomingSms(body, Number(date));
   }
 });
@@ -32,6 +33,7 @@ AppRegistry.registerHeadlessTask('SyncHeadlessTask', () => {
     });
 
     try {
+      await initDatabase();
       // Wait for Zustand hydration
       const checkHydration = () => {
         return new Promise<void>((resolve) => {
@@ -101,6 +103,7 @@ AppRegistry.registerHeadlessTask('SyncHeadlessTask', () => {
 AppRegistry.registerHeadlessTask('BootHeadlessTask', () => async () => {
   console.log('[BootHeadlessTask] Device booted. Restoring scheduled alarms/reminders...');
   try {
+    await initDatabase();
     // Wait for Zustand hydration
     const checkHydration = () => {
       return new Promise<void>((resolve) => {

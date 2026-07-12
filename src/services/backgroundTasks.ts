@@ -5,6 +5,7 @@ import { Platform, PermissionsAndroid } from 'react-native';
 import { SyncService } from './sync';
 import { useStore } from '../store/useStore';
 import {
+  initDatabase,
   getAccountScanRanges,
   updateAccountLastScanned,
   addTransaction,
@@ -61,6 +62,7 @@ TaskManager.defineTask(BACKGROUND_SYNC_TASK, async () => {
   _syncRunning = true;
 
   try {
+    await initDatabase();
     const { preferences, googleUser } = useStore.getState();
 
     if (!googleUser || preferences.syncSchedule === 'none') {
@@ -152,6 +154,7 @@ TaskManager.defineTask(BACKGROUND_NOTIFICATION_TASK, async ({ data, error }) => 
 
   if (payload?.triggerSync) {
     try {
+      await initDatabase();
       const { preferences, googleUser } = useStore.getState();
       if (googleUser && preferences.syncSchedule !== 'none') {
         const lastSyncIso = await getLastSyncTimeFromDb();
@@ -482,6 +485,7 @@ const _doSmsScan = async (silent = false): Promise<BackgroundFetch.BackgroundFet
 
 TaskManager.defineTask(BACKGROUND_SMS_SCAN_TASK, async () => {
   try {
+    await initDatabase();
     return await performBackgroundSmsScan();
   } catch (error) {
     console.error('[Background] SMS scan failed:', error);
@@ -493,6 +497,7 @@ TaskManager.defineTask(BACKGROUND_SMS_SCAN_TASK, async () => {
 
 TaskManager.defineTask(BACKGROUND_ALERTS_TASK, async () => {
   try {
+    await initDatabase();
     const {
       preferences,
       updateBudgetNotificationHistory,

@@ -14,6 +14,7 @@ import {
 import { useIsFocused } from '@react-navigation/native';
 import { ThemedSafeAreaView, ThemedText } from '../components/ThemedSafeAreaView';
 import { useTheme } from '../theme/ThemeProvider';
+import { withAlpha } from '../theme/tokens';
 import { useStore } from '../store/useStore';
 import { notify } from '../utils/notify';
 import {
@@ -405,18 +406,18 @@ const SplitDetailScreen = ({ navigation, route }: any) => {
             style={{
               flexDirection: 'row', alignItems: 'center', gap: 10,
               padding: 12, borderRadius: 14,
-              backgroundColor: linkedSub ? '#5AC8FA10' : linkedGoal ? '#34C75910' : '#FF950010',
+              backgroundColor: linkedSub ? withAlpha(colors.credit, '10') : linkedGoal ? withAlpha(colors.credit, '10') : withAlpha(colors.debit, '10'),
               borderWidth: 1,
-              borderColor: linkedSub ? '#5AC8FA30' : linkedGoal ? '#34C75930' : '#FF950030',
+              borderColor: linkedSub ? withAlpha(colors.credit, '30') : linkedGoal ? withAlpha(colors.credit, '30') : withAlpha(colors.debit, '30'),
             }}
           >
-            {linkedSub && <LucideRepeat color="#5AC8FA" size={15} />}
-            {linkedGoal && <LucideTarget color="#34C759" size={15} />}
-            {linkedLoan && <LucideLandmark color="#FF9500" size={15} />}
+            {linkedSub && <LucideRepeat color={colors.credit} size={15} />}
+            {linkedGoal && <LucideTarget color={colors.credit} size={15} />}
+            {linkedLoan && <LucideLandmark color={colors.debit} size={15} />}
             <View style={{ flex: 1 }}>
               {linkedSub && (
                 <>
-                  <ThemedText style={{ fontSize: 13, fontWeight: '700', color: '#5AC8FA' }}>
+                  <ThemedText style={{ fontSize: 13, fontWeight: '700', color: colors.credit }}>
                     Subscription Split — {linkedSub.name}
                   </ThemedText>
                   <ThemedText style={{ fontSize: 11, color: colors.secondary }}>
@@ -426,7 +427,7 @@ const SplitDetailScreen = ({ navigation, route }: any) => {
               )}
               {linkedGoal && (
                 <>
-                  <ThemedText style={{ fontSize: 13, fontWeight: '700', color: '#34C759' }}>
+                  <ThemedText style={{ fontSize: 13, fontWeight: '700', color: colors.credit }}>
                     Goal Contribution — {linkedGoal.name}
                   </ThemedText>
                   <ThemedText style={{ fontSize: 11, color: colors.secondary }}>
@@ -436,7 +437,7 @@ const SplitDetailScreen = ({ navigation, route }: any) => {
               )}
               {linkedLoan && (
                 <>
-                  <ThemedText style={{ fontSize: 13, fontWeight: '700', color: '#FF9500' }}>
+                  <ThemedText style={{ fontSize: 13, fontWeight: '700', color: colors.debit }}>
                     Loan Payment — {linkedLoan.lender}
                   </ThemedText>
                   <ThemedText style={{ fontSize: 11, color: colors.secondary }}>
@@ -447,17 +448,17 @@ const SplitDetailScreen = ({ navigation, route }: any) => {
             </View>
             {linkedSub && (
               <TouchableOpacity onPress={() => navigation.navigate('AddSubscription', { subscriptionToEdit: linkedSub })}>
-                <LucideChevronRight color="#5AC8FA" size={14} />
+                <LucideChevronRight color={colors.credit} size={14} />
               </TouchableOpacity>
             )}
             {linkedGoal && (
               <TouchableOpacity onPress={() => navigation.navigate('AddGoal', { goalToEdit: linkedGoal })}>
-                <LucideChevronRight color="#34C759" size={14} />
+                <LucideChevronRight color={colors.credit} size={14} />
               </TouchableOpacity>
             )}
             {linkedLoan && (
               <TouchableOpacity onPress={() => navigation.navigate('AddLoan', { loanToEdit: linkedLoan })}>
-                <LucideChevronRight color="#FF9500" size={14} />
+                <LucideChevronRight color={colors.debit} size={14} />
               </TouchableOpacity>
             )}
           </MotiView>

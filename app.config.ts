@@ -13,7 +13,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   splash: {
     image: './assets/splash-icon.png',
     resizeMode: 'contain',
-    backgroundColor: '#000000',
+    backgroundColor: '#0A1416',
   },
 
   ios: {
@@ -30,8 +30,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     package: process.env.APP_BUNDLE_ID || 'com.adkdinesh.echospend',
     versionCode: 2,
     adaptiveIcon: {
-      foregroundImage: './assets/icon.png',
-      backgroundColor: '#000000',
+      foregroundImage: './assets/adaptive-icon.png',
+      backgroundColor: '#0A1416',
     },
     predictiveBackGestureEnabled: false,
     permissions: [
@@ -62,8 +62,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     [
       'expo-notifications',
       {
-        icon: './assets/icon.png',
-        color: '#0A84FF',
+        icon: './assets/notification-icon.png',
+        color: '#FFB454',
         defaultChannel: 'default',
       },
     ],

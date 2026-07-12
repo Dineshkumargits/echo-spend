@@ -21,6 +21,8 @@ import { NotificationService } from "./src/services/notifications";
 import { performBackgroundSmsScan } from './src/services/backgroundTasks';
 import { SyncService } from './src/services/sync';
 import { AIModelManager } from './src/services/aiModelManager';
+import { useFonts } from 'expo-font';
+import { fontFiles } from './src/theme/tokens';
 
 export const navigationRef = createNavigationContainerRef<any>();
 
@@ -37,6 +39,9 @@ function AppContent() {
   const { authenticate, checkSupport } = useBiometric();
   const { requestPermissions } = useNotifications();
   const { isDark } = useTheme();
+  // Brand typefaces. If loading fails we render anyway — RN falls back to
+  // system fonts rather than blocking the app on typography.
+  const [fontsLoaded, fontsError] = useFonts(fontFiles);
 
   // Initial Lock Check
   useEffect(() => {
@@ -365,7 +370,7 @@ function AppContent() {
     );
   }
 
-  if (!dbInitialized || !hasHydrated) return null;
+  if (!dbInitialized || !hasHydrated || (!fontsLoaded && !fontsError)) return null;
 
   if (isLocked) {
     return (
@@ -390,12 +395,12 @@ function AppContent() {
 }
 
 const lockStyles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center', padding: 32 },
+  container: { flex: 1, backgroundColor: '#0A1416', alignItems: 'center', justifyContent: 'center', padding: 32 },
   icon: { fontSize: 64, marginBottom: 24 },
-  title: { color: '#FFF', fontSize: 24, fontWeight: 'bold', textAlign: 'center' },
-  subtitle: { color: '#8E8E93', fontSize: 15, textAlign: 'center', marginTop: 8, marginBottom: 40 },
-  button: { backgroundColor: '#0A84FF', paddingHorizontal: 32, paddingVertical: 16, borderRadius: 14 },
-  buttonText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
+  title: { color: '#E8F2F0', fontSize: 24, fontWeight: 'bold', textAlign: 'center' },
+  subtitle: { color: '#7E9895', fontSize: 15, textAlign: 'center', marginTop: 8, marginBottom: 40 },
+  button: { backgroundColor: '#FFB454', paddingHorizontal: 32, paddingVertical: 16, borderRadius: 14 },
+  buttonText: { color: '#0A1416', fontSize: 16, fontWeight: 'bold' },
 });
 
 export default function App() {

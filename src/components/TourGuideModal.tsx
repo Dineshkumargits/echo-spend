@@ -37,7 +37,7 @@ const SLIDES = [
   {
     title: 'Private Smart Scanner',
     icon: LucideBrain,
-    color: '#0A84FF',
+    color: '#56D4C0',
     tagline: '100% Private & Secure',
     description: 'Echo Spend has a smart assistant that reads and understands your bank SMS directly on your phone. Your money details never leave your device and are never sent to any cloud server.',
     bullets: [
@@ -61,7 +61,7 @@ const SLIDES = [
   {
     title: 'Safe Google Drive Backups',
     icon: LucideCloud,
-    color: '#30D158',
+    color: '#56D4C0',
     tagline: 'Private & Secure Backups',
     description: 'Back up your transactions and settings to your own Google Drive. Echo Spend uses a hidden folder that other apps cannot open, keeping your backups completely private.',
     bullets: [
@@ -73,7 +73,7 @@ const SLIDES = [
   {
     title: 'Budgets & Financial Cycle',
     icon: LucideTarget,
-    color: '#FF9500',
+    color: '#FFB454',
     tagline: 'Set Spending Limits',
     description: 'Echo Spend adapts to your actual payday! Set your custom salary day to reset your monthly calculations. Add spending limits for different categories and get notified at 80%, 90%, and 100% of your limits.',
     bullets: [

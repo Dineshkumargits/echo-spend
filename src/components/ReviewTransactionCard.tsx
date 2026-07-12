@@ -23,6 +23,8 @@ import { useTheme } from '../theme/ThemeProvider';
 import { useStore } from '../store/useStore';
 import { Transaction, Account, Category, updateTransaction } from '../services/database';
 import { TagInput } from './TagInput';
+import { ConfidenceChip } from './Signal';
+import { fonts } from '../theme/tokens';
 
 interface Props {
   tx: Transaction;
@@ -52,9 +54,11 @@ export const ReviewTransactionCard = ({
   onTransactionUpdated,
   onChangeAccount,
 }: Props) => {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const { preferences } = useStore();
   const currency = preferences?.currency ?? '₹';
+  // Text color for content sitting on an amber/aqua fill
+  const onFill = colors.onAccent;
   const [isExpanded, setIsExpanded] = useState(false);
   const [showCatPicker, setShowCatPicker] = useState(false);
   const [catSearch, setCatSearch] = useState('');
@@ -92,12 +96,6 @@ export const ReviewTransactionCard = ({
 
   const confidence = tx.confidence ?? 'medium';
   const effectiveAcc = accounts.find(a => a.id === (accountOverride ?? tx.accountId));
-
-  const confidenceColor: Record<string, string> = {
-    high: colors.success,
-    medium: colors.warning,
-    low: colors.danger,
-  };
 
 
   const saveNameEdit = async () => {
@@ -160,25 +158,22 @@ export const ReviewTransactionCard = ({
           <View className="flex-1 mr-3">
             <View className="flex-row items-center mb-1">
               {tx.type === 'credit'
-                ? <LucideArrowDownLeft color={colors.success} size={18} />
+                ? <LucideArrowDownLeft color={colors.credit} size={18} />
                 : tx.type === 'transfer'
-                  ? <LucideRotateCw color={colors.warning} size={18} />
-                  : <LucideArrowUpRight color={colors.danger} size={18} />
+                  ? <LucideRotateCw color={colors.secondary} size={18} />
+                  : <LucideArrowUpRight color={colors.debit} size={18} />
               }
-              <ThemedText className="font-bold text-2xl ml-1.5">
-                {tx.type === 'credit' ? '+' : '-'}{currency}{tx.amount?.toLocaleString('en-IN') ?? '0'}
-              </ThemedText>
-              <View
-                className="ml-2 px-2 py-0.5 rounded-full"
-                style={{ backgroundColor: `${confidenceColor[confidence]}18` }}
+              <ThemedText
+                className="text-2xl ml-1.5"
+                style={{
+                  fontFamily: fonts.signalBold,
+                  fontVariant: ['tabular-nums'],
+                  color: tx.type === 'credit' ? colors.credit : tx.type === 'transfer' ? colors.primary : colors.debit,
+                }}
               >
-                <ThemedText
-                  className="text-[9px] font-bold uppercase"
-                  style={{ color: confidenceColor[confidence] }}
-                >
-                  {confidence}
-                </ThemedText>
-              </View>
+                {tx.type === 'credit' ? '+' : '−'}{currency}{tx.amount?.toLocaleString('en-IN') ?? '0'}
+              </ThemedText>
+              <ConfidenceChip confidence={confidence as 'high' | 'medium' | 'low'} style={{ marginLeft: 8 }} />
             </View>
 
             {isEditingName ? (
@@ -242,7 +237,7 @@ export const ReviewTransactionCard = ({
               className="w-10 h-10 rounded-full items-center justify-center"
               style={{ backgroundColor: colors.accent }}
             >
-              <LucideCheck color="#FFFFFF" size={18} />
+              <LucideCheck color={onFill} size={18} />
             </TouchableOpacity>
           </View>
         </View>
@@ -250,9 +245,9 @@ export const ReviewTransactionCard = ({
         {/* Transaction Type Selector */}
         <View className="flex-row mb-3 bg-black/5 dark:bg-white/5 p-1 rounded-full">
           {[
-            { id: 'debit', label: 'Expense', icon: LucideArrowUpRight, color: colors.danger },
-            { id: 'credit', label: 'Income', icon: LucideArrowDownLeft, color: colors.success },
-            { id: 'transfer', label: 'Transfer', icon: LucideRotateCw, color: colors.warning },
+            { id: 'debit', label: 'Expense', icon: LucideArrowUpRight, color: colors.debit },
+            { id: 'credit', label: 'Income', icon: LucideArrowDownLeft, color: colors.credit },
+            { id: 'transfer', label: 'Transfer', icon: LucideRotateCw, color: colors.secondary },
           ].map((type) => {
             const active = tx.type === type.id;
             const Icon = type.icon;
@@ -477,10 +472,10 @@ export const ReviewTransactionCard = ({
                               borderColor: isSelected ? colors.accent : colors.border,
                             }}
                           >
-                            {renderCategoryIcon(cat.icon, isSelected ? '#FFF' : cat.color, 10)}
+                            {renderCategoryIcon(cat.icon, isSelected ? onFill : cat.color, 10)}
                             <ThemedText
                               className="text-[10px] font-medium ml-1.5"
-                              style={{ color: isSelected ? '#FFF' : colors.secondary }}
+                              style={{ color: isSelected ? onFill : colors.secondary }}
                             >
                               {displayName}
                             </ThemedText>
@@ -511,10 +506,10 @@ export const ReviewTransactionCard = ({
                         borderColor: tx.category === parent.name ? colors.accent : colors.border,
                       }}
                     >
-                      {renderCategoryIcon(parent.icon, tx.category === parent.name ? '#FFF' : parent.color, 12)}
+                      {renderCategoryIcon(parent.icon, tx.category === parent.name ? onFill : parent.color, 12)}
                       <ThemedText
                         className="text-[11px] font-bold ml-1.5"
-                        style={{ color: tx.category === parent.name ? '#FFF' : colors.secondary }}
+                        style={{ color: tx.category === parent.name ? onFill : colors.secondary }}
                       >
                         {parent.name}
                       </ThemedText>
@@ -533,10 +528,10 @@ export const ReviewTransactionCard = ({
                               borderColor: tx.category === child.name ? colors.accent : colors.border,
                             }}
                           >
-                            {renderCategoryIcon(child.icon, tx.category === child.name ? '#FFF' : child.color, 10)}
+                            {renderCategoryIcon(child.icon, tx.category === child.name ? onFill : child.color, 10)}
                             <ThemedText
                               className="text-[10px] font-medium ml-1.5"
-                              style={{ color: tx.category === child.name ? '#FFF' : colors.secondary }}
+                              style={{ color: tx.category === child.name ? onFill : colors.secondary }}
                             >
                               {child.name}
                             </ThemedText>
@@ -581,7 +576,7 @@ export const ReviewTransactionCard = ({
                   >
                     <ThemedText
                       className="text-[11px] font-bold"
-                      style={{ color: active ? '#FFF' : colors.secondary }}
+                      style={{ color: active ? onFill : colors.secondary }}
                     >
                       {acc.name}
                     </ThemedText>
@@ -624,7 +619,7 @@ export const ReviewTransactionCard = ({
                   >
                     <ThemedText
                       className="text-[11px] font-bold"
-                      style={{ color: active ? '#FFF' : colors.secondary }}
+                      style={{ color: active ? onFill : colors.secondary }}
                     >
                       {acc.name}
                     </ThemedText>
@@ -635,15 +630,20 @@ export const ReviewTransactionCard = ({
           </MotiView>
         )}
 
-        {/* Raw SMS */}
+        {/* Raw SMS — the original signal trace */}
         {isExpanded && tx.rawSms && (
           <MotiView
             from={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="mt-3 p-3 rounded-lg"
-            style={{ backgroundColor: colors.translucent }}
+            className="mt-3 p-3 rounded-lg border"
+            style={{ backgroundColor: colors.background, borderColor: colors.border }}
           >
-            <ThemedText type="secondary" className="text-xs leading-relaxed">{tx.rawSms}</ThemedText>
+            <ThemedText
+              font="signal"
+              style={{ fontSize: 10, lineHeight: 16, color: colors.secondary, letterSpacing: 0.2 }}
+            >
+              {tx.rawSms}
+            </ThemedText>
           </MotiView>
         )}
       </View>

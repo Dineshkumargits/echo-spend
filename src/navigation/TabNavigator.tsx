@@ -15,6 +15,7 @@ import FinancesScreen from '../screens/FinancesScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import { useTheme } from '../theme/ThemeProvider';
 import { useStore } from '../store/useStore';
+import { fonts } from '../theme/tokens';
 
 const Tab = createBottomTabNavigator();
 
@@ -24,7 +25,7 @@ const Tab = createBottomTabNavigator();
  * eliminating the jank caused by the former MotiView re-animating every time.
  */
 const ScanTabButton = memo(({ onPress }: { onPress?: (...args: any[]) => void }) => {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
 
   return (
     <TouchableOpacity
@@ -32,6 +33,11 @@ const ScanTabButton = memo(({ onPress }: { onPress?: (...args: any[]) => void })
       activeOpacity={0.85}
       style={scanBtnStyles.wrapper}
     >
+      {/* Static echo ring — the scan button is the app's live "emitter" */}
+      <View
+        pointerEvents="none"
+        style={[scanBtnStyles.echoRing, { borderColor: colors.accent }]}
+      />
       <View
         style={[
           scanBtnStyles.circle,
@@ -42,7 +48,7 @@ const ScanTabButton = memo(({ onPress }: { onPress?: (...args: any[]) => void })
           },
         ]}
       >
-        <LucideZap color="#FFFFFF" size={26} />
+        <LucideZap color={colors.onAccent} size={26} />
       </View>
     </TouchableOpacity>
   );
@@ -53,6 +59,14 @@ const scanBtnStyles = StyleSheet.create({
     top: -20,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  echoRing: {
+    position: 'absolute',
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    borderWidth: 1,
+    opacity: 0.35,
   },
   circle: {
     width: 60,
@@ -93,11 +107,13 @@ export const TabNavigator = ({ navigation }: any) => {
           paddingTop: 8,
           height: 85,
         },
-        tabBarActiveTintColor: colors.primary,
+        tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.secondary,
         tabBarLabelStyle: {
-          fontSize: 10,
-          fontWeight: 'bold',
+          fontSize: 9,
+          fontFamily: fonts.signal,
+          letterSpacing: 0.8,
+          textTransform: 'uppercase',
           marginBottom: 10,
         },
         tabBarIcon: ({ color, size }) => {
@@ -110,7 +126,7 @@ export const TabNavigator = ({ navigation }: any) => {
       })}
     >
       <Tab.Screen name="Home" component={DashboardScreen} />
-      <Tab.Screen name="Txns" component={TransactionsScreen} options={{ tabBarLabel: 'Transactions' }} />
+      <Tab.Screen name="Txns" component={TransactionsScreen} options={{ tabBarLabel: 'Txns' }} />
       <Tab.Screen
         name="Scan"
         component={SmartScanTab}
@@ -120,8 +136,8 @@ export const TabNavigator = ({ navigation }: any) => {
           tabBarButton: (props) => <ScanTabButton onPress={props.onPress} />,
         }}
       />
-      <Tab.Screen name="Finances" component={FinancesScreen} />
-      <Tab.Screen name="Settings" component={SettingsScreen} />
+      <Tab.Screen name="Finances" component={FinancesScreen} options={{ tabBarLabel: 'Money' }} />
+      <Tab.Screen name="Settings" component={SettingsScreen} options={{ tabBarLabel: 'More' }} />
     </Tab.Navigator>
   );
 };
