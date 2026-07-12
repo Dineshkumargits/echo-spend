@@ -882,7 +882,10 @@ const SettingsScreen = ({ navigation }: any) => {
                 sub="Secure your data with daily Drive backups"
                 onPress={handleGoogleSignIn}
                 right={
-                  <View className="px-3 py-1 rounded-full" style={{ backgroundColor: colors.accent }}>
+                  <View
+                    className="px-3 py-1 rounded-full"
+                    style={{ backgroundColor: colors.accent }}
+                  >
                     <ThemedText
                       className="text-[10px] font-bold"
                       style={{ color: colors.onAccent }}
@@ -926,27 +929,6 @@ const SettingsScreen = ({ navigation }: any) => {
                     )
                   }
                 />
-                {preferences.syncSchedule !== "none" &&
-                  googleUser?.email === "dineshkumar.invests@gmail.com" && (
-                    <Row
-                      icon={
-                        <LucideAlertTriangle
-                          color={
-                            lastSyncAttempt?.outcome === "failure"
-                              ? colors.danger
-                              : colors.secondary
-                          }
-                          size={18}
-                        />
-                      }
-                      label="Last Automatic Attempt"
-                      sub={
-                        lastSyncAttempt
-                          ? `${new Date(lastSyncAttempt.timestamp).toLocaleString("en-IN")} · ${lastSyncAttempt.outcome}${lastSyncAttempt.reason ? ` (${lastSyncAttempt.reason})` : ""} · via ${lastSyncAttempt.source}`
-                          : "No automatic attempt recorded yet — the scheduled alarm may not be firing on this device"
-                      }
-                    />
-                  )}
                 <Row
                   icon={<LucideTimer color={colors.primary} size={18} />}
                   label="Sync Schedule"
@@ -1135,7 +1117,8 @@ const SettingsScreen = ({ navigation }: any) => {
                   />
                   <TouchableOpacity
                     onPress={handleSaveAutoLock}
-                    className="px-4 justify-center rounded-apple-sm" style={{ backgroundColor: colors.accent }}
+                    className="px-4 justify-center rounded-apple-sm"
+                    style={{ backgroundColor: colors.accent }}
                   >
                     <ThemedText
                       className="font-bold text-xs"
@@ -1263,7 +1246,8 @@ const SettingsScreen = ({ navigation }: any) => {
                 />
                 <TouchableOpacity
                   onPress={handleSaveBudget}
-                  className="px-4 justify-center rounded-apple-sm" style={{ backgroundColor: colors.accent }}
+                  className="px-4 justify-center rounded-apple-sm"
+                  style={{ backgroundColor: colors.accent }}
                 >
                   <ThemedText
                     className="font-bold text-xs"
@@ -1299,7 +1283,8 @@ const SettingsScreen = ({ navigation }: any) => {
                 />
                 <TouchableOpacity
                   onPress={handleSaveSalaryDay}
-                  className="px-4 justify-center rounded-apple-sm" style={{ backgroundColor: colors.accent }}
+                  className="px-4 justify-center rounded-apple-sm"
+                  style={{ backgroundColor: colors.accent }}
                 >
                   <ThemedText
                     className="font-bold text-xs"
@@ -1650,8 +1635,22 @@ const SettingsScreen = ({ navigation }: any) => {
                       gap: 6,
                     }}
                   >
-                    <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: sw.accent }} />
-                    <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: sw.credit }} />
+                    <View
+                      style={{
+                        width: 12,
+                        height: 12,
+                        borderRadius: 6,
+                        backgroundColor: sw.accent,
+                      }}
+                    />
+                    <View
+                      style={{
+                        width: 12,
+                        height: 12,
+                        borderRadius: 6,
+                        backgroundColor: sw.credit,
+                      }}
+                    />
                     <View
                       style={{
                         flex: 1,
@@ -1662,7 +1661,10 @@ const SettingsScreen = ({ navigation }: any) => {
                       }}
                     />
                   </View>
-                  <View className="flex-row items-center justify-between" style={{ marginTop: 10 }}>
+                  <View
+                    className="flex-row items-center justify-between"
+                    style={{ marginTop: 10 }}
+                  >
                     <View style={{ flex: 1 }}>
                       <ThemedText
                         font="display"
@@ -1672,7 +1674,12 @@ const SettingsScreen = ({ navigation }: any) => {
                         {t.name}
                       </ThemedText>
                       <ThemedText
-                        style={{ color: sw.text, opacity: 0.55, fontSize: 11, marginTop: 1 }}
+                        style={{
+                          color: sw.text,
+                          opacity: 0.55,
+                          fontSize: 11,
+                          marginTop: 1,
+                        }}
                         numberOfLines={1}
                       >
                         {t.blurb}
@@ -1724,7 +1731,10 @@ const SettingsScreen = ({ navigation }: any) => {
                 onPress={() => setTheme(v as any)}
                 right={
                   preferences.theme === v ? (
-                    <View className="w-2 h-2 rounded-full" style={{ backgroundColor: colors.accent }} />
+                    <View
+                      className="w-2 h-2 rounded-full"
+                      style={{ backgroundColor: colors.accent }}
+                    />
                   ) : null
                 }
               />
@@ -1802,7 +1812,8 @@ const SettingsScreen = ({ navigation }: any) => {
                   />
                   <TouchableOpacity
                     onPress={handleSaveThreshold}
-                    className="px-4 justify-center rounded-apple-sm" style={{ backgroundColor: colors.accent }}
+                    className="px-4 justify-center rounded-apple-sm"
+                    style={{ backgroundColor: colors.accent }}
                   >
                     <ThemedText
                       className="font-bold text-xs"

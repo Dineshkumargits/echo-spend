@@ -185,6 +185,16 @@ const SmartScanScreen = ({ navigation }: any) => {
     }, [phase]),
   );
 
+  const finishScanOrRedirect = useCallback(async () => {
+    const all = await getUnconfirmedTransactions();
+    if (all.length > 0) {
+      navigation.replace("SmartInbox");
+    } else {
+      setQueue(all);
+      setPhase("review");
+    }
+  }, [navigation]);
+
   const startScan = useCallback(
     async (
       ranges: AccountScanRange[],
@@ -227,11 +237,7 @@ const SmartScanScreen = ({ navigation }: any) => {
 
         if (trackableRanges.length === 0) {
           // Only cash/wallet accounts — nothing to scan
-          const all = await getUnconfirmedTransactions();
-          setQueue(all);
-          setOldPendingCount(all.length);
-          setNewTxIds(new Set());
-          setPhase("review");
+          await finishScanOrRedirect();
           return;
         }
 
@@ -311,9 +317,8 @@ const SmartScanScreen = ({ navigation }: any) => {
                 [
                   {
                     text: "Decline",
-                    style: "cancel",
                     onPress: () => {
-                      setPhase("review");
+                      finishScanOrRedirect();
                       notify.error("SMS permission required for Smart Scan");
                     },
                   },
@@ -341,13 +346,13 @@ const SmartScanScreen = ({ navigation }: any) => {
                         } else if (
                           granted === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN
                         ) {
-                          setPhase("review");
+                          finishScanOrRedirect();
                           notify.error(
                             "SMS permission permanently denied",
                             "Enable it in Settings → App Permissions",
                           );
                         } else {
-                          setPhase("review");
+                          finishScanOrRedirect();
                           notify.error(
                             "SMS permission required for Smart Scan",
                           );
@@ -357,7 +362,7 @@ const SmartScanScreen = ({ navigation }: any) => {
                           "[SmartScanScreen] Failed to request SMS permission:",
                           e,
                         );
-                        setPhase("review");
+                        finishScanOrRedirect();
                       }
                     },
                   },
@@ -457,10 +462,7 @@ const SmartScanScreen = ({ navigation }: any) => {
               updateAccountLastScanned(r.account.id, now),
             ),
           );
-          const all = await getUnconfirmedTransactions();
-          setQueue(all);
-          setNewTxIds(new Set());
-          setPhase("review");
+          await finishScanOrRedirect();
           return;
         }
 
@@ -609,21 +611,25 @@ const SmartScanScreen = ({ navigation }: any) => {
 
         // Load ALL unconfirmed for review (old + new)
         const allUnconfirmed = await getUnconfirmedTransactions();
-        setQueue(allUnconfirmed);
+        if (allUnconfirmed.length > 0) {
+          navigation.replace("SmartInbox");
+        } else {
+          setQueue(allUnconfirmed);
 
-        // Mark which ones are new this session
-        const newIds = new Set(
-          newlySavedIds.filter((id) => !existingIds.has(id)),
-        );
-        setNewTxIds(newIds);
-        setOfflineTxIds(new Set(offlineSavedIds));
+          // Mark which ones are new this session
+          const newIds = new Set(
+            newlySavedIds.filter((id) => !existingIds.has(id)),
+          );
+          setNewTxIds(newIds);
+          setOfflineTxIds(new Set(offlineSavedIds));
 
-        setPhase("review");
+          setPhase("review");
+        }
       } finally {
         setForegroundScanActive(false);
       }
     },
-    [accounts, categories, parseSms, preferences, navigation],
+    [accounts, categories, parseSms, preferences, navigation, finishScanOrRedirect],
   );
 
   // ── Review actions ──────────────────────────────────────────────────────────

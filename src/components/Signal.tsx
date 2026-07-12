@@ -180,7 +180,7 @@ export const WaveformBar: React.FC<WaveformBarProps> = ({
   const max = Math.max(...data.map(d => Math.abs(d.value)), 1);
 
   return (
-    <View style={[{ flexDirection: 'row', alignItems: 'flex-end', height, gap }, style]}>
+    <View style={[{ flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', height }, style]}>
       {data.map((d, i) => {
         const h = Math.max(3, (Math.abs(d.value) / max) * height);
         const bg = d.kind === 'in' ? colors.credit : colors.debit;

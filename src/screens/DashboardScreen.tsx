@@ -739,7 +739,7 @@ const DashboardScreen = ({ navigation }: any) => {
               animate={{ opacity: 1, translateY: 0 }}
               transition={{ type: 'timing', duration: 400 }}
             >
-              <WaveformBar data={waveData} height={40} barWidth={5} gap={3} style={{ width: '100%' }} />
+              <WaveformBar data={waveData} height={40} barWidth={8} style={{ width: '100%' }} />
               {wavePeak > 0 && (
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
                   <ThemedText font="signal" style={{ fontSize: 9, color: colors.muted }}>last 14 days</ThemedText>
