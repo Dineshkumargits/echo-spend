@@ -18,14 +18,13 @@ import {
   NativeModules,
   AppState,
   PermissionsAndroid,
+  Image,
 } from "react-native";
 import { MotiView } from "moti";
 import {
-  LucideCloudSync,
   LucideDownload,
   LucideBrain,
   LucideChevronRight,
-  LucideFingerprint,
   LucideBell,
   LucideSun,
   LucideMoon,
@@ -33,7 +32,6 @@ import {
   LucideCheck,
   LucideRefreshCcw,
   LucideShield,
-  LucideWallet,
   LucideTag,
   LucideUserCircle,
   LucideLogOut,
@@ -44,32 +42,21 @@ import {
   LucideTrash2,
   LucideCpu,
   LucideAlertTriangle,
-  LucidePlay,
-  LucidePause,
-  LucideX,
   LucideSparkles,
   LucideLightbulb,
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
-import {
-  GoogleSignin,
-  statusCodes,
-} from "@react-native-google-signin/google-signin";
+import { GoogleSignin } from "@react-native-google-signin/google-signin";
 import Constants from "expo-constants";
 import { notify } from "../utils/notify";
 import { useStore } from "../store/useStore";
 import { SyncService } from "../services/sync";
-import {
-  resetAllData,
-  getLastSyncAttempt,
-  SyncAttemptLog,
-} from "../services/database";
+import { resetAllData } from "../services/database";
 import { useBiometric } from "../hooks/useBiometric";
 import { useTheme } from "../theme/ThemeProvider";
 import { registerBackgroundTasks } from "../services/backgroundTasks";
 import { NotificationService } from "../services/notifications";
 import { AIModelManager } from "../services/aiModelManager";
-import DateTimePicker from "@react-native-community/datetimepicker";
 import { TourGuideModal } from "../components/TourGuideModal";
 import { SectionLabel } from "../components/Signal";
 import { fonts, THEMES, themeSwatches } from "../theme/tokens";
@@ -88,14 +75,8 @@ const SettingsScreen = ({ navigation }: any) => {
     preferences,
     lastSynced,
     googleUser,
-    isSyncing,
     setTheme,
     setThemeId,
-    setSyncSchedule,
-    setSyncTime,
-    setGoogleUser,
-    updateLastSynced,
-    resetOnboarding,
     fullLogout,
     toggleAutoApprove,
     setAutoApproveThreshold,
@@ -104,11 +85,8 @@ const SettingsScreen = ({ navigation }: any) => {
     toggleRecurringAlerts,
     toggleWeeklyDigest,
     toggleDailyReminder,
-    setMonthlyBudget,
     toggleHideAmounts,
     toggleHaptics,
-    setLaunchScreen,
-    setSalaryDay,
     setAutoLockMinutes,
     toggleAutoSmsScan,
   } = useStore();
@@ -122,17 +100,6 @@ const SettingsScreen = ({ navigation }: any) => {
   const [isBatteryOptimized, setIsBatteryOptimized] = useState(true);
   const [isExactAlarmAllowed, setIsExactAlarmAllowed] = useState(true);
   const [isNotificationGranted, setIsNotificationGranted] = useState(true);
-  const [lastSyncAttempt, setLastSyncAttempt] = useState<SyncAttemptLog | null>(
-    null,
-  );
-
-  const loadLastSyncAttempt = async () => {
-    try {
-      setLastSyncAttempt(await getLastSyncAttempt());
-    } catch (e) {
-      console.warn("[Settings] Failed to load last sync attempt:", e);
-    }
-  };
 
   const checkBackgroundPermissions = async () => {
     // Check notification permission (all platforms)
@@ -159,13 +126,11 @@ const SettingsScreen = ({ navigation }: any) => {
 
   useEffect(() => {
     checkBackgroundPermissions();
-    loadLastSyncAttempt();
 
     if (Platform.OS === "android") {
       const subscription = AppState.addEventListener("change", (nextState) => {
         if (nextState === "active") {
           checkBackgroundPermissions();
-          loadLastSyncAttempt();
         }
       });
       return () => subscription.remove();
@@ -246,53 +211,6 @@ const SettingsScreen = ({ navigation }: any) => {
     } catch (e: any) {
       notify.error("Failed to open exact alarm settings", e?.message);
     }
-  };
-
-  const handleSyncScheduleChange = async (
-    schedule: "none" | "daily" | "weekly",
-  ) => {
-    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
-    if (schedule === "none") {
-      setSyncSchedule("none");
-      setTimeout(() => registerBackgroundTasks(), 0);
-      return;
-    }
-
-    if (Platform.OS === "android" && BackgroundOptimizationModule) {
-      try {
-        const alarmAllowed =
-          await BackgroundOptimizationModule.isExactAlarmAllowed();
-        if (!alarmAllowed) {
-          Alert.alert(
-            "Precision Alarm Recommendation",
-            "To run automatic backups precisely at your scheduled time, Echo Spend recommends the 'Alarms & Reminders' permission. Without it, backups will still run but may be slightly delayed to optimize battery life.",
-            [
-              {
-                text: "Continue Anyway",
-                onPress: () => {
-                  setSyncSchedule(schedule);
-                  setTimeout(() => registerBackgroundTasks(), 0);
-                },
-              },
-              {
-                text: "Open Settings",
-                onPress: async () => {
-                  setSyncSchedule(schedule);
-                  setTimeout(() => registerBackgroundTasks(), 0);
-                  await BackgroundOptimizationModule.openExactAlarmSettings();
-                },
-              },
-            ],
-          );
-          return;
-        }
-      } catch (e) {
-        console.warn("[Settings] Failed to check exact alarm permission:", e);
-      }
-    }
-
-    setSyncSchedule(schedule);
-    setTimeout(() => registerBackgroundTasks(), 0);
   };
 
   const handleAutoSmsScanToggle = async (value: boolean) => {
@@ -520,14 +438,6 @@ const SettingsScreen = ({ navigation }: any) => {
   const [thresholdInput, setThresholdInput] = useState(
     (preferences?.autoApproveThreshold ?? 100).toString(),
   );
-  const [budgetInput, setBudgetInput] = useState(
-    (preferences?.monthlyBudget ?? 50000).toString(),
-  );
-  const [showTimePicker, setShowTimePicker] = useState(false);
-  const [salaryDayInput, setSalaryDayInput] = useState(
-    (preferences?.salaryDay ?? 1).toString(),
-  );
-
   const [autoLockInput, setAutoLockInput] = useState(
     (preferences?.autoLockMinutes ?? 5).toString(),
   );
@@ -557,15 +467,8 @@ const SettingsScreen = ({ navigation }: any) => {
   // Sync local text input state when preferences are updated from external sources (e.g. Google Drive restore)
   useEffect(() => {
     setThresholdInput((preferences?.autoApproveThreshold ?? 100).toString());
-    setBudgetInput((preferences?.monthlyBudget ?? 50000).toString());
-    setSalaryDayInput((preferences?.salaryDay ?? 1).toString());
     setAutoLockInput((preferences?.autoLockMinutes ?? 5).toString());
-  }, [
-    preferences?.autoApproveThreshold,
-    preferences?.monthlyBudget,
-    preferences?.salaryDay,
-    preferences?.autoLockMinutes,
-  ]);
+  }, [preferences?.autoApproveThreshold, preferences?.autoLockMinutes]);
 
   const triggerHaptic = (style = Haptics.ImpactFeedbackStyle.Light) => {
     if (preferences.hapticsEnabled) {
@@ -573,114 +476,6 @@ const SettingsScreen = ({ navigation }: any) => {
     }
   };
 
-  const handleGoogleSignIn = async () => {
-    try {
-      await GoogleSignin.hasPlayServices();
-      const result = await GoogleSignin.signIn();
-
-      if (result.type === "success") {
-        const { user } = result.data;
-        const tokens = await GoogleSignin.getTokens();
-
-        setGoogleUser({
-          name: user.name || "Google User",
-          email: user.email,
-          photo: user.photo ?? undefined,
-          accessToken: tokens.accessToken,
-          refreshToken: "native_sdk_managed",
-          expiresAt: Date.now() + 3600 * 1000,
-        });
-
-        notify.success("Cloud Account Linked!");
-        triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
-      }
-    } catch (error: any) {
-      if (error.code !== statusCodes.SIGN_IN_CANCELLED) {
-        console.error("[Auth] Native Error:", error);
-        notify.error("Native Auth Failed", error.message);
-      }
-    }
-  };
-
-  const handleSyncNow = async () => {
-    if (isSyncing) return;
-    if (!googleUser) {
-      handleGoogleSignIn();
-      return;
-    }
-    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
-    const success = await SyncService.syncToGoogleDrive();
-    if (success) {
-      notify.success("Synced to Google Drive");
-    } else {
-      notify.error("Sync failed. Check your connection.");
-    }
-  };
-
-  const handleRestoreFromDrive = () => {
-    if (!googleUser) {
-      notify.info("Please link your Google account first");
-      return;
-    }
-
-    Alert.alert(
-      "Restore from Google Drive",
-      "This will replace ALL local data with the Drive backup. Continue?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Restore Now",
-          style: "destructive",
-          onPress: async () => {
-            const ok = await SyncService.restoreFromGoogleDrive();
-            if (ok) {
-              notify.success("Data Restored Successfully");
-              triggerHaptic(Haptics.ImpactFeedbackStyle.Heavy);
-            } else {
-              notify.error("Restore failed");
-            }
-          },
-        },
-      ],
-    );
-  };
-
-  const formatDisplayTime = (timeStr: string): string => {
-    return timeStr;
-  };
-
-  const getDateTimeObject = (timeStr: string): Date => {
-    const date = new Date();
-    try {
-      const [hoursStr, minutesStr] = timeStr.split(":");
-      date.setHours(parseInt(hoursStr, 10), parseInt(minutesStr, 10), 0, 0);
-    } catch {}
-    return date;
-  };
-
-  const handleTimePickerChange = (event: any, selectedDate?: Date) => {
-    if (Platform.OS === "android") {
-      setShowTimePicker(false);
-    }
-    if (selectedDate && event.type !== "dismissed") {
-      const hours = selectedDate.getHours().toString().padStart(2, "0");
-      const minutes = selectedDate.getMinutes().toString().padStart(2, "0");
-      const timeStr = `${hours}:${minutes}`;
-      setSyncTime(timeStr);
-      notify.success("Sync time updated");
-      registerBackgroundTasks();
-    }
-  };
-
-  const handleSaveBudget = () => {
-    const val = parseFloat(budgetInput);
-    if (!isNaN(val)) {
-      setMonthlyBudget(val);
-      notify.success("Budget updated");
-    } else {
-      setBudgetInput(preferences.monthlyBudget.toString());
-    }
-  };
 
   const handleSaveThreshold = () => {
     const val = parseFloat(thresholdInput);
@@ -689,16 +484,6 @@ const SettingsScreen = ({ navigation }: any) => {
       notify.success("Threshold updated");
     } else {
       setThresholdInput(preferences.autoApproveThreshold.toString());
-    }
-  };
-
-  const handleSaveSalaryDay = () => {
-    const val = parseInt(salaryDayInput);
-    if (!isNaN(val) && val >= 1 && val <= 31) {
-      setSalaryDay(val);
-      notify.success("Financial cycle updated");
-    } else {
-      setSalaryDayInput(preferences.salaryDay.toString());
     }
   };
 
@@ -853,451 +638,266 @@ const SettingsScreen = ({ navigation }: any) => {
             >
               More
             </ThemedText>
-            {googleUser && (
-              <ThemedText
-                font="signal"
-                type="secondary"
-                style={{ fontSize: 10, letterSpacing: 0.5, marginTop: 6 }}
-                numberOfLines={1}
-              >
-                {googleUser.email}
-              </ThemedText>
-            )}
           </MotiView>
 
-          {/* ── Google Cloud Sync ── */}
-          <Section title="Google Cloud Sync" />
-          <View
-            className="rounded-apple-md overflow-hidden"
+          {/* ── Account & Backup (entry to detail screen) ── */}
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => {
+              triggerHaptic();
+              navigation.navigate("AccountBackup");
+            }}
+            className="rounded-apple-md overflow-hidden mt-4 flex-row items-center px-4 py-4"
             style={{
               backgroundColor: colors.surface,
               borderWidth: 1,
               borderColor: colors.border,
+              gap: 14,
             }}
           >
-            {!googleUser ? (
-              <Row
-                icon={<LucideUserCircle color={colors.secondary} size={20} />}
-                label="Link Google Cloud"
-                sub="Secure your data with daily Drive backups"
-                onPress={handleGoogleSignIn}
-                right={
-                  <View
-                    className="px-3 py-1 rounded-full"
-                    style={{ backgroundColor: colors.accent }}
-                  >
-                    <ThemedText
-                      className="text-[10px] font-bold"
-                      style={{ color: colors.onAccent }}
-                    >
-                      CONNECT
-                    </ThemedText>
-                  </View>
-                }
-              />
-            ) : (
-              <>
-                <Row
-                  icon={<LucideCloudSync color={colors.success} size={20} />}
-                  label={googleUser.name}
-                  sub={googleUser.email}
-                  right={
-                    <TouchableOpacity onPress={handleLogout}>
-                      <LucideLogOut color={colors.danger} size={18} />
-                    </TouchableOpacity>
-                  }
-                />
-                <Row
-                  icon={<LucideRefreshCcw color={colors.accent} size={18} />}
-                  label="Manual Backup"
-                  sub={
-                    lastSynced
-                      ? `Last: ${new Date(lastSynced).toLocaleString("en-IN")}`
-                      : "Never synced"
-                  }
-                  onPress={handleSyncNow}
-                  right={
-                    isSyncing ? (
-                      <ActivityIndicator size="small" color={colors.accent} />
-                    ) : (
-                      <ThemedText
-                        className="text-xs font-bold"
-                        style={{ color: colors.accent }}
-                      >
-                        SYNC NOW
-                      </ThemedText>
-                    )
-                  }
-                />
-                <Row
-                  icon={<LucideTimer color={colors.primary} size={18} />}
-                  label="Sync Schedule"
-                  sub={`Frequency: ${preferences.syncSchedule}`}
-                />
-                <View
-                  className="flex-row p-1"
-                  style={{ backgroundColor: colors.translucent }}
-                >
-                  {(["none", "daily", "weekly"] as const).map((s) => (
-                    <TouchableOpacity
-                      key={s}
-                      onPress={() => handleSyncScheduleChange(s)}
-                      style={[
-                        {
-                          flex: 1,
-                          padding: 8,
-                          alignItems: "center",
-                          borderRadius: 8,
-                        },
-                        preferences.syncSchedule === s && {
-                          backgroundColor: colors.surface,
-                          elevation: 1,
-                        },
-                      ]}
-                    >
-                      <ThemedText
-                        style={{
-                          fontSize: 10,
-                          fontWeight: "bold",
-                          color:
-                            preferences.syncSchedule === s
-                              ? colors.primary
-                              : colors.secondary,
-                        }}
-                      >
-                        {s.toUpperCase()}
-                      </ThemedText>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-                {preferences.syncSchedule !== "none" && (
-                  <View
-                    className="p-4 border-t"
-                    style={{ borderTopColor: colors.border }}
-                  >
-                    <ThemedText
-                      type="secondary"
-                      className="text-[10px] uppercase font-bold mb-2"
-                    >
-                      Sync Time (Auto)
-                    </ThemedText>
-                    <TouchableOpacity
-                      onPress={() => {
-                        setShowTimePicker(true);
-                        Haptics.selectionAsync();
-                      }}
-                      className="bg-border flex-row justify-between items-center p-3 rounded-apple-sm"
-                      activeOpacity={0.7}
-                    >
-                      <ThemedText
-                        className="font-bold text-sm"
-                        style={{ color: colors.primary }}
-                      >
-                        {formatDisplayTime(preferences.syncTime)}
-                      </ThemedText>
-                      <ThemedText
-                        className="text-xs font-bold"
-                        style={{ color: colors.accent }}
-                      >
-                        SELECT TIME
-                      </ThemedText>
-                    </TouchableOpacity>
-                    {showTimePicker && (
-                      <View
-                        style={
-                          Platform.OS === "ios"
-                            ? {
-                                backgroundColor: colors.surface,
-                                borderRadius: 14,
-                                overflow: "hidden",
-                                marginTop: 12,
-                                borderWidth: 1,
-                                borderColor: colors.border,
-                              }
-                            : undefined
-                        }
-                      >
-                        <DateTimePicker
-                          value={getDateTimeObject(preferences.syncTime)}
-                          mode="time"
-                          is24Hour={true}
-                          display={
-                            Platform.OS === "ios" ? "spinner" : "default"
-                          }
-                          onChange={handleTimePickerChange}
-                          themeVariant={isDark ? "dark" : "light"}
-                        />
-                        {Platform.OS === "ios" && (
-                          <TouchableOpacity
-                            onPress={() => setShowTimePicker(false)}
-                            style={{
-                              borderTopWidth: 1,
-                              borderTopColor: colors.border,
-                              padding: 12,
-                              alignItems: "center",
-                            }}
-                          >
-                            <ThemedText
-                              style={{
-                                color: colors.accent,
-                                fontWeight: "bold",
-                              }}
-                            >
-                              Done
-                            </ThemedText>
-                          </TouchableOpacity>
-                        )}
-                      </View>
-                    )}
-                  </View>
-                )}
-              </>
-            )}
-            <Row
-              icon={<LucideDownload color={colors.primary} size={20} />}
-              label="Restore Data"
-              sub="Replace local data with Drive backup"
-              onPress={handleRestoreFromDrive}
-            />
-          </View>
-
-          {/* ── Privacy & Security ── */}
-          <Section title="Privacy & Security" />
-          <View
-            className="rounded-apple-md overflow-hidden"
-            style={{
-              backgroundColor: colors.surface,
-              borderWidth: 1,
-              borderColor: colors.border,
-            }}
-          >
-            <Row
-              icon={<LucideEyeOff color={colors.primary} size={18} />}
-              label="Mask Amount Values"
-              sub="Asterisks (****) on Dashboard"
-              right={
-                <Switch
-                  value={preferences.hideAmounts}
-                  onValueChange={toggleHideAmounts}
-                  trackColor={{ true: colors.success }}
-                />
-              }
-            />
-            <Row
-              icon={<LucideShield color={colors.primary} size={20} />}
-              label="Biometric Lock"
-              sub="Authenticate on app launch"
-              right={
-                <Switch
-                  value={preferences.biometricLock}
-                  onValueChange={handleBiometricToggle}
-                  trackColor={{ true: colors.success }}
-                />
-              }
-            />
-            {preferences.biometricLock && (
-              <View
-                className="p-4 border-t"
-                style={{ borderTopColor: colors.border }}
-              >
-                <ThemedText
-                  type="secondary"
-                  className="text-[10px] uppercase font-bold mb-2"
-                >
-                  Auto-lock After (minutes, 1–60)
-                </ThemedText>
-                <View className="flex-row gap-2">
-                  <TextInput
-                    className="bg-border flex-1 p-2 rounded-apple-sm font-bold"
-                    style={{ color: colors.primary }}
-                    value={autoLockInput}
-                    onChangeText={setAutoLockInput}
-                    onBlur={handleSaveAutoLock}
-                    keyboardType="numeric"
-                  />
-                  <TouchableOpacity
-                    onPress={handleSaveAutoLock}
-                    className="px-4 justify-center rounded-apple-sm"
-                    style={{ backgroundColor: colors.accent }}
-                  >
-                    <ThemedText
-                      className="font-bold text-xs"
-                      style={{ color: colors.onAccent }}
-                    >
-                      SET
-                    </ThemedText>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )}
-          </View>
-
-          {/* ── Interaction & Experience ── */}
-          <Section title="Experience" />
-          <View
-            className="rounded-apple-md overflow-hidden"
-            style={{
-              backgroundColor: colors.surface,
-              borderWidth: 1,
-              borderColor: colors.border,
-            }}
-          >
-            <Row
-              icon={<LucideZap color={colors.primary} size={18} />}
-              label="Haptic Feedback"
-              sub="Vibrate on actions"
-              right={
-                <Switch
-                  value={preferences.hapticsEnabled}
-                  onValueChange={toggleHaptics}
-                  trackColor={{ true: colors.success }}
-                />
-              }
-            />
-            <Row
-              icon={<LucideLayout color={colors.primary} size={18} />}
-              label="Startup Screen"
-              sub={`Opens to: ${preferences.defaultLaunchScreen}`}
-            />
             <View
-              className="flex-row p-1"
-              style={{ backgroundColor: colors.translucent }}
+              style={{
+                width: 48,
+                height: 48,
+                borderRadius: 24,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: colors.translucent,
+                overflow: "hidden",
+              }}
             >
-              {(["Dashboard", "SmartInbox"] as const).map((screen) => (
+              {googleUser?.photo ? (
+                <Image
+                  source={{ uri: googleUser.photo }}
+                  style={{ width: 48, height: 48 }}
+                />
+              ) : googleUser ? (
+                <ThemedText
+                  style={{
+                    fontFamily: fonts.displayBold,
+                    fontSize: 20,
+                    color: colors.primary,
+                  }}
+                >
+                  {googleUser.name?.charAt(0)?.toUpperCase() ?? "U"}
+                </ThemedText>
+              ) : (
+                <LucideUserCircle color={colors.secondary} size={26} />
+              )}
+            </View>
+            <View className="flex-1">
+              <ThemedText
+                style={{ fontFamily: fonts.textSemibold, fontSize: 16 }}
+                numberOfLines={1}
+              >
+                {googleUser ? googleUser.name : "Local Account"}
+              </ThemedText>
+              <ThemedText
+                type="secondary"
+                className="text-xs mt-0.5"
+                numberOfLines={1}
+              >
+                {googleUser
+                  ? googleUser.email
+                  : "Tap to link Google Cloud & back up"}
+              </ThemedText>
+              <View
+                className="flex-row items-center mt-1.5"
+                style={{ gap: 5 }}
+              >
+                <View
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: 3,
+                    backgroundColor: googleUser
+                      ? colors.success
+                      : colors.warning,
+                  }}
+                />
+                <ThemedText
+                  font="signal"
+                  type="secondary"
+                  style={{ fontSize: 9, letterSpacing: 0.4 }}
+                >
+                  {googleUser
+                    ? lastSynced
+                      ? `SYNCED ${new Date(lastSynced).toLocaleDateString("en-IN")}`
+                      : "NEVER SYNCED"
+                    : "LOCAL ONLY"}
+                </ThemedText>
+              </View>
+            </View>
+            <LucideChevronRight color={colors.muted} size={18} />
+          </TouchableOpacity>
+
+          {/* ── Appearance ── */}
+          <Section title="Appearance" />
+
+          {/* Light / Dark / System — segmented mode selector */}
+          <View
+            className="flex-row rounded-apple-md p-1 mb-4"
+            style={{
+              backgroundColor: colors.surface,
+              borderWidth: 1,
+              borderColor: colors.border,
+            }}
+          >
+            {(["light", "dark", "system"] as const).map((v) => {
+              const active = preferences.theme === v;
+              const Icon =
+                v === "dark"
+                  ? LucideMoon
+                  : v === "light"
+                    ? LucideSun
+                    : LucideMonitor;
+              return (
                 <TouchableOpacity
-                  key={screen}
-                  onPress={() => setLaunchScreen(screen)}
+                  key={v}
+                  onPress={() => {
+                    triggerHaptic();
+                    setTheme(v as any);
+                  }}
                   style={[
                     {
                       flex: 1,
-                      padding: 8,
+                      flexDirection: "row",
                       alignItems: "center",
-                      borderRadius: 8,
+                      justifyContent: "center",
+                      gap: 6,
+                      paddingVertical: 10,
+                      borderRadius: 10,
                     },
-                    preferences.defaultLaunchScreen === screen && {
-                      backgroundColor: colors.surface,
-                      elevation: 1,
+                    active && {
+                      backgroundColor: colors.translucent,
                     },
                   ]}
                 >
+                  <Icon
+                    size={16}
+                    color={active ? colors.accent : colors.secondary}
+                  />
                   <ThemedText
                     style={{
-                      fontSize: 10,
-                      fontWeight: "bold",
-                      color:
-                        preferences.defaultLaunchScreen === screen
-                          ? colors.primary
-                          : colors.secondary,
+                      fontSize: 12,
+                      fontFamily: fonts.textSemibold,
+                      color: active ? colors.primary : colors.secondary,
                     }}
                   >
-                    {screen.replace("Smart", "").toUpperCase()}
+                    {v.charAt(0).toUpperCase() + v.slice(1)}
                   </ThemedText>
                 </TouchableOpacity>
-              ))}
-            </View>
-            <Row
-              icon={<LucideSparkles color={colors.accent} size={18} />}
-              label="Echo Spend Tour Guide"
-              sub="Explore all features and power-user tips"
-              onPress={() => {
-                triggerHaptic();
-                setShowTour(true);
-              }}
-            />
-            <Row
-              icon={<LucideLightbulb color={colors.primary} size={18} />}
-              label="Tips & Tricks"
-              sub="Unlock and configure the app's full potential"
-              onPress={() => {
-                triggerHaptic();
-                navigation.navigate("Tips");
-              }}
-            />
+              );
+            })}
           </View>
 
-          {/* ── Financial Cycle ── */}
-          <Section title="Financial Planning" />
-          <View
-            className="rounded-apple-md overflow-hidden"
-            style={{
-              backgroundColor: colors.surface,
-              borderWidth: 1,
-              borderColor: colors.border,
-            }}
+          <ThemedText
+            type="secondary"
+            className="text-[10px] uppercase font-bold mb-2 ml-1"
           >
-            <View className="p-4">
-              <View className="flex-row items-center mb-2">
-                <LucideWallet
-                  color={colors.primary}
-                  size={20}
-                  className="mr-3"
-                />
-                <ThemedText className="font-medium">Monthly Budget</ThemedText>
-              </View>
-              <View className="flex-row gap-2">
-                <TextInput
-                  className="bg-border flex-1 p-2 rounded-apple-sm font-bold"
-                  style={{ color: colors.primary }}
-                  value={budgetInput}
-                  onChangeText={setBudgetInput}
-                  onBlur={handleSaveBudget}
-                  keyboardType="numeric"
-                  placeholder="0.00"
-                />
+            Color Theme
+          </ThemedText>
+          <View className="flex-row flex-wrap justify-between">
+            {THEMES.map((t) => {
+              const sw = themeSwatches(t, isDark ? "dark" : "light");
+              const selected = themeId === t.id;
+              return (
                 <TouchableOpacity
-                  onPress={handleSaveBudget}
-                  className="px-4 justify-center rounded-apple-sm"
-                  style={{ backgroundColor: colors.accent }}
+                  key={t.id}
+                  activeOpacity={0.85}
+                  onPress={() => setThemeId(t.id)}
+                  style={{
+                    width: "48.5%",
+                    marginBottom: 12,
+                    borderRadius: 16,
+                    borderWidth: selected ? 2 : 1,
+                    borderColor: selected ? sw.accent : colors.border,
+                    backgroundColor: sw.bg,
+                    padding: 12,
+                    overflow: "hidden",
+                  }}
                 >
-                  <ThemedText
-                    className="font-bold text-xs"
-                    style={{ color: colors.onAccent }}
+                  {/* Mini preview: a surface bar + swatch dots */}
+                  <View
+                    style={{
+                      height: 34,
+                      borderRadius: 9,
+                      backgroundColor: sw.surface,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      paddingHorizontal: 8,
+                      gap: 6,
+                    }}
                   >
-                    SAVE
-                  </ThemedText>
-                </TouchableOpacity>
-              </View>
-            </View>
-            <View
-              className="p-4 border-t"
-              style={{ borderTopColor: colors.border }}
-            >
-              <View className="flex-row items-center mb-2">
-                <LucideTimer
-                  color={colors.primary}
-                  size={20}
-                  className="mr-3"
-                />
-                <ThemedText className="font-medium">
-                  Salary Day (1-31)
-                </ThemedText>
-              </View>
-              <View className="flex-row gap-2">
-                <TextInput
-                  className="bg-border flex-1 p-2 rounded-apple-sm font-bold"
-                  style={{ color: colors.primary }}
-                  value={salaryDayInput}
-                  onChangeText={setSalaryDayInput}
-                  onBlur={handleSaveSalaryDay}
-                  keyboardType="numeric"
-                />
-                <TouchableOpacity
-                  onPress={handleSaveSalaryDay}
-                  className="px-4 justify-center rounded-apple-sm"
-                  style={{ backgroundColor: colors.accent }}
-                >
-                  <ThemedText
-                    className="font-bold text-xs"
-                    style={{ color: colors.onAccent }}
+                    <View
+                      style={{
+                        width: 12,
+                        height: 12,
+                        borderRadius: 6,
+                        backgroundColor: sw.accent,
+                      }}
+                    />
+                    <View
+                      style={{
+                        width: 12,
+                        height: 12,
+                        borderRadius: 6,
+                        backgroundColor: sw.credit,
+                      }}
+                    />
+                    <View
+                      style={{
+                        flex: 1,
+                        height: 5,
+                        borderRadius: 3,
+                        backgroundColor: sw.text,
+                        opacity: 0.35,
+                      }}
+                    />
+                  </View>
+                  <View
+                    className="flex-row items-center justify-between"
+                    style={{ marginTop: 10 }}
                   >
-                    SET
-                  </ThemedText>
+                    <View style={{ flex: 1 }}>
+                      <ThemedText
+                        font="display"
+                        style={{ color: sw.text, fontSize: 15 }}
+                        numberOfLines={1}
+                      >
+                        {t.name}
+                      </ThemedText>
+                      <ThemedText
+                        style={{
+                          color: sw.text,
+                          opacity: 0.55,
+                          fontSize: 11,
+                          marginTop: 1,
+                        }}
+                        numberOfLines={1}
+                      >
+                        {t.blurb}
+                      </ThemedText>
+                    </View>
+                    {selected && (
+                      <View
+                        style={{
+                          width: 20,
+                          height: 20,
+                          borderRadius: 10,
+                          backgroundColor: sw.accent,
+                          alignItems: "center",
+                          justifyContent: "center",
+                          marginLeft: 6,
+                        }}
+                      >
+                        <LucideCheck size={13} color={sw.bg} strokeWidth={3} />
+                      </View>
+                    )}
+                  </View>
                 </TouchableOpacity>
-              </View>
-              <ThemedText type="secondary" className="text-[10px] mt-2">
-                Adjusts when your monthly spend resets.
-              </ThemedText>
-            </View>
+              );
+            })}
           </View>
 
           {/* ── Categorization ── */}
@@ -1601,112 +1201,8 @@ const SettingsScreen = ({ navigation }: any) => {
             />
           </View>
 
-          {/* ── Appearance ── */}
-          <Section title="Theme" />
-          <View className="flex-row flex-wrap justify-between">
-            {THEMES.map((t) => {
-              const sw = themeSwatches(t, isDark ? "dark" : "light");
-              const selected = themeId === t.id;
-              return (
-                <TouchableOpacity
-                  key={t.id}
-                  activeOpacity={0.85}
-                  onPress={() => setThemeId(t.id)}
-                  style={{
-                    width: "48.5%",
-                    marginBottom: 12,
-                    borderRadius: 16,
-                    borderWidth: selected ? 2 : 1,
-                    borderColor: selected ? sw.accent : colors.border,
-                    backgroundColor: sw.bg,
-                    padding: 12,
-                    overflow: "hidden",
-                  }}
-                >
-                  {/* Mini preview: a surface bar + swatch dots */}
-                  <View
-                    style={{
-                      height: 34,
-                      borderRadius: 9,
-                      backgroundColor: sw.surface,
-                      flexDirection: "row",
-                      alignItems: "center",
-                      paddingHorizontal: 8,
-                      gap: 6,
-                    }}
-                  >
-                    <View
-                      style={{
-                        width: 12,
-                        height: 12,
-                        borderRadius: 6,
-                        backgroundColor: sw.accent,
-                      }}
-                    />
-                    <View
-                      style={{
-                        width: 12,
-                        height: 12,
-                        borderRadius: 6,
-                        backgroundColor: sw.credit,
-                      }}
-                    />
-                    <View
-                      style={{
-                        flex: 1,
-                        height: 5,
-                        borderRadius: 3,
-                        backgroundColor: sw.text,
-                        opacity: 0.35,
-                      }}
-                    />
-                  </View>
-                  <View
-                    className="flex-row items-center justify-between"
-                    style={{ marginTop: 10 }}
-                  >
-                    <View style={{ flex: 1 }}>
-                      <ThemedText
-                        font="display"
-                        style={{ color: sw.text, fontSize: 15 }}
-                        numberOfLines={1}
-                      >
-                        {t.name}
-                      </ThemedText>
-                      <ThemedText
-                        style={{
-                          color: sw.text,
-                          opacity: 0.55,
-                          fontSize: 11,
-                          marginTop: 1,
-                        }}
-                        numberOfLines={1}
-                      >
-                        {t.blurb}
-                      </ThemedText>
-                    </View>
-                    {selected && (
-                      <View
-                        style={{
-                          width: 20,
-                          height: 20,
-                          borderRadius: 10,
-                          backgroundColor: sw.accent,
-                          alignItems: "center",
-                          justifyContent: "center",
-                          marginLeft: 6,
-                        }}
-                      >
-                        <LucideCheck size={13} color={sw.bg} strokeWidth={3} />
-                      </View>
-                    )}
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-
-          <Section title="Appearance" />
+          {/* ── Privacy & Security ── */}
+          <Section title="Privacy & Security" />
           <View
             className="rounded-apple-md overflow-hidden"
             style={{
@@ -1715,34 +1211,108 @@ const SettingsScreen = ({ navigation }: any) => {
               borderColor: colors.border,
             }}
           >
-            {["dark", "light", "system"].map((v) => (
+            <Row
+              icon={<LucideEyeOff color={colors.primary} size={18} />}
+              label="Mask Amount Values"
+              sub="Asterisks (****) on Dashboard"
+              right={
+                <Switch
+                  value={preferences.hideAmounts}
+                  onValueChange={toggleHideAmounts}
+                  trackColor={{ true: colors.success }}
+                />
+              }
+            />
+            <Row
+              icon={<LucideShield color={colors.primary} size={20} />}
+              label="Biometric Lock"
+              sub="Authenticate on app launch"
+              right={
+                <Switch
+                  value={preferences.biometricLock}
+                  onValueChange={handleBiometricToggle}
+                  trackColor={{ true: colors.success }}
+                />
+              }
+            />
+            {preferences.biometricLock && (
+              <View
+                className="p-4 border-t"
+                style={{ borderTopColor: colors.border }}
+              >
+                <ThemedText
+                  type="secondary"
+                  className="text-[10px] uppercase font-bold mb-2"
+                >
+                  Auto-lock After (minutes, 1–60)
+                </ThemedText>
+                <View className="flex-row gap-2">
+                  <TextInput
+                    className="bg-border flex-1 p-2 rounded-apple-sm font-bold"
+                    style={{ color: colors.primary }}
+                    value={autoLockInput}
+                    onChangeText={setAutoLockInput}
+                    onBlur={handleSaveAutoLock}
+                    keyboardType="numeric"
+                  />
+                  <TouchableOpacity
+                    onPress={handleSaveAutoLock}
+                    className="px-4 justify-center rounded-apple-sm"
+                    style={{ backgroundColor: colors.accent }}
+                  >
+                    <ThemedText
+                      className="font-bold text-xs"
+                      style={{ color: colors.onAccent }}
+                    >
+                      SET
+                    </ThemedText>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+            <Row
+              icon={<LucideDownload color={colors.primary} size={20} />}
+              label="Export to CSV"
+              sub="Download all transactions as a spreadsheet"
+              onPress={() => SyncService.exportToCSV()}
+            />
+            {!googleUser && (
               <Row
-                key={v}
-                icon={
-                  v === "dark" ? (
-                    <LucideMoon size={18} color={colors.primary} />
-                  ) : v === "light" ? (
-                    <LucideSun size={18} color={colors.primary} />
-                  ) : (
-                    <LucideMonitor size={18} color={colors.primary} />
-                  )
-                }
-                label={v.charAt(0).toUpperCase() + v.slice(1)}
-                onPress={() => setTheme(v as any)}
-                right={
-                  preferences.theme === v ? (
-                    <View
-                      className="w-2 h-2 rounded-full"
-                      style={{ backgroundColor: colors.accent }}
-                    />
-                  ) : null
-                }
+                icon={<LucideLogOut color={colors.danger} size={18} />}
+                label="Reset App & Wipe Data"
+                sub="Permanently delete all local data"
+                onPress={handleLogout}
+                danger
               />
-            ))}
+            )}
+          </View>
+
+          {/* ── Interaction & Experience ── */}
+          <Section title="Experience" />
+          <View
+            className="rounded-apple-md overflow-hidden"
+            style={{
+              backgroundColor: colors.surface,
+              borderWidth: 1,
+              borderColor: colors.border,
+            }}
+          >
+            <Row
+              icon={<LucideZap color={colors.primary} size={18} />}
+              label="Haptic Feedback"
+              sub="Vibrate on actions"
+              right={
+                <Switch
+                  value={preferences.hapticsEnabled}
+                  onValueChange={toggleHaptics}
+                  trackColor={{ true: colors.success }}
+                />
+              }
+            />
           </View>
 
           {/* ── Automation ── */}
-          <Section title="Automation" />
+          <Section title="Automation & AI" />
           <View
             className="rounded-apple-md overflow-hidden"
             style={{
@@ -1827,8 +1397,14 @@ const SettingsScreen = ({ navigation }: any) => {
             )}
           </View>
 
-          {/* ── Echo AI ── */}
-          <Section title="Echo AI" />
+          {/* ── Echo AI (on-device engine) ── */}
+          <ThemedText
+            type="secondary"
+            className="text-[10px] uppercase font-bold mb-2 ml-1"
+            style={{ marginTop: 18 }}
+          >
+            Echo AI Engine
+          </ThemedText>
           <View
             className="rounded-apple-md overflow-hidden"
             style={{
@@ -1990,9 +1566,10 @@ const SettingsScreen = ({ navigation }: any) => {
             )}
           </View>
 
-          <Section title="Data & Privacy" />
+          {/* ── Help & Support ── */}
+          <Section title="Help & Support" />
           <View
-            className="rounded-apple-md overflow-hidden mb-24"
+            className="rounded-apple-md overflow-hidden"
             style={{
               backgroundColor: colors.surface,
               borderWidth: 1,
@@ -2000,18 +1577,23 @@ const SettingsScreen = ({ navigation }: any) => {
             }}
           >
             <Row
-              icon={<LucideDownload color={colors.primary} size={20} />}
-              label="Export to CSV"
-              onPress={() => SyncService.exportToCSV()}
+              icon={<LucideSparkles color={colors.accent} size={18} />}
+              label="Echo Spend Tour Guide"
+              sub="Explore all features and power-user tips"
+              onPress={() => {
+                triggerHaptic();
+                setShowTour(true);
+              }}
             />
-            {!googleUser && (
-              <Row
-                icon={<LucideLogOut color={colors.danger} size={18} />}
-                label="Reset App & Wipe Data"
-                onPress={handleLogout}
-                danger
-              />
-            )}
+            <Row
+              icon={<LucideLightbulb color={colors.primary} size={18} />}
+              label="Tips & Tricks"
+              sub="Unlock and configure the app's full potential"
+              onPress={() => {
+                triggerHaptic();
+                navigation.navigate("Tips");
+              }}
+            />
           </View>
 
           {/* ── Developer Testing ── (Hidden in Release) */}

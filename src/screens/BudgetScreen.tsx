@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { MotiView } from 'moti';
 import * as Haptics from 'expo-haptics';
-import { LucidePlus, LucideTrash2, LucideTarget, LucideX, LucideCheck } from 'lucide-react-native';
+import { LucidePlus, LucideTrash2, LucideTarget, LucideX, LucideCheck, LucideWallet, LucideTimer } from 'lucide-react-native';
 import { renderCategoryIcon } from '../components/CategoryManager';
 import { notify } from '../utils/notify';
 import {
@@ -36,7 +36,7 @@ interface BudgetRow {
 
 const BudgetScreen = () => {
   const { colors, theme } = useTheme();
-  const { preferences } = useStore();
+  const { preferences, setMonthlyBudget, setSalaryDay } = useStore();
   const currency = preferences?.currency ?? '₹';
   const [rows, setRows] = useState<BudgetRow[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -46,6 +46,39 @@ const BudgetScreen = () => {
   const [budgetAmount, setBudgetAmount] = useState('');
   const [period, setPeriod] = useState<'monthly' | 'weekly'>('monthly');
   const { checkBudgetAlerts } = useNotifications();
+
+  // Overall monthly budget & salary-cycle config (moved here from Settings)
+  const [monthlyBudgetInput, setMonthlyBudgetInput] = useState(
+    (preferences?.monthlyBudget ?? 50000).toString(),
+  );
+  const [salaryDayInput, setSalaryDayInput] = useState(
+    (preferences?.salaryDay ?? 1).toString(),
+  );
+
+  useEffect(() => {
+    setMonthlyBudgetInput((preferences?.monthlyBudget ?? 50000).toString());
+    setSalaryDayInput((preferences?.salaryDay ?? 1).toString());
+  }, [preferences?.monthlyBudget, preferences?.salaryDay]);
+
+  const handleSaveMonthlyBudget = () => {
+    const val = parseFloat(monthlyBudgetInput);
+    if (!isNaN(val)) {
+      setMonthlyBudget(val);
+      notify.success('Budget updated');
+    } else {
+      setMonthlyBudgetInput((preferences?.monthlyBudget ?? 50000).toString());
+    }
+  };
+
+  const handleSaveSalaryDay = () => {
+    const val = parseInt(salaryDayInput);
+    if (!isNaN(val) && val >= 1 && val <= 31) {
+      setSalaryDay(val);
+      notify.success('Financial cycle updated');
+    } else {
+      setSalaryDayInput((preferences?.salaryDay ?? 1).toString());
+    }
+  };
 
   const refreshCategories = useCallback(() => {
     getCategories().then(setCategories);
@@ -128,6 +161,72 @@ const BudgetScreen = () => {
             <ThemedText type="secondary" className="text-sm uppercase tracking-widest">Finance</ThemedText>
             <ThemedText className="text-3xl font-bold">Budgets</ThemedText>
           </MotiView>
+
+          {/* ── Overall plan: monthly budget + salary cycle ── */}
+          <View
+            className="rounded-apple-md overflow-hidden mb-6"
+            style={{
+              backgroundColor: colors.surface,
+              borderWidth: 1,
+              borderColor: colors.border,
+            }}
+          >
+            <View className="p-4">
+              <View className="flex-row items-center mb-2">
+                <LucideWallet color={colors.primary} size={20} className="mr-3" />
+                <ThemedText className="font-medium">Monthly Budget</ThemedText>
+              </View>
+              <View className="flex-row gap-2">
+                <TextInput
+                  className="bg-border flex-1 p-2 rounded-apple-sm font-bold"
+                  style={{ color: colors.primary }}
+                  value={monthlyBudgetInput}
+                  onChangeText={setMonthlyBudgetInput}
+                  onBlur={handleSaveMonthlyBudget}
+                  keyboardType="numeric"
+                  placeholder="0.00"
+                  placeholderTextColor={colors.muted}
+                />
+                <TouchableOpacity
+                  onPress={handleSaveMonthlyBudget}
+                  className="px-4 justify-center rounded-apple-sm"
+                  style={{ backgroundColor: colors.accent }}
+                >
+                  <ThemedText className="font-bold text-xs" style={{ color: '#FFFFFF' }}>
+                    SAVE
+                  </ThemedText>
+                </TouchableOpacity>
+              </View>
+            </View>
+            <View className="p-4 border-t" style={{ borderTopColor: colors.border }}>
+              <View className="flex-row items-center mb-2">
+                <LucideTimer color={colors.primary} size={20} className="mr-3" />
+                <ThemedText className="font-medium">Salary Day (1-31)</ThemedText>
+              </View>
+              <View className="flex-row gap-2">
+                <TextInput
+                  className="bg-border flex-1 p-2 rounded-apple-sm font-bold"
+                  style={{ color: colors.primary }}
+                  value={salaryDayInput}
+                  onChangeText={setSalaryDayInput}
+                  onBlur={handleSaveSalaryDay}
+                  keyboardType="numeric"
+                />
+                <TouchableOpacity
+                  onPress={handleSaveSalaryDay}
+                  className="px-4 justify-center rounded-apple-sm"
+                  style={{ backgroundColor: colors.accent }}
+                >
+                  <ThemedText className="font-bold text-xs" style={{ color: '#FFFFFF' }}>
+                    SET
+                  </ThemedText>
+                </TouchableOpacity>
+              </View>
+              <ThemedText type="secondary" className="text-[10px] mt-2">
+                Adjusts when your monthly spend resets.
+              </ThemedText>
+            </View>
+          </View>
 
           {loading ? (
             <ActivityIndicator color={colors.accent} style={{ marginTop: 40 }} />

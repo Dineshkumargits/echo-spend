@@ -27,6 +27,7 @@ import { useTheme } from '../theme/ThemeProvider';
 import ManageAccountsScreen from '../screens/ManageAccountsScreen';
 import TipsScreen from '../screens/TipsScreen';
 import AIModelSetupStep from '../screens/AIModelSetupStep';
+import AccountBackupScreen from '../screens/AccountBackupScreen';
 
 const Stack = createStackNavigator();
 
@@ -67,6 +68,7 @@ export const AppNavigator = () => {
             <Stack.Screen name="SplitDetail" component={SplitDetailScreen} options={{ presentation: 'card' }} />
             <Stack.Screen name="Tips" component={TipsScreen} options={{ presentation: 'card' }} />
             <Stack.Screen name="AIModelSetup" component={AIModelSetupStep} options={{ presentation: 'modal' }} />
+            <Stack.Screen name="AccountBackup" component={AccountBackupScreen} options={{ presentation: 'card' }} />
           </>
         )}
       </Stack.Navigator>
