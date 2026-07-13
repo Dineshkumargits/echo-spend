@@ -6,7 +6,6 @@ import { useStore } from '../store/useStore';
 import OnboardingScreen from '../screens/OnboardingScreen';
 import { TabNavigator } from './TabNavigator';
 import SmartInboxScreen from '../screens/SmartInboxScreen';
-import BudgetScreen from '../screens/BudgetScreen';
 import CategoriesScreen from '../screens/CategoriesScreen';
 import SearchScreen from '../screens/SearchScreen';
 import AddTransactionScreen from '../screens/AddTransactionScreen';
@@ -17,7 +16,6 @@ import AddGoalScreen from '../screens/AddGoalScreen';
 import AddLoanScreen from '../screens/AddLoanScreen';
 import AddSubscriptionScreen from '../screens/AddSubscriptionScreen';
 import SubscriptionsScreen from '../screens/SubscriptionsScreen';
-import AnalyticsScreen from '../screens/AnalyticsScreen';
 import TransactionDetailScreen from '../screens/TransactionDetailScreen';
 import BankAccountDetailScreen from '../screens/BankAccountDetailScreen';
 import SplitExpenseScreen from '../screens/SplitExpenseScreen';
@@ -50,7 +48,6 @@ export const AppNavigator = () => {
             <Stack.Screen name="Main" component={TabNavigator} />
             <Stack.Screen name="ManageAccounts" component={ManageAccountsScreen} options={{ presentation: 'card' }} />
             <Stack.Screen name="SmartInbox" component={SmartInboxScreen} options={{ presentation: 'modal' }} />
-            <Stack.Screen name="Budget" component={BudgetScreen} options={{ presentation: 'card' }} />
             <Stack.Screen name="Categories" component={CategoriesScreen} options={{ presentation: 'card' }} />
             <Stack.Screen name="Search" component={SearchScreen} />
             <Stack.Screen name="AddTransaction" component={AddTransactionScreen} options={{ presentation: 'modal' }} />
@@ -61,7 +58,6 @@ export const AppNavigator = () => {
             <Stack.Screen name="AddLoan" component={AddLoanScreen} options={{ presentation: 'modal' }} />
             <Stack.Screen name="AddSubscription" component={AddSubscriptionScreen} options={{ presentation: 'modal' }} />
             <Stack.Screen name="Subscriptions" component={SubscriptionsScreen} options={{ presentation: 'card' }} />
-            <Stack.Screen name="Analytics" component={AnalyticsScreen} options={{ presentation: 'card' }} />
             <Stack.Screen name="TransactionDetail" component={TransactionDetailScreen} options={{ presentation: 'modal' }} />
             <Stack.Screen name="BankAccountDetail" component={BankAccountDetailScreen} options={{ presentation: 'card' }} />
             <Stack.Screen name="SplitExpense" component={SplitExpenseScreen} options={{ presentation: 'modal' }} />

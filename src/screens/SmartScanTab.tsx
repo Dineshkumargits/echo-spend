@@ -145,8 +145,8 @@ const SmartScanTab = ({ navigation }: any) => {
               activeOpacity={0.85}
               className="rounded-full px-10 py-4 mb-3 w-full items-center"
               style={{
-                backgroundColor: colors.debit,
-                shadowColor: colors.debit,
+                backgroundColor: colors.accent,
+                shadowColor: colors.accent,
                 shadowOffset: { width: 0, height: 4 },
                 shadowOpacity: 0.4,
                 shadowRadius: 16,

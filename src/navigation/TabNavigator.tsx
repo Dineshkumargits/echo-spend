@@ -7,12 +7,16 @@ import {
   LucideSettings,
   LucideZap,
   LucideReceiptText,
+  LucidePieChart,
+  LucideWallet,
 } from 'lucide-react-native';
 import DashboardScreen from '../screens/DashboardScreen';
 import TransactionsScreen from '../screens/TransactionsScreen';
 import SmartScanTab from '../screens/SmartScanTab';
 import FinancesScreen from '../screens/FinancesScreen';
 import SettingsScreen from '../screens/SettingsScreen';
+import AnalyticsScreen from '../screens/AnalyticsScreen';
+import BudgetScreen from '../screens/BudgetScreen';
 import { useTheme } from '../theme/ThemeProvider';
 import { useStore } from '../store/useStore';
 import { fonts } from '../theme/tokens';
@@ -110,16 +114,18 @@ export const TabNavigator = ({ navigation }: any) => {
         tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.secondary,
         tabBarLabelStyle: {
-          fontSize: 9,
+          fontSize: 8,
           fontFamily: fonts.signal,
-          letterSpacing: 0.8,
+          letterSpacing: 0.4,
           textTransform: 'uppercase',
           marginBottom: 10,
         },
         tabBarIcon: ({ color, size }) => {
           if (route.name === 'Home') return <LucideLayoutDashboard color={color} size={size} />;
           if (route.name === 'Txns') return <LucideReceiptText color={color} size={size} />;
+          if (route.name === 'Analytics') return <LucidePieChart color={color} size={size} />;
           if (route.name === 'Finances') return <LucideCalendar color={color} size={size} />;
+          if (route.name === 'Budget') return <LucideWallet color={color} size={size} />;
           if (route.name === 'Settings') return <LucideSettings color={color} size={size} />;
           return null;
         },
@@ -127,6 +133,7 @@ export const TabNavigator = ({ navigation }: any) => {
     >
       <Tab.Screen name="Home" component={DashboardScreen} />
       <Tab.Screen name="Txns" component={TransactionsScreen} options={{ tabBarLabel: 'Txns' }} />
+      <Tab.Screen name="Analytics" component={AnalyticsScreen} options={{ tabBarLabel: 'Charts' }} />
       <Tab.Screen
         name="Scan"
         component={SmartScanTab}
@@ -137,6 +144,7 @@ export const TabNavigator = ({ navigation }: any) => {
         }}
       />
       <Tab.Screen name="Finances" component={FinancesScreen} options={{ tabBarLabel: 'Money' }} />
+      <Tab.Screen name="Budget" component={BudgetScreen} options={{ tabBarLabel: 'Budget' }} />
       <Tab.Screen name="Settings" component={SettingsScreen} options={{ tabBarLabel: 'More' }} />
     </Tab.Navigator>
   );

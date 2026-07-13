@@ -270,7 +270,7 @@ const AnalyticsScreen = () => {
         {/* Stat tiles */}
         <View className="flex-row mb-6" style={{ gap: 10 }}>
           {[
-            { label: `Spend · ${trendDays}d`, value: fmtShort(totalThisPeriod), color: colors.debit },
+            { label: `Spend · ${trendDays}d`, value: fmtShort(totalThisPeriod), color: colors.accent },
             { label: 'Income · month', value: fmtShort(Number(thisMonth.income)), color: colors.credit },
             { label: 'Net · month', value: `${monthNet < 0 ? '−' : '+'}${fmtShort(Math.abs(monthNet))}`, color: monthNet >= 0 ? colors.credit : colors.danger },
           ].map((tile, i) => (
@@ -329,8 +329,8 @@ const AnalyticsScreen = () => {
             <View style={{ overflow: 'hidden' }}>
               <LineChart.Provider data={chartData}>
                 <LineChart height={140} width={SCREEN_WIDTH - 80}>
-                  <LineChart.Path color={colors.debit}>
-                    <LineChart.Gradient color={colors.debit} />
+                  <LineChart.Path color={colors.accent}>
+                    <LineChart.Gradient color={colors.accent} />
                   </LineChart.Path>
                   <LineChart.CursorCrosshair color={colors.primary} />
                 </LineChart>

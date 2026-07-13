@@ -185,7 +185,7 @@ export const WaveformBar: React.FC<WaveformBarProps> = ({
     <View style={[{ flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', height }, style]}>
       {data.map((d, i) => {
         const h = Math.max(3, (Math.abs(d.value) / max) * height);
-        const bg = d.kind === 'in' ? colors.credit : colors.debit;
+        const bg = d.kind === 'in' ? colors.credit : colors.accent;
         return (
           <MotiView
             key={i}
