@@ -13,6 +13,7 @@ import {
   Pressable,
   KeyboardAvoidingView,
 } from 'react-native';
+import { GestureHandlerRootView, ScrollView as GHScrollView } from 'react-native-gesture-handler';
 import {
   LucideSearch,
   LucideX,
@@ -570,6 +571,9 @@ const TransactionsScreen = () => {
         animationType="slide"
         onRequestClose={() => setShowFilters(false)}
       >
+        {/* Modal renders outside the root GestureHandlerRootView; re-establish one
+            so the ScrollView scrolls over its pressable filter rows (RNGH fix). */}
+        <GestureHandlerRootView style={{ flex: 1 }}>
         <Pressable
           style={{ flex: 1, backgroundColor: 'rgba(4,10,11,0.6)', justifyContent: 'flex-end' }}
           onPress={() => setShowFilters(false)}
@@ -604,7 +608,7 @@ const TransactionsScreen = () => {
                 ) : undefined}
               />
 
-              <ScrollView
+              <GHScrollView
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 24 }}
               >
@@ -797,10 +801,11 @@ const TransactionsScreen = () => {
                   }}
                   style={{ marginBottom: Platform.OS === 'ios' ? 20 : 8 }}
                 />
-              </ScrollView>
+              </GHScrollView>
             </Pressable>
           </KeyboardAvoidingView>
         </Pressable>
+        </GestureHandlerRootView>
       </Modal>
     </ThemedSafeAreaView>
   );

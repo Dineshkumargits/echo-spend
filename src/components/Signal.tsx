@@ -28,7 +28,9 @@ interface PulseDotProps {
 
 export const PulseDot: React.FC<PulseDotProps> = ({ size = 9, color, animated = true, style }) => {
   const { colors } = useTheme();
-  const dotColor = color ?? colors.debit;
+  // The live "something needs you" primitive uses the brand hue (signal green),
+  // not a debit color — attention, not money-direction.
+  const dotColor = color ?? colors.brand;
 
   return (
     <View style={[{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }, style]}>

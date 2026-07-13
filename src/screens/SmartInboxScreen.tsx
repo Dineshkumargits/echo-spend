@@ -1,5 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { View, Pressable, ScrollView, Alert, useWindowDimensions } from 'react-native';
+// Gesture-handler ScrollView: on the New Architecture a core ScrollView won't
+// hand a finger-drag off to scroll when the drag starts on a Pressable child
+// (rows only scroll from non-pressable gaps). RNGH's ScrollView fixes that for
+// the in-sheet selection lists. Must live under a GestureHandlerRootView (the
+// BottomSheet shell provides one).
+import { ScrollView as GHScrollView } from 'react-native-gesture-handler';
 import { MotiView } from 'moti';
 import * as Haptics from 'expo-haptics';
 import {
@@ -530,22 +536,22 @@ const SmartInboxScreen = ({ navigation }: any) => {
               ) : undefined}
             />
           </View>
-          <ScrollView style={{ maxHeight: 380 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 8 }}>
+          <GHScrollView style={{ maxHeight: 380 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 8 }}>
             {categorySheetBody()}
-          </ScrollView>
+          </GHScrollView>
         </View>
       </BottomSheet>
 
       <BottomSheet visible={sheet === 'account'} onClose={() => setSheet(null)} title={activeTx?.type === 'transfer' ? 'Source account' : 'Assign account'}>
-        <ScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingTop: 6 }}>
+        <GHScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingTop: 6 }}>
           <AccountRows mode="from" />
-        </ScrollView>
+        </GHScrollView>
       </BottomSheet>
 
       <BottomSheet visible={sheet === 'toAccount'} onClose={() => setSheet(null)} title="Destination account">
-        <ScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingTop: 6 }}>
+        <GHScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingTop: 6 }}>
           <AccountRows mode="to" />
-        </ScrollView>
+        </GHScrollView>
       </BottomSheet>
 
       <BottomSheet visible={sheet === 'tags'} onClose={() => setSheet(null)} title="Tags">

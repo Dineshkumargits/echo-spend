@@ -8,6 +8,7 @@ import {
   StyleSheet,
   Platform
 } from 'react-native';
+import { GestureHandlerRootView, ScrollView as GHScrollView } from 'react-native-gesture-handler';
 import {
   LucideTag,
   LucideSearch,
@@ -136,6 +137,9 @@ export const CategoryPicker: React.FC<CategoryPickerProps> = ({
         transparent
         onRequestClose={() => setModalVisible(false)}
       >
+        {/* Modal renders outside the root GestureHandlerRootView; re-establish one
+            so the ScrollView scrolls over its TouchableOpacity rows (RNGH fix). */}
+        <GestureHandlerRootView style={{ flex: 1 }}>
         <View style={styles.modalOverlay}>
           <TouchableOpacity
             style={StyleSheet.absoluteFill}
@@ -174,7 +178,7 @@ export const CategoryPicker: React.FC<CategoryPickerProps> = ({
               )}
             </View>
 
-            <ScrollView
+            <GHScrollView
               showsVerticalScrollIndicator={false}
               contentContainerStyle={styles.scrollContent}
             >
@@ -251,9 +255,10 @@ export const CategoryPicker: React.FC<CategoryPickerProps> = ({
                   );
                 })}
               </View>
-            </ScrollView>
+            </GHScrollView>
           </View>
         </View>
+        </GestureHandlerRootView>
       </Modal>
 
       <CategoryManagerModal manager={categoryManager} onRefresh={refreshCategories} />

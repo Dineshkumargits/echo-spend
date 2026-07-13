@@ -194,7 +194,7 @@ export const AddSubscriptionScreen = () => {
     field: { marginBottom: 20 },
     label: { fontSize: 11, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1, fontWeight: 'bold', color: colors.secondary },
     input: { fontSize: 18, borderBottomWidth: 1, borderBottomColor: colors.border, paddingVertical: 10, color: colors.primary },
-    amountInput: { fontSize: 36, fontWeight: 'bold', borderBottomWidth: 1, borderBottomColor: colors.border, paddingVertical: 10, color: colors.accent },
+    amountInput: { fontSize: 36, fontWeight: 'bold', borderBottomWidth: 1, borderBottomColor: colors.border, paddingVertical: 10, color: colors.debit },
     dateRow: { flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: colors.border, paddingVertical: 12, gap: 10 },
     toggleRow: { flexDirection: 'row', backgroundColor: colors.translucent, borderRadius: 12, padding: 4 },
     toggleBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 8 },

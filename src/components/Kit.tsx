@@ -12,6 +12,7 @@ import {
   View, Text, Pressable, ScrollView, TextInput, Modal, useWindowDimensions,
   ViewStyle, StyleProp, TextStyle, TextInputProps,
 } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { MotiView } from 'moti';
 import * as Haptics from 'expo-haptics';
 import { useTheme } from '../theme/ThemeProvider';
@@ -376,6 +377,11 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({ visible, onClose, titl
   const { height } = useWindowDimensions();
   return (
     <Modal visible={visible} transparent statusBarTranslucent animationType="fade" onRequestClose={onClose}>
+      {/* react-native Modal renders in a separate native hierarchy OUTSIDE the app's
+          root GestureHandlerRootView. Without re-establishing one here, RNGH breaks
+          touch arbitration for the inner ScrollView vs its Pressable rows — scroll
+          only works over non-pressable areas (e.g. an icon). This wrapper fixes it. */}
+      <GestureHandlerRootView style={{ flex: 1 }}>
       <Pressable onPress={onClose} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' }}>
         <MotiView
           from={{ translateY: 32, opacity: 0 }}
@@ -402,6 +408,7 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({ visible, onClose, titl
           </Pressable>
         </MotiView>
       </Pressable>
+      </GestureHandlerRootView>
     </Modal>
   );
 };

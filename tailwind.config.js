@@ -16,8 +16,9 @@ module.exports = {
         primary: "#E8F2F0",      // glow
         muted: "#7E9895",        // fog
         // Signals
-        accent: "#FFB454",       // pulse amber — money out / primary action
-        pulse: "#FFB454",
+        accent: "#30D158",       // signal green — brand / primary action
+        brand: "#30D158",
+        pulse: "#FFB454",        // pulse amber — money out / debit
         echo: "#56D4C0",         // echo aqua — money in / AI
         alert: "#FF6B5E",
         // Misc

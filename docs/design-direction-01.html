@@ -1,0 +1,1317 @@
+<title>Echo Spend — Design Direction: Money as Signal</title>
+<style>
+  /* ── Tokens ─────────────────────────────────────────────── */
+  :root {
+    --bg: #F2F6F5;
+    --surface: #FFFFFF;
+    --surface-2: #E9EFEE;
+    --text: #10201F;
+    --muted: #5B6F6D;
+    --hairline: rgba(16, 32, 31, 0.12);
+    --pulse: #A96E12;        /* pulse amber, darkened for light ground */
+    --pulse-bright: #DB9420;
+    --brand: #148F45;        /* signal green — brand / primary action */
+    --brand-bright: #1BAE55;
+    --chip-brand-bg: rgba(20, 143, 69, 0.12);
+    --echo: #0B7D6C;         /* echo aqua, darkened for light ground */
+    --alert: #C2453B;
+    --chip-pulse-bg: rgba(219, 148, 32, 0.14);
+    --chip-echo-bg: rgba(11, 125, 108, 0.12);
+    --shadow: 0 8px 32px rgba(16, 32, 31, 0.10);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0B1417;
+      --surface: #111E22;
+      --surface-2: #16262B;
+      --text: #E6F0EE;
+      --muted: #86A09D;
+      --hairline: rgba(230, 240, 238, 0.10);
+      --pulse: #FFB454;
+      --pulse-bright: #FFC470;
+      --brand: #30D158;      /* signal green — brand / primary action */
+      --brand-bright: #4FE873;
+      --chip-brand-bg: rgba(48, 209, 88, 0.16);
+      --echo: #56D4C0;
+      --alert: #FF6B5E;
+      --chip-pulse-bg: rgba(255, 180, 84, 0.12);
+      --chip-echo-bg: rgba(86, 212, 192, 0.12);
+      --shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0B1417;
+    --surface: #111E22;
+    --surface-2: #16262B;
+    --text: #E6F0EE;
+    --muted: #86A09D;
+    --hairline: rgba(230, 240, 238, 0.10);
+    --pulse: #FFB454;
+    --pulse-bright: #FFC470;
+    --brand: #30D158;        /* signal green — brand / primary action */
+    --brand-bright: #4FE873;
+    --chip-brand-bg: rgba(48, 209, 88, 0.16);
+    --echo: #56D4C0;
+    --alert: #FF6B5E;
+    --chip-pulse-bg: rgba(255, 180, 84, 0.12);
+    --chip-echo-bg: rgba(86, 212, 192, 0.12);
+    --shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  }
+  :root[data-theme="light"] {
+    --bg: #F2F6F5;
+    --surface: #FFFFFF;
+    --surface-2: #E9EFEE;
+    --text: #10201F;
+    --muted: #5B6F6D;
+    --hairline: rgba(16, 32, 31, 0.12);
+    --pulse: #A96E12;
+    --pulse-bright: #DB9420;
+    --brand: #148F45;        /* signal green — brand / primary action */
+    --brand-bright: #1BAE55;
+    --chip-brand-bg: rgba(20, 143, 69, 0.12);
+    --echo: #0B7D6C;
+    --alert: #C2453B;
+    --chip-pulse-bg: rgba(219, 148, 32, 0.14);
+    --chip-echo-bg: rgba(11, 125, 108, 0.12);
+    --shadow: 0 8px 32px rgba(16, 32, 31, 0.10);
+  }
+
+  /* App-frame tokens: the pitched app UI inside phone mockups keeps its own
+     committed palette, independent of the page theme. */
+  .phone {
+    --app-bg: #0A1416;
+    --app-surface: #101D21;
+    --app-surface-2: #15262B;
+    --app-text: #E8F2F0;
+    --app-muted: #7E9895;
+    --app-hairline: rgba(232, 242, 240, 0.09);
+    --app-brand: #30D158;
+    --app-pulse: #FFB454;
+    --app-echo: #56D4C0;
+    --app-alert: #FF6B5E;
+  }
+  .phone--light {
+    --app-bg: #F0F5F4;
+    --app-surface: #FFFFFF;
+    --app-surface-2: #E7EEEC;
+    --app-text: #122120;
+    --app-muted: #60716F;
+    --app-hairline: rgba(18, 33, 32, 0.10);
+    --app-brand: #148F45;
+    --app-pulse: #B4761A;
+    --app-echo: #0C8271;
+    --app-alert: #C2453B;
+  }
+
+  /* ── Base ───────────────────────────────────────────────── */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Avenir Next", "Segoe UI", system-ui, -apple-system, sans-serif;
+    line-height: 1.6;
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .mono {
+    font-family: "SF Mono", "Cascadia Code", "JetBrains Mono", ui-monospace, Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+  a { color: var(--echo); }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; border-radius: 4px; }
+
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 0 24px; }
+
+  .eyebrow {
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .eyebrow .tick { color: var(--brand); }
+
+  h1, h2, h3 { text-wrap: balance; line-height: 1.12; }
+  h2 { font-size: clamp(26px, 4vw, 38px); font-weight: 800; letter-spacing: -0.02em; }
+  .section-lede { color: var(--muted); max-width: 58ch; margin-top: 12px; }
+
+  section { padding: 72px 0; border-top: 1px solid var(--hairline); }
+  section > .wrap > .eyebrow { margin-bottom: 14px; }
+
+  /* ── Hero ───────────────────────────────────────────────── */
+  header.hero {
+    position: relative;
+    overflow: hidden;
+    padding: 110px 0 90px;
+  }
+  .hero-rings {
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 0; height: 0;
+    pointer-events: none;
+  }
+  .ring {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    border: 1px solid var(--brand);
+    border-radius: 50%;
+    opacity: 0;
+    animation: ringout 5.5s ease-out infinite;
+  }
+  .ring:nth-child(1) { width: 240px; height: 240px; animation-delay: 0s; }
+  .ring:nth-child(2) { width: 240px; height: 240px; animation-delay: 1.35s; }
+  .ring:nth-child(3) { width: 240px; height: 240px; animation-delay: 2.7s; }
+  .ring:nth-child(4) { width: 240px; height: 240px; animation-delay: 4.05s; }
+  @keyframes ringout {
+    0%   { transform: translate(-50%, -50%) scale(0.25); opacity: 0.55; }
+    100% { transform: translate(-50%, -50%) scale(3.4);  opacity: 0; }
+  }
+  .hero-inner { position: relative; text-align: center; }
+  .hero-dot {
+    display: inline-block;
+    width: 10px; height: 10px;
+    background: var(--brand);
+    border-radius: 50%;
+    margin-bottom: 26px;
+    box-shadow: 0 0 0 0 var(--chip-brand-bg);
+    animation: heartbeat 2.2s ease-out infinite;
+  }
+  @keyframes heartbeat {
+    0%   { box-shadow: 0 0 0 0 rgba(48,209,88,0.45); }
+    70%  { box-shadow: 0 0 0 18px rgba(48,209,88,0); }
+    100% { box-shadow: 0 0 0 0 rgba(48,209,88,0); }
+  }
+  h1.display {
+    font-size: clamp(44px, 8vw, 88px);
+    font-weight: 800;
+    letter-spacing: -0.035em;
+    line-height: 1.02;
+  }
+  h1.display .accent { color: var(--brand); }
+  .hero-lede {
+    margin: 26px auto 0;
+    max-width: 56ch;
+    color: var(--muted);
+    font-size: 18px;
+  }
+  .hero-meta {
+    margin-top: 40px;
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .meta-chip {
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    padding: 7px 14px;
+    border: 1px solid var(--hairline);
+    border-radius: 999px;
+    color: var(--muted);
+    background: var(--surface);
+  }
+
+  /* ── Thesis ─────────────────────────────────────────────── */
+  .thesis-grid {
+    margin-top: 40px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 20px;
+  }
+  .thesis-card {
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: 18px;
+    padding: 28px 26px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .thesis-card .glyph {
+    width: 44px; height: 44px;
+    border-radius: 12px;
+    display: grid;
+    place-items: center;
+    font-size: 20px;
+    background: var(--chip-pulse-bg);
+  }
+  .thesis-card:nth-child(2) .glyph { background: var(--chip-echo-bg); }
+  .thesis-card h3 { font-size: 19px; font-weight: 700; letter-spacing: -0.01em; }
+  .thesis-card p { color: var(--muted); font-size: 15px; }
+  .thesis-card .step-tag {
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    color: var(--brand);
+    text-transform: uppercase;
+  }
+
+  /* ── Palette ────────────────────────────────────────────── */
+  .swatch-grid {
+    margin-top: 40px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 16px;
+  }
+  .swatch {
+    border: 1px solid var(--hairline);
+    border-radius: 16px;
+    overflow: hidden;
+    background: var(--surface);
+  }
+  .swatch .chip { height: 96px; }
+  .swatch .info { padding: 14px 16px; display: flex; flex-direction: column; gap: 3px; }
+  .swatch .name { font-weight: 700; font-size: 14px; }
+  .swatch .hexes {
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-size: 11.5px;
+    color: var(--muted);
+    letter-spacing: 0.02em;
+  }
+  .swatch .role { font-size: 12px; color: var(--muted); }
+
+  .semantics-note {
+    margin-top: 28px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+  }
+  .sem-card {
+    border-radius: 16px;
+    padding: 22px 24px;
+    border: 1px solid var(--hairline);
+    background: var(--surface);
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+  }
+  .sem-card .amt { font-size: 26px; font-weight: 800; letter-spacing: -0.01em; white-space: nowrap; }
+  .sem-card.out .amt { color: var(--pulse); }
+  .sem-card.in  .amt { color: var(--echo); }
+  .sem-card p { font-size: 14px; color: var(--muted); }
+  .sem-card strong { color: var(--text); }
+
+  /* ── Type ───────────────────────────────────────────────── */
+  .type-stage {
+    margin-top: 40px;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: 20px;
+    padding: 44px clamp(24px, 5vw, 56px);
+    display: flex;
+    flex-direction: column;
+    gap: 36px;
+  }
+  .specimen { display: flex; flex-direction: column; gap: 8px; }
+  .specimen .label {
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .spec-display {
+    font-size: clamp(40px, 6vw, 64px);
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1.05;
+    font-variant-numeric: tabular-nums;
+  }
+  .spec-display .rupee { color: var(--muted); font-weight: 600; }
+  .spec-body { max-width: 62ch; font-size: 16px; }
+  .spec-data {
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 14px;
+    color: var(--muted);
+    letter-spacing: 0.02em;
+  }
+  .type-note { font-size: 13.5px; color: var(--muted); border-top: 1px solid var(--hairline); padding-top: 20px; }
+  .type-note strong { color: var(--text); }
+
+  /* ── Signature elements ────────────────────────────────── */
+  .element-grid {
+    margin-top: 40px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 20px;
+  }
+  .element {
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: 18px;
+    padding: 26px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .element h3 { font-size: 16px; font-weight: 700; }
+  .element p { font-size: 14px; color: var(--muted); }
+  .element .demo {
+    background: var(--surface-2);
+    border-radius: 12px;
+    min-height: 84px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 18px;
+    gap: 14px;
+  }
+
+  .pulse-dot-demo { display: flex; align-items: center; gap: 12px; }
+  .pdot {
+    width: 9px; height: 9px; border-radius: 50%;
+    background: var(--brand);
+    animation: heartbeat 2.2s ease-out infinite;
+  }
+  .pulse-dot-demo .txt { font-size: 13.5px; font-weight: 600; }
+
+  .wavebar { display: flex; align-items: flex-end; gap: 3px; height: 44px; }
+  .wavebar i {
+    width: 6px;
+    border-radius: 3px;
+    background: var(--echo);
+    opacity: 0.85;
+  }
+  .wavebar i.spent { background: var(--pulse); }
+  .wavebar i.faint { opacity: 0.22; }
+
+  .conf-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: var(--chip-echo-bg);
+    color: var(--echo);
+  }
+  .conf-chip.med { background: var(--chip-pulse-bg); color: var(--pulse); }
+  .conf-chip .cdot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+  .ripple-btn {
+    position: relative;
+    border: none;
+    cursor: pointer;
+    font: inherit;
+    font-weight: 700;
+    font-size: 14px;
+    color: #0A1416;
+    background: var(--brand-bright);
+    padding: 12px 26px;
+    border-radius: 999px;
+  }
+  .ripple-btn::after {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    border: 1.5px solid var(--brand);
+    animation: ringout-sm 2.4s ease-out infinite;
+    pointer-events: none;
+  }
+  @keyframes ringout-sm {
+    0%   { transform: scale(1); opacity: 0.7; }
+    100% { transform: scale(1.55); opacity: 0; }
+  }
+
+  /* ── Phone mockups ─────────────────────────────────────── */
+  .screens-grid {
+    margin-top: 48px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 36px;
+    justify-items: center;
+  }
+  .screen-item { display: flex; flex-direction: column; gap: 18px; align-items: center; max-width: 320px; }
+  .screen-item figcaption { text-align: center; }
+  .screen-item .cap-title { font-weight: 700; font-size: 15px; }
+  .screen-item .cap-sub { font-size: 13px; color: var(--muted); margin-top: 4px; max-width: 34ch; }
+
+  .phone {
+    width: 280px;
+    border-radius: 40px;
+    background: var(--app-bg);
+    border: 1px solid var(--hairline);
+    box-shadow: var(--shadow);
+    padding: 14px 14px 10px;
+    color: var(--app-text);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    height: 580px;
+  }
+  .statusbar {
+    display: flex;
+    justify-content: space-between;
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-size: 10px;
+    color: var(--app-muted);
+    padding: 4px 10px 12px;
+  }
+  .app-body { flex: 1; display: flex; flex-direction: column; gap: 14px; padding: 0 6px; min-height: 0; }
+
+  .app-label {
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-size: 9px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--app-muted);
+  }
+  .app-hero-amt {
+    font-size: 40px;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1.05;
+    font-variant-numeric: tabular-nums;
+  }
+  .app-hero-amt .rp { color: var(--app-muted); font-weight: 600; font-size: 28px; }
+  .cycle-row { display: flex; align-items: center; gap: 8px; }
+  .cycle-track {
+    flex: 1;
+    height: 5px;
+    border-radius: 3px;
+    background: var(--app-surface-2);
+    overflow: hidden;
+  }
+  .cycle-fill { height: 100%; width: 62%; border-radius: 3px; background: linear-gradient(90deg, var(--app-brand), var(--app-echo)); }
+  .cycle-days { font-family: "SF Mono", ui-monospace, Menlo, monospace; font-size: 9.5px; color: var(--app-muted); }
+
+  .inbox-chip {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--app-surface);
+    border: 1px solid var(--app-hairline);
+    border-radius: 14px;
+    padding: 12px 14px;
+    font-size: 12.5px;
+    font-weight: 600;
+  }
+  .inbox-chip .pdot { flex: none; }
+  .inbox-chip .arrow { margin-left: auto; color: var(--app-muted); }
+
+  .txn-list { display: flex; flex-direction: column; }
+  .txn {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 11px 2px;
+    border-bottom: 1px solid var(--app-hairline);
+  }
+  .txn:last-child { border-bottom: none; }
+  .txn .emoji {
+    width: 34px; height: 34px;
+    border-radius: 11px;
+    background: var(--app-surface-2);
+    display: grid;
+    place-items: center;
+    font-size: 15px;
+    flex: none;
+  }
+  .txn .who { flex: 1; min-width: 0; }
+  .txn .who .m { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .txn .who .c { font-size: 10.5px; color: var(--app-muted); }
+  .txn .amt {
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 13px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .txn .amt.out { color: var(--app-pulse); }
+  .txn .amt.in  { color: var(--app-echo); }
+
+  .tabbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    padding: 10px 8px 6px;
+    border-top: 1px solid var(--app-hairline);
+    margin-top: auto;
+  }
+  .tab {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-size: 8px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--app-muted);
+  }
+  .tab.active { color: var(--app-brand); }
+  .tab .ico { font-size: 15px; line-height: 1; }
+  .tab-scan {
+    width: 46px; height: 46px;
+    border-radius: 50%;
+    background: var(--app-brand);
+    color: #0A1416;
+    display: grid;
+    place-items: center;
+    font-size: 19px;
+    margin-top: -22px;
+    box-shadow: 0 6px 20px rgba(48, 209, 88, 0.35);
+    position: relative;
+  }
+  .tab-scan::after {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    border-radius: 50%;
+    border: 1.5px solid var(--app-brand);
+    animation: ringout-sm 2.6s ease-out infinite;
+  }
+
+  /* Smart Inbox card */
+  .review-card {
+    background: var(--app-surface);
+    border: 1px solid var(--app-hairline);
+    border-radius: 20px;
+    padding: 20px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 13px;
+    box-shadow: 0 10px 28px rgba(0,0,0,0.35);
+    position: relative;
+    z-index: 2;
+  }
+  .card-stack {
+    position: relative;
+    margin: 4px 0 18px;
+  }
+  .stack-peek {
+    position: absolute;
+    left: 12px; right: 12px;
+    bottom: -9px;
+    height: 30px;
+    border-radius: 16px;
+    background: var(--app-surface-2);
+    opacity: 0.65;
+    z-index: 1;
+  }
+  .stack-peek.two {
+    left: 24px; right: 24px;
+    bottom: -17px;
+    opacity: 0.35;
+    z-index: 0;
+  }
+  .review-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .review-amt {
+    font-size: 32px;
+    font-weight: 800;
+    letter-spacing: -0.025em;
+    font-variant-numeric: tabular-nums;
+    color: var(--app-pulse);
+  }
+  .review-merchant { font-size: 15px; font-weight: 700; }
+  .review-meta { display: flex; flex-wrap: wrap; gap: 7px; }
+  .rchip {
+    font-size: 10.5px;
+    font-weight: 600;
+    padding: 5px 11px;
+    border-radius: 999px;
+    background: var(--app-surface-2);
+    color: var(--app-text);
+  }
+  .rchip.ai {
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-size: 9px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    background: rgba(86, 212, 192, 0.12);
+    color: var(--app-echo);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .rchip.ai .cdot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+  .raw-sms {
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-size: 9.5px;
+    line-height: 1.55;
+    color: var(--app-muted);
+    background: var(--app-bg);
+    border-radius: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--app-hairline);
+  }
+  .swipe-hints {
+    display: flex;
+    justify-content: space-between;
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-size: 9px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+  .swipe-hints .dismiss { color: var(--app-alert); }
+  .swipe-hints .confirm { color: var(--app-echo); }
+
+  /* Radar / scan screen */
+  .radar-wrap { display: flex; justify-content: center; padding: 18px 0 6px; }
+  .radar {
+    position: relative;
+    width: 172px; height: 172px;
+    border-radius: 50%;
+    border: 1px solid var(--app-hairline);
+  }
+  .radar::before, .radar::after {
+    content: "";
+    position: absolute;
+    border-radius: 50%;
+    border: 1px solid var(--app-hairline);
+  }
+  .radar::before { inset: 28px; }
+  .radar::after { inset: 58px; }
+  .radar .sweep {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: conic-gradient(from 0deg, rgba(48, 209, 88, 0) 0deg, rgba(48, 209, 88, 0.30) 46deg, rgba(48, 209, 88, 0) 72deg);
+    animation: sweep 3.2s linear infinite;
+  }
+  @keyframes sweep { to { transform: rotate(360deg); } }
+  .radar .blip {
+    position: absolute;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--app-echo);
+    animation: blipfade 3.2s ease-out infinite;
+  }
+  .radar .blip.b1 { top: 34%; left: 62%; animation-delay: 0.4s; }
+  .radar .blip.b2 { top: 60%; left: 30%; animation-delay: 1.6s; background: var(--app-pulse); }
+  .radar .blip.b3 { top: 22%; left: 38%; animation-delay: 2.4s; }
+  @keyframes blipfade {
+    0%, 10% { opacity: 0; transform: scale(0.4); }
+    18%     { opacity: 1; transform: scale(1); }
+    70%     { opacity: 0.35; }
+    100%    { opacity: 0; transform: scale(0.9); }
+  }
+  .radar .core {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 11px; height: 11px;
+    border-radius: 50%;
+    background: var(--app-brand);
+  }
+  .scan-status { text-align: center; display: flex; flex-direction: column; gap: 5px; }
+  .scan-status .big { font-size: 15px; font-weight: 700; }
+  .scan-status .sub {
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-size: 10px;
+    color: var(--app-muted);
+    letter-spacing: 0.06em;
+  }
+  .scan-log {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    background: var(--app-surface);
+    border: 1px solid var(--app-hairline);
+    border-radius: 14px;
+    padding: 13px 14px;
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-size: 9.5px;
+    color: var(--app-muted);
+  }
+  .scan-log .found { color: var(--app-echo); }
+  .scan-log .parsing { color: var(--app-pulse); }
+
+  /* ── Motion principles ─────────────────────────────────── */
+  .motion-list {
+    margin-top: 36px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 2px;
+    border: 1px solid var(--hairline);
+    border-radius: 18px;
+    overflow: hidden;
+  }
+  .motion-item {
+    background: var(--surface);
+    padding: 26px 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .motion-item h3 { font-size: 15.5px; font-weight: 700; }
+  .motion-item p { font-size: 14px; color: var(--muted); }
+  .motion-item .m-tag {
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-size: 9.5px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--echo);
+  }
+
+  /* ── Rollout ────────────────────────────────────────────── */
+  .phase-list { margin-top: 40px; display: flex; flex-direction: column; gap: 14px; }
+  .phase {
+    display: grid;
+    grid-template-columns: 92px 1fr;
+    gap: 22px;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: 16px;
+    padding: 24px 26px;
+    align-items: start;
+  }
+  .phase .pnum {
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    color: var(--brand);
+    text-transform: uppercase;
+    padding-top: 3px;
+  }
+  .phase h3 { font-size: 17px; font-weight: 700; margin-bottom: 6px; }
+  .phase p { font-size: 14.5px; color: var(--muted); }
+  .phase .files {
+    margin-top: 10px;
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.02em;
+  }
+  @media (max-width: 560px) {
+    .phase { grid-template-columns: 1fr; gap: 8px; }
+  }
+
+  footer {
+    border-top: 1px solid var(--hairline);
+    padding: 44px 0 60px;
+    color: var(--muted);
+    font-size: 13.5px;
+  }
+  footer .wrap { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ring, .hero-dot, .pdot, .ripple-btn::after, .tab-scan::after,
+    .radar .sweep, .radar .blip { animation: none; }
+    .ring { opacity: 0.15; transform: translate(-50%, -50%) scale(1.4); }
+    html { scroll-behavior: auto; }
+  }
+</style>
+
+<header class="hero">
+  <div class="hero-rings" aria-hidden="true">
+    <span class="ring"></span><span class="ring"></span><span class="ring"></span><span class="ring"></span>
+  </div>
+  <div class="wrap hero-inner">
+    <span class="hero-dot" aria-hidden="true"></span>
+    <p class="eyebrow"><span class="tick">●</span>&nbsp; Echo Spend · Design Direction 01</p>
+    <h1 class="display" style="margin-top:18px;">Money as <span class="accent">signal.</span></h1>
+    <p class="hero-lede">
+      Every rupee you move announces itself — a bank SMS lands, the on-device AI listens,
+      you confirm with a swipe. No other finance app owns this loop, so the design
+      language comes from it: pulses, echoes, sweeps. Not borrowed from any neobank.
+    </p>
+    <div class="hero-meta">
+      <span class="meta-chip">Petrol ink ground</span>
+      <span class="meta-chip">Signal green · brand</span>
+      <span class="meta-chip">Pulse amber · out</span>
+      <span class="meta-chip">Echo aqua · in</span>
+      <span class="meta-chip">Tabular ₹ numerals</span>
+      <span class="meta-chip">Zero logic changes</span>
+    </div>
+  </div>
+</header>
+
+<section id="thesis">
+  <div class="wrap">
+    <p class="eyebrow">The idea</p>
+    <h2>The app already has a metaphor.<br>It's in the name.</h2>
+    <p class="section-lede">
+      Echo Spend's entire loop is acoustic: a transaction emits a signal, the app hears it,
+      an echo comes back for you to confirm. The visual system makes that loop visible —
+      so the product's real differentiator (on-device AI that listens privately) becomes
+      the thing you <em>see</em>, not a settings toggle you read about.
+    </p>
+    <div class="thesis-grid">
+      <div class="thesis-card">
+        <span class="glyph" aria-hidden="true">〰️</span>
+        <span class="step-tag">Signal in</span>
+        <h3>Spending emits a pulse</h3>
+        <p>Debits render in <strong style="color:var(--pulse)">pulse amber</strong> — warm, outgoing energy. Unreviewed transactions carry a live heartbeat dot. The SMS itself appears as a raw signal trace in monospace.</p>
+      </div>
+      <div class="thesis-card">
+        <span class="glyph" aria-hidden="true">📡</span>
+        <span class="step-tag">AI listens</span>
+        <h3>Scanning is a sonar sweep</h3>
+        <p>SmartScan stops being a progress bar and becomes a radar: a sweep arm rotates over your inbox, blips light up as transactions are found. The private, on-device model finally gets a face.</p>
+      </div>
+      <div class="thesis-card">
+        <span class="glyph" aria-hidden="true">💠</span>
+        <span class="step-tag">Echo back</span>
+        <h3>Money in returns as an echo</h3>
+        <p>Credits answer in <strong style="color:var(--echo)">echo aqua</strong> — cool, returning. Confirming a transaction triggers a single ripple from your thumb. Goal milestones resonate: rings expand outward.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="palette">
+  <div class="wrap">
+    <p class="eyebrow">Color system</p>
+    <h2>Signal green, amber pulse, aqua echo.</h2>
+    <p class="section-lede">
+      One deliberately biased neutral (a teal-black, not #000), a signal-green brand accent
+      carried over from the original logo, two semantic signal hues, and one alert red
+      reserved for genuinely bad news. This kills the current iOS-clone palette and the
+      ThemeProvider/Tailwind mismatch in one move — every value below is a token with a dark
+      and a light resolution.
+    </p>
+    <div class="swatch-grid">
+      <div class="swatch">
+        <div class="chip" style="background:#0A1416;"></div>
+        <div class="info">
+          <span class="name">Ink</span>
+          <span class="hexes mono">#0A1416 · #F0F5F4</span>
+          <span class="role">Ground — teal-biased, never pure black/white</span>
+        </div>
+      </div>
+      <div class="swatch">
+        <div class="chip" style="background:#101D21;"></div>
+        <div class="info">
+          <span class="name">Tide</span>
+          <span class="hexes mono">#101D21 · #FFFFFF</span>
+          <span class="role">Cards &amp; sheets</span>
+        </div>
+      </div>
+      <div class="swatch">
+        <div class="chip" style="background:#30D158;"></div>
+        <div class="info">
+          <span class="name">Signal</span>
+          <span class="hexes mono">#30D158 · #148F45</span>
+          <span class="role">Brand · primary action · scan · active state</span>
+        </div>
+      </div>
+      <div class="swatch">
+        <div class="chip" style="background:#FFB454;"></div>
+        <div class="info">
+          <span class="name">Pulse</span>
+          <span class="hexes mono">#FFB454 · #B4761A</span>
+          <span class="role">Money out · debits · spend waveform</span>
+        </div>
+      </div>
+      <div class="swatch">
+        <div class="chip" style="background:#56D4C0;"></div>
+        <div class="info">
+          <span class="name">Echo</span>
+          <span class="hexes mono">#56D4C0 · #0C8271</span>
+          <span class="role">Money in · AI confidence · success</span>
+        </div>
+      </div>
+      <div class="swatch">
+        <div class="chip" style="background:#FF6B5E;"></div>
+        <div class="info">
+          <span class="name">Alert</span>
+          <span class="hexes mono">#FF6B5E · #C2453B</span>
+          <span class="role">Overbudget · destructive only</span>
+        </div>
+      </div>
+      <div class="swatch">
+        <div class="chip" style="background:#7E9895;"></div>
+        <div class="info">
+          <span class="name">Fog</span>
+          <span class="hexes mono">#7E9895 · #60716F</span>
+          <span class="role">Secondary text — grey with the ink's teal bias</span>
+        </div>
+      </div>
+    </div>
+    <div class="semantics-note">
+      <div class="sem-card out">
+        <span class="amt mono">−₹340</span>
+        <p><strong>Amber for debits, not red.</strong> Spending is normal, not a failure state — red screams at users dozens of times a day in every other tracker. Amber reads as "energy spent"; red stays meaningful for actual problems.</p>
+      </div>
+      <div class="sem-card in">
+        <span class="amt mono">+₹85,000</span>
+        <p><strong>Aqua for credits, and for the AI.</strong> The echo hue doubles as the intelligence color — confidence chips, parsed-by-AI badges, radar blips — tying "money coming back" and "the app understood" into one feeling: resonance.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="type">
+  <div class="wrap">
+    <p class="eyebrow">Typography</p>
+    <h2>Numerals are the interface.</h2>
+    <p class="section-lede">
+      A finance app's real typography is its numbers. The system: a tight grotesk display for
+      hero amounts, a humanist text face for everything readable, and a monospace for raw
+      signals — SMS traces, hashes, timestamps — so "machine data" is visually distinct from
+      "your money".
+    </p>
+    <div class="type-stage">
+      <div class="specimen">
+        <span class="label">Display · hero amounts · Clash Display or Cabinet Grotesk (via expo-font)</span>
+        <div class="spec-display mono"><span class="rupee">₹</span>1,24,518<span style="color:var(--muted); font-size:0.5em;">.40</span></div>
+        <span class="label" style="letter-spacing:0.1em;">Lakh-aware grouping · tabular · paise de-emphasized</span>
+      </div>
+      <div class="specimen">
+        <span class="label">Text · UI &amp; body · Switzer or General Sans</span>
+        <p class="spec-body">Your Swiggy order was matched to <strong>Food &amp; Dining → Takeout</strong> from HDFC ••4521. Everything was read on this device — nothing left your phone.</p>
+      </div>
+      <div class="specimen">
+        <span class="label">Signal · raw SMS &amp; metadata · JetBrains Mono</span>
+        <p class="spec-data">INR 340.00 debited from A/c XX4521 on 11-Jul-26 to VPA swiggy@icici · UPI Ref 519...</p>
+      </div>
+      <p class="type-note">
+        <strong>Note:</strong> this pitch page simulates the faces with system fonts. In the app, all three load
+        once through <span class="mono">expo-font</span> (already a dependency) — Fontshare/Google faces, free for commercial use,
+        bundled offline so typography never depends on the network. This alone removes the "SF Pro on Android
+        silently becomes Roboto" problem.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section id="elements">
+  <div class="wrap">
+    <p class="eyebrow">Signature elements</p>
+    <h2>Five details that make it ours.</h2>
+    <div class="element-grid">
+      <div class="element">
+        <div class="demo">
+          <div class="pulse-dot-demo">
+            <span class="pdot" aria-hidden="true"></span>
+            <span class="txt">3 signals awaiting review</span>
+          </div>
+        </div>
+        <h3>The live pulse dot</h3>
+        <p>Anything unconfirmed carries a heartbeat. It replaces badge counts as the app's "something needs you" primitive — calmer than a red bubble, impossible to miss.</p>
+      </div>
+      <div class="element">
+        <div class="demo" aria-label="Waveform showing daily spending as bars">
+          <div class="wavebar" aria-hidden="true">
+            <i style="height:30%"></i><i class="spent" style="height:55%"></i><i style="height:40%"></i><i class="spent" style="height:90%"></i><i class="spent" style="height:65%"></i><i style="height:35%"></i><i class="spent" style="height:75%"></i><i style="height:25%"></i><i class="spent" style="height:50%"></i><i class="faint" style="height:45%"></i><i class="faint" style="height:60%"></i><i class="faint" style="height:38%"></i>
+          </div>
+        </div>
+        <h3>Waveform, not bar chart</h3>
+        <p>The 7-day spend trend renders as an audio waveform — days you spent are amber peaks, income days are aqua, future days sit faint. Your month literally has a sound shape.</p>
+      </div>
+      <div class="element">
+        <div class="demo" style="gap:10px; flex-wrap:wrap;">
+          <span class="conf-chip"><span class="cdot" aria-hidden="true"></span>AI · High</span>
+          <span class="conf-chip med"><span class="cdot" aria-hidden="true"></span>AI · Check this</span>
+        </div>
+        <h3>Honest confidence chips</h3>
+        <p>The parser's confidence (already in the data model) becomes visible. High-confidence rows breeze by; uncertain ones ask for a glance. Trust is built by admitting doubt.</p>
+      </div>
+      <div class="element">
+        <div class="demo">
+          <button class="ripple-btn" type="button">Confirm ₹340</button>
+        </div>
+        <h3>Ripple on confirm</h3>
+        <p>Confirming a transaction emits one ring from the touch point — the echo answered. Paired with the existing haptics engine (already installed, barely used) for a physical "thock".</p>
+      </div>
+      <div class="element">
+        <div class="demo">
+          <span class="mono" style="font-size:20px; font-weight:700; font-variant-numeric: tabular-nums;">₹42,318 <span style="color:var(--muted); font-size:12px; font-weight:500;">safe till Aug 1</span></span>
+        </div>
+        <h3>Safe-to-spend, front and center</h3>
+        <p>The dashboard's first fact stops being a balance and becomes the answer to the only daily question: <em>what can I still spend this cycle?</em> Salary-day cycles already exist in the logic — the UI finally leads with them.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="screens">
+  <div class="wrap">
+    <p class="eyebrow">Key screens</p>
+    <h2>The system on glass.</h2>
+    <p class="section-lede">
+      Same navigation, same data, same business logic — every screen keeps its current
+      structure and store/DB wiring. Only the skin, hierarchy and motion change.
+    </p>
+    <div class="screens-grid">
+
+      <figure class="screen-item">
+        <div class="phone">
+          <div class="statusbar"><span>9:41</span><span>▲▲ ●</span></div>
+          <div class="app-body">
+            <div>
+              <p class="app-label">Safe to spend · till Aug 1</p>
+              <p class="app-hero-amt mono" style="margin-top:6px;"><span class="rp">₹</span>42,318</p>
+              <div class="cycle-row" style="margin-top:10px;">
+                <div class="cycle-track"><div class="cycle-fill"></div></div>
+                <span class="cycle-days">18d left</span>
+              </div>
+            </div>
+            <div class="inbox-chip">
+              <span class="pdot" aria-hidden="true"></span>
+              <span>3 signals awaiting review</span>
+              <span class="arrow">→</span>
+            </div>
+            <div>
+              <p class="app-label" style="margin-bottom:4px;">Today</p>
+              <div class="txn-list">
+                <div class="txn">
+                  <span class="emoji" aria-hidden="true">🍽️</span>
+                  <div class="who"><p class="m">Swiggy</p><p class="c">Food &amp; Dining · HDFC ••4521</p></div>
+                  <span class="amt out">−₹340</span>
+                </div>
+                <div class="txn">
+                  <span class="emoji" aria-hidden="true">💰</span>
+                  <div class="who"><p class="m">Salary · TCS</p><p class="c">Income · HDFC ••4521</p></div>
+                  <span class="amt in">+₹85,000</span>
+                </div>
+                <div class="txn">
+                  <span class="emoji" aria-hidden="true">🚌</span>
+                  <div class="who"><p class="m">Chennai Metro</p><p class="c">Transport · Paytm Wallet</p></div>
+                  <span class="amt out">−₹60</span>
+                </div>
+              </div>
+            </div>
+            <div class="tabbar">
+              <span class="tab active"><span class="ico" aria-hidden="true">◉</span>Home</span>
+              <span class="tab"><span class="ico" aria-hidden="true">≋</span>Txns</span>
+              <span class="tab-scan" aria-label="Scan">📡</span>
+              <span class="tab"><span class="ico" aria-hidden="true">◈</span>Money</span>
+              <span class="tab"><span class="ico" aria-hidden="true">⚙</span>More</span>
+            </div>
+          </div>
+        </div>
+        <figcaption>
+          <p class="cap-title">Dashboard — dark</p>
+          <p class="cap-sub">Safe-to-spend leads. The inbox pulse is the one thing that moves. Amber out, aqua in.</p>
+        </figcaption>
+      </figure>
+
+      <figure class="screen-item">
+        <div class="phone">
+          <div class="statusbar"><span>9:41</span><span>▲▲ ●</span></div>
+          <div class="app-body">
+            <div>
+              <p class="app-label">Smart Inbox</p>
+              <p style="font-size:17px; font-weight:800; margin-top:4px;">3 signals to review</p>
+            </div>
+            <div class="card-stack">
+              <div class="review-card">
+                <div class="review-top">
+                  <span class="review-merchant">Swiggy</span>
+                  <span class="rchip ai"><span class="cdot" aria-hidden="true"></span>AI · High</span>
+                </div>
+                <p class="review-amt mono">−₹340</p>
+                <div class="review-meta">
+                  <span class="rchip">🍽️ Food &amp; Dining</span>
+                  <span class="rchip">HDFC ••4521</span>
+                  <span class="rchip">Today 8:12 PM</span>
+                </div>
+                <p class="raw-sms">INR 340.00 debited from A/c XX4521 to VPA swiggy@icici · UPI Ref 519402</p>
+                <div class="swipe-hints">
+                  <span class="dismiss">← Not a txn</span>
+                  <span class="confirm">Confirm →</span>
+                </div>
+              </div>
+              <div class="stack-peek" aria-hidden="true"></div>
+              <div class="stack-peek two" aria-hidden="true"></div>
+            </div>
+            <p style="text-align:center; font-size:11px; color:var(--app-muted);">Tap any chip to edit before confirming</p>
+            <div class="tabbar">
+              <span class="tab"><span class="ico" aria-hidden="true">◉</span>Home</span>
+              <span class="tab"><span class="ico" aria-hidden="true">≋</span>Txns</span>
+              <span class="tab-scan" aria-label="Scan">📡</span>
+              <span class="tab"><span class="ico" aria-hidden="true">◈</span>Money</span>
+              <span class="tab"><span class="ico" aria-hidden="true">⚙</span>More</span>
+            </div>
+          </div>
+        </div>
+        <figcaption>
+          <p class="cap-title">Smart Inbox — swipe triage</p>
+          <p class="cap-sub">One card at a time, Tinder-fast. Raw SMS shown as a signal trace; AI confidence stated honestly.</p>
+        </figcaption>
+      </figure>
+
+      <figure class="screen-item">
+        <div class="phone">
+          <div class="statusbar"><span>9:41</span><span>▲▲ ●</span></div>
+          <div class="app-body">
+            <div>
+              <p class="app-label">Smart Scan</p>
+              <p style="font-size:17px; font-weight:800; margin-top:4px;">Listening…</p>
+            </div>
+            <div class="radar-wrap">
+              <div class="radar" role="img" aria-label="Radar sweep animation scanning messages">
+                <span class="sweep" aria-hidden="true"></span>
+                <span class="blip b1" aria-hidden="true"></span>
+                <span class="blip b2" aria-hidden="true"></span>
+                <span class="blip b3" aria-hidden="true"></span>
+                <span class="core" aria-hidden="true"></span>
+              </div>
+            </div>
+            <div class="scan-status">
+              <p class="big">214 messages · 38 parsed</p>
+              <p class="sub">ALL PROCESSING ON-DEVICE · NOTHING UPLOADED</p>
+            </div>
+            <div class="scan-log" aria-label="Scan activity log">
+              <span class="found">＋ Swiggy −₹340 · food &amp; dining</span>
+              <span class="found">＋ Salary +₹85,000 · income</span>
+              <span class="parsing">◌ parsing HDFC ••4521 …</span>
+              <span>· 172 skipped (OTP / promo)</span>
+            </div>
+            <div class="tabbar">
+              <span class="tab"><span class="ico" aria-hidden="true">◉</span>Home</span>
+              <span class="tab"><span class="ico" aria-hidden="true">≋</span>Txns</span>
+              <span class="tab-scan" aria-label="Scan">📡</span>
+              <span class="tab"><span class="ico" aria-hidden="true">◈</span>Money</span>
+              <span class="tab"><span class="ico" aria-hidden="true">⚙</span>More</span>
+            </div>
+          </div>
+        </div>
+        <figcaption>
+          <p class="cap-title">Smart Scan — the AI's face</p>
+          <p class="cap-sub">The sonar sweep turns a wait into the product's proudest moment: private intelligence, visualized.</p>
+        </figcaption>
+      </figure>
+
+      <figure class="screen-item">
+        <div class="phone phone--light">
+          <div class="statusbar"><span>9:41</span><span>▲▲ ●</span></div>
+          <div class="app-body">
+            <div>
+              <p class="app-label">Safe to spend · till Aug 1</p>
+              <p class="app-hero-amt mono" style="margin-top:6px;"><span class="rp">₹</span>42,318</p>
+              <div class="cycle-row" style="margin-top:10px;">
+                <div class="cycle-track"><div class="cycle-fill"></div></div>
+                <span class="cycle-days">18d left</span>
+              </div>
+            </div>
+            <div class="inbox-chip">
+              <span class="pdot" aria-hidden="true"></span>
+              <span>3 signals awaiting review</span>
+              <span class="arrow">→</span>
+            </div>
+            <div>
+              <p class="app-label" style="margin-bottom:4px;">Today</p>
+              <div class="txn-list">
+                <div class="txn">
+                  <span class="emoji" aria-hidden="true">🍽️</span>
+                  <div class="who"><p class="m">Swiggy</p><p class="c">Food &amp; Dining · HDFC ••4521</p></div>
+                  <span class="amt out">−₹340</span>
+                </div>
+                <div class="txn">
+                  <span class="emoji" aria-hidden="true">💰</span>
+                  <div class="who"><p class="m">Salary · TCS</p><p class="c">Income · HDFC ••4521</p></div>
+                  <span class="amt in">+₹85,000</span>
+                </div>
+                <div class="txn">
+                  <span class="emoji" aria-hidden="true">🚌</span>
+                  <div class="who"><p class="m">Chennai Metro</p><p class="c">Transport · Paytm Wallet</p></div>
+                  <span class="amt out">−₹60</span>
+                </div>
+              </div>
+            </div>
+            <div class="tabbar">
+              <span class="tab active"><span class="ico" aria-hidden="true">◉</span>Home</span>
+              <span class="tab"><span class="ico" aria-hidden="true">≋</span>Txns</span>
+              <span class="tab-scan" aria-label="Scan">📡</span>
+              <span class="tab"><span class="ico" aria-hidden="true">◈</span>Money</span>
+              <span class="tab"><span class="ico" aria-hidden="true">⚙</span>More</span>
+            </div>
+          </div>
+        </div>
+        <figcaption>
+          <p class="cap-title">Dashboard — light</p>
+          <p class="cap-sub">Same tokens, resolved for daylight: warm sea-glass ground, deepened amber and aqua for contrast.</p>
+        </figcaption>
+      </figure>
+
+    </div>
+  </div>
+</section>
+
+<section id="motion">
+  <div class="wrap">
+    <p class="eyebrow">Motion &amp; feel</p>
+    <h2>Everything moves like sound.</h2>
+    <p class="section-lede">
+      Moti and Reanimated are already in the project — the redesign choreographs them instead of
+      adding libraries. Four rules keep it coherent:
+    </p>
+    <div class="motion-list">
+      <div class="motion-item">
+        <span class="m-tag">Rule 01 · Emit</span>
+        <h3>Actions ripple outward</h3>
+        <p>Confirm, pay, contribute — anything that moves money emits one ring from the touch point, synced with a medium haptic. Never more than one ring per action.</p>
+      </div>
+      <div class="motion-item">
+        <span class="m-tag">Rule 02 · Arrive</span>
+        <h3>New data fades up, staggered</h3>
+        <p>List items arrive like echoes returning: 40ms stagger, small y-offset, no bounce. Springy overshoot is reserved exclusively for celebrations.</p>
+      </div>
+      <div class="motion-item">
+        <span class="m-tag">Rule 03 · Breathe</span>
+        <h3>Only live things pulse</h3>
+        <p>The heartbeat animation is earned: unconfirmed transactions, an active scan, a due bill. If nothing needs the user, the interface is perfectly still.</p>
+      </div>
+      <div class="motion-item">
+        <span class="m-tag">Rule 04 · Resonate</span>
+        <h3>Milestones ring</h3>
+        <p>Goal reached, budget cycle survived, debt cleared — concentric rings expand across the card with a success haptic. The one moment the app is allowed to show off.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="rollout">
+  <div class="wrap">
+    <p class="eyebrow">Rollout</p>
+    <h2>Four phases, zero logic changes.</h2>
+    <p class="section-lede">
+      Each phase ships independently and the app stays fully working between them.
+      All changes live in the presentation layer — services, store logic, and the
+      database are untouched.
+    </p>
+    <div class="phase-list">
+      <div class="phase">
+        <span class="pnum">Phase 1</span>
+        <div>
+          <h3>Token foundation</h3>
+          <p>One source of truth for color, type, spacing, radius and motion durations, feeding both ThemeProvider and Tailwind (fixing their current mismatch). Load the three typefaces via expo-font. The whole app shifts palette in a day.</p>
+          <p class="files">src/theme/tokens.ts · ThemeProvider.tsx · tailwind.config.js</p>
+        </div>
+      </div>
+      <div class="phase">
+        <span class="pnum">Phase 2</span>
+        <div>
+          <h3>Component kit</h3>
+          <p>Upgrade the primitives every screen already uses — ThemedCard, Row, buttons, amount text, chips, chart theming — plus the new signature pieces: pulse dot, confidence chip, waveform bar, ripple button.</p>
+          <p class="files">src/components/* · ThemedSafeAreaView.tsx</p>
+        </div>
+      </div>
+      <div class="phase">
+        <span class="pnum">Phase 3</span>
+        <div>
+          <h3>Hero screens</h3>
+          <p>Dashboard (safe-to-spend hierarchy), Smart Inbox (swipe-card triage), Smart Scan (sonar sweep), tab bar with the pulsing scan button. This is where the identity becomes unmistakable.</p>
+          <p class="files">DashboardScreen · SmartInboxScreen · SmartScanScreen · TabNavigator</p>
+        </div>
+      </div>
+      <div class="phase">
+        <span class="pnum">Phase 4</span>
+        <div>
+          <h3>The sweep</h3>
+          <p>Remaining ~20 screens inherit the kit, then polish: empty states with the ring motif, haptic choreography, milestone resonance moments, onboarding that introduces the signal metaphor.</p>
+          <p class="files">All remaining screens · OnboardingScreen last</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>Echo Spend · Direction 01 — "Money as Signal"</span>
+    <span class="mono" style="font-size:11px; letter-spacing:0.1em;">SIGNAL #30D158 · PULSE #FFB454 · ECHO #56D4C0 · INK #0A1416</span>
+  </div>
+</footer>

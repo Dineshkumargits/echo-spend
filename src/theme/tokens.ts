@@ -22,7 +22,9 @@ export interface Palette {
   tide: string;        // surface / cards
   tideRaised: string;  // elevated surface
   // Signals
-  pulse: string;       // money out / primary action (accent)
+  brand: string;       // brand / primary action (accent) — signal green on Echo
+  brandSoft: string;
+  pulse: string;       // money out / debit
   pulseSoft: string;
   echo: string;        // money in / AI / success
   echoSoft: string;
@@ -48,6 +50,8 @@ export const inkPalette: Palette = {
   tide: '#101D21',
   tideRaised: '#15262B',
   // Signals
+  brand: '#30D158',
+  brandSoft: 'rgba(48, 209, 88, 0.16)',
   pulse: '#FFB454',
   pulseSoft: 'rgba(255, 180, 84, 0.12)',
   echo: '#56D4C0',
@@ -69,6 +73,8 @@ export const dayPalette: Palette = {
   ink: '#F0F5F4',
   tide: '#FFFFFF',
   tideRaised: '#E7EEEC',
+  brand: '#148F45',
+  brandSoft: 'rgba(20, 143, 69, 0.12)',
   pulse: '#B4761A',
   pulseSoft: 'rgba(180, 118, 26, 0.12)',
   echo: '#0C8271',
@@ -91,6 +97,8 @@ const midnightDark: Palette = {
   ink: '#0B1020',
   tide: '#131A2E',
   tideRaised: '#1B2440',
+  brand: '#6C8CFF',
+  brandSoft: 'rgba(108, 140, 255, 0.14)',
   pulse: '#6C8CFF',
   pulseSoft: 'rgba(108, 140, 255, 0.14)',
   echo: '#3ED8E6',
@@ -111,6 +119,8 @@ const midnightLight: Palette = {
   ink: '#F3F5FF',
   tide: '#FFFFFF',
   tideRaised: '#E9EDFF',
+  brand: '#3A5BD9',
+  brandSoft: 'rgba(58, 91, 217, 0.12)',
   pulse: '#3A5BD9',
   pulseSoft: 'rgba(58, 91, 217, 0.12)',
   echo: '#0E8A96',
@@ -133,6 +143,8 @@ const roseDark: Palette = {
   ink: '#160A12',
   tide: '#21121C',
   tideRaised: '#2C1826',
+  brand: '#FF7EB0',
+  brandSoft: 'rgba(255, 126, 176, 0.14)',
   pulse: '#FF7EB0',
   pulseSoft: 'rgba(255, 126, 176, 0.14)',
   echo: '#F0B15E',
@@ -153,6 +165,8 @@ const roseLight: Palette = {
   ink: '#FDF3F8',
   tide: '#FFFFFF',
   tideRaised: '#FBE7F0',
+  brand: '#C63878',
+  brandSoft: 'rgba(198, 56, 120, 0.12)',
   pulse: '#C63878',
   pulseSoft: 'rgba(198, 56, 120, 0.12)',
   echo: '#B57314',
@@ -169,45 +183,52 @@ const roseLight: Palette = {
   onAccent: '#FFFFFF',
 };
 
-// ─── Forest — deep green + lime ──────────────────────────────────────────────
+// ─── Ember — warm charcoal + coral-red ───────────────────────────────────────
+// Accent is a coral-orange (brand), deliberately kept distinct from the crimson
+// `alert` so a primary button never reads as a warning. Money-in echoes cool
+// teal for maximum contrast against the warm ground.
 
-const forestDark: Palette = {
-  ink: '#0A140E',
-  tide: '#0F1F16',
-  tideRaised: '#152A1F',
-  pulse: '#9BE564',
-  pulseSoft: 'rgba(155, 229, 100, 0.14)',
-  echo: '#5EC9A8',
-  echoSoft: 'rgba(94, 201, 168, 0.12)',
-  alert: '#FF7A5E',
-  alertSoft: 'rgba(255, 122, 94, 0.12)',
-  violet: '#C0A0FF',
-  violetSoft: 'rgba(192, 160, 255, 0.14)',
-  glow: '#E8F4EA',
-  fog: '#7E9888',
-  fogFaint: '#374E40',
-  hairline: 'rgba(232, 244, 234, 0.09)',
-  translucent: 'rgba(232, 244, 234, 0.05)',
-  onAccent: '#0A140E',
+const emberDark: Palette = {
+  ink: '#1A0B0B',
+  tide: '#261311',
+  tideRaised: '#331B17',
+  brand: '#FF6A4D',
+  brandSoft: 'rgba(255, 106, 77, 0.16)',
+  pulse: '#FF6A4D',
+  pulseSoft: 'rgba(255, 106, 77, 0.14)',
+  echo: '#4ECDC4',
+  echoSoft: 'rgba(78, 205, 196, 0.12)',
+  alert: '#E23B5A',
+  alertSoft: 'rgba(226, 59, 90, 0.14)',
+  violet: '#C08CFF',
+  violetSoft: 'rgba(192, 140, 255, 0.14)',
+  glow: '#F7E9E4',
+  fog: '#B0908A',
+  fogFaint: '#553E3A',
+  hairline: 'rgba(247, 233, 228, 0.10)',
+  translucent: 'rgba(247, 233, 228, 0.05)',
+  onAccent: '#1A0B0B',
 };
 
-const forestLight: Palette = {
-  ink: '#F0F6F1',
+const emberLight: Palette = {
+  ink: '#FBF2EE',
   tide: '#FFFFFF',
-  tideRaised: '#E4EEE6',
-  pulse: '#3E7D1E',
-  pulseSoft: 'rgba(62, 125, 30, 0.12)',
-  echo: '#0C8267',
-  echoSoft: 'rgba(12, 130, 103, 0.10)',
-  alert: '#C24E3B',
-  alertSoft: 'rgba(194, 78, 59, 0.10)',
-  violet: '#6E45C4',
+  tideRaised: '#F6E3DB',
+  brand: '#D2402A',
+  brandSoft: 'rgba(210, 64, 42, 0.12)',
+  pulse: '#D2402A',
+  pulseSoft: 'rgba(210, 64, 42, 0.12)',
+  echo: '#0E8A80',
+  echoSoft: 'rgba(14, 138, 128, 0.10)',
+  alert: '#B4293F',
+  alertSoft: 'rgba(180, 41, 63, 0.10)',
+  violet: '#7B45C4',
   violetSoft: 'rgba(110, 69, 196, 0.10)',
-  glow: '#122117',
-  fog: '#5C716A',
-  fogFaint: '#C4D4C7',
-  hairline: 'rgba(18, 33, 23, 0.10)',
-  translucent: 'rgba(18, 33, 23, 0.05)',
+  glow: '#2A1512',
+  fog: '#8B6A60',
+  fogFaint: '#E4C8BE',
+  hairline: 'rgba(42, 21, 18, 0.10)',
+  translucent: 'rgba(42, 21, 18, 0.05)',
   onAccent: '#FFFFFF',
 };
 
@@ -217,6 +238,8 @@ const monoDark: Palette = {
   ink: '#0D0D0F',
   tide: '#17171A',
   tideRaised: '#212125',
+  brand: '#E6E6E9',
+  brandSoft: 'rgba(230, 230, 233, 0.12)',
   pulse: '#E6E6E9',
   pulseSoft: 'rgba(230, 230, 233, 0.12)',
   echo: '#5B9DFF',
@@ -237,6 +260,8 @@ const monoLight: Palette = {
   ink: '#F4F4F6',
   tide: '#FFFFFF',
   tideRaised: '#EAEAED',
+  brand: '#26262B',
+  brandSoft: 'rgba(38, 38, 43, 0.10)',
   pulse: '#26262B',
   pulseSoft: 'rgba(38, 38, 43, 0.10)',
   echo: '#2F6FE0',
@@ -259,6 +284,8 @@ const solarDark: Palette = {
   ink: '#150F09',
   tide: '#211810',
   tideRaised: '#2C2117',
+  brand: '#FF9F45',
+  brandSoft: 'rgba(255, 159, 69, 0.14)',
   pulse: '#FF9F45',
   pulseSoft: 'rgba(255, 159, 69, 0.14)',
   echo: '#F2C94C',
@@ -279,6 +306,8 @@ const solarLight: Palette = {
   ink: '#FBF4EA',
   tide: '#FFFFFF',
   tideRaised: '#F4E8D6',
+  brand: '#C2681A',
+  brandSoft: 'rgba(194, 104, 26, 0.12)',
   pulse: '#C2681A',
   pulseSoft: 'rgba(194, 104, 26, 0.12)',
   echo: '#A67C0C',
@@ -308,7 +337,7 @@ export const buildColors = (p: Palette) => ({
   primary: p.glow,
   secondary: p.fog,
   muted: p.fogFaint,
-  accent: p.pulse,
+  accent: p.brand,         // primary action / brand — signal green on Echo
   success: p.echo,
   warning: p.pulse,
   danger: p.alert,
@@ -316,7 +345,9 @@ export const buildColors = (p: Palette) => ({
   translucent: p.translucent,
 
   // Signal-semantic keys
-  debit: p.pulse,          // money out — accent hue
+  brand: p.brand,          // brand / primary action (== accent)
+  brandSoft: p.brandSoft,
+  debit: p.pulse,          // money out — pulse amber
   credit: p.echo,          // money in — echo hue
   ai: p.echo,              // on-device intelligence shares the echo hue
   violet: p.violet,        // split / shared-expense accent
@@ -343,7 +374,7 @@ export const THEMES: ThemeDefinition[] = [
   { id: 'echo',     name: 'Echo',     blurb: 'Signal teal & amber',  dark: inkPalette,   light: dayPalette },
   { id: 'midnight', name: 'Midnight', blurb: 'Indigo & cyan',        dark: midnightDark, light: midnightLight },
   { id: 'rose',     name: 'Rose',     blurb: 'Plum & rose',          dark: roseDark,     light: roseLight },
-  { id: 'forest',   name: 'Forest',   blurb: 'Deep green & lime',    dark: forestDark,   light: forestLight },
+  { id: 'ember',    name: 'Ember',    blurb: 'Warm charcoal & coral', dark: emberDark,   light: emberLight },
   { id: 'mono',     name: 'Mono',     blurb: 'Graphite & blue',      dark: monoDark,     light: monoLight },
   { id: 'solar',    name: 'Solar',    blurb: 'Warm amber & gold',    dark: solarDark,    light: solarLight },
 ];
@@ -363,7 +394,7 @@ export const getPalette = (themeId: string, mode: 'dark' | 'light'): Palette => 
 /** Small swatch set used by the theme picker cards. */
 export const themeSwatches = (theme: ThemeDefinition, mode: 'dark' | 'light') => {
   const p = mode === 'dark' ? theme.dark : theme.light;
-  return { bg: p.ink, surface: p.tide, accent: p.pulse, credit: p.echo, text: p.glow };
+  return { bg: p.ink, surface: p.tide, accent: p.brand, credit: p.echo, text: p.glow };
 };
 
 export const darkColors = buildColors(inkPalette);

@@ -15,6 +15,7 @@ import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
   Modal, Alert, Dimensions, StyleSheet, Platform, KeyboardAvoidingView,
 } from 'react-native';
+import { GestureHandlerRootView, ScrollView as GHScrollView } from 'react-native-gesture-handler';
 import {
   LucideX, LucideCheck, LucideTrash2, LucideSearch,
 } from 'lucide-react-native';
@@ -543,6 +544,9 @@ export const CategoryManagerModal = ({ manager, onRefresh, onSaved }: CategoryMa
       transparent
       onRequestClose={close}
     >
+      {/* Modal renders outside the root GestureHandlerRootView; re-establish one
+          so the ScrollView scrolls over its TouchableOpacity rows (RNGH fix). */}
+      <GestureHandlerRootView style={{ flex: 1 }}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={{ flex: 1 }}
@@ -586,7 +590,7 @@ export const CategoryManagerModal = ({ manager, onRefresh, onSaved }: CategoryMa
               </View>
             </View>
 
-            <ScrollView
+            <GHScrollView
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
               contentContainerStyle={{ padding: 24, paddingBottom: 8 }}
@@ -731,10 +735,11 @@ export const CategoryManagerModal = ({ manager, onRefresh, onSaved }: CategoryMa
                 </ThemedText>
               </TouchableOpacity>
               <View style={{ height: 16 }} />
-            </ScrollView>
+            </GHScrollView>
           </View>
         </View>
       </KeyboardAvoidingView>
+      </GestureHandlerRootView>
     </Modal>
   );
 };
