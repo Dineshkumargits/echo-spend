@@ -85,7 +85,6 @@ const SettingsScreen = ({ navigation }: any) => {
     toggleRecurringAlerts,
     toggleWeeklyDigest,
     toggleDailyReminder,
-    toggleHideAmounts,
     toggleHaptics,
     setAutoLockMinutes,
     toggleAutoSmsScan,
@@ -1211,18 +1210,7 @@ const SettingsScreen = ({ navigation }: any) => {
               borderColor: colors.border,
             }}
           >
-            <Row
-              icon={<LucideEyeOff color={colors.primary} size={18} />}
-              label="Mask Amount Values"
-              sub="Asterisks (****) on Dashboard"
-              right={
-                <Switch
-                  value={preferences.hideAmounts}
-                  onValueChange={toggleHideAmounts}
-                  trackColor={{ true: colors.success }}
-                />
-              }
-            />
+
             <Row
               icon={<LucideShield color={colors.primary} size={20} />}
               label="Biometric Lock"
