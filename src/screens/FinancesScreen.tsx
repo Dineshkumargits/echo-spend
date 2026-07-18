@@ -2,13 +2,14 @@ import React, { useState, useEffect } from 'react';
 import {
   View, ScrollView, TouchableOpacity, StyleSheet, Modal,
   TextInput, KeyboardAvoidingView, Platform, RefreshControl,
+  LayoutAnimation,
 } from 'react-native';
 import { ThemedSafeAreaView, ThemedText } from '../components/ThemedSafeAreaView';
 import PagerView from 'react-native-pager-view';
 import {
   LucidePlus, LucideTarget, LucideLandmark, LucideRepeat, LucideCalendar,
   LucideUserPlus, LucideCreditCard,
-  LucideAlertCircle, LucidePencil, LucideUsers, LucideChevronRight,
+  LucideAlertCircle, LucidePencil, LucideUsers, LucideChevronRight, LucideChevronDown,
   LucideZap, LucideWallet, LucideBanknote,
   LucideX, LucideCheck, LucideChevronLeft,
 } from 'lucide-react-native';
@@ -209,6 +210,9 @@ export const FinancesScreen = ({ navigation, route }: any) => {
   const [refreshing, setRefreshing] = useState(false);
   const [quickAction, setQuickAction] = useState<QuickActionState | null>(null);
   const [highlightedId, setHighlightedId] = useState<number | null>(null);
+  const [showCompletedSplits, setShowCompletedSplits] = useState(false);
+  const [showCompletedGoals, setShowCompletedGoals] = useState(false);
+  const [showCompletedLoans, setShowCompletedLoans] = useState(false);
 
   useEffect(() => {
     if (isFocused) loadData();
@@ -261,14 +265,37 @@ export const FinancesScreen = ({ navigation, route }: any) => {
     setRefreshing(false);
   }, []);
 
-  const daysUntilDue = (billDueDay: number): number => {
+  /** Next calendar occurrence of a day-of-month, rolling into next month if it's already passed. */
+  const nextOccurrence = (day: number, today: Date): Date => {
+    let d = new Date(today.getFullYear(), today.getMonth(), day);
+    if (d < today) d = new Date(today.getFullYear(), today.getMonth() + 1, day);
+    return d;
+  };
+
+  /** Whichever of the next statement date or next due date comes first. */
+  const getNextCardEvent = (
+    statementDay: number | undefined,
+    billDueDay: number | undefined,
+  ): { kind: 'due' | 'bill'; date: Date; daysUntil: number } | null => {
     const today = new Date();
-    const thisMonth = new Date(today.getFullYear(), today.getMonth(), billDueDay);
-    if (thisMonth < today) {
-      const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, billDueDay);
-      return Math.ceil((nextMonth.getTime() - today.getTime()) / 86_400_000);
+    today.setHours(0, 0, 0, 0);
+    const nextDue = billDueDay ? nextOccurrence(billDueDay, today) : null;
+    const nextBill = statementDay ? nextOccurrence(statementDay, today) : null;
+
+    let kind: 'due' | 'bill';
+    let date: Date;
+    if (nextDue && nextBill) {
+      kind = nextDue <= nextBill ? 'due' : 'bill';
+      date = nextDue <= nextBill ? nextDue : nextBill;
+    } else if (nextDue) {
+      kind = 'due'; date = nextDue;
+    } else if (nextBill) {
+      kind = 'bill'; date = nextBill;
+    } else {
+      return null;
     }
-    return Math.ceil((thisMonth.getTime() - today.getTime()) / 86_400_000);
+    const daysUntil = Math.ceil((date.getTime() - today.getTime()) / 86_400_000);
+    return { kind, date, daysUntil };
   };
 
   const daysUntilDate = (dateStr: string): number => {
@@ -384,7 +411,7 @@ export const FinancesScreen = ({ navigation, route }: any) => {
                     <ThemedText style={{ fontSize: 11, color: colors.secondary, textTransform: 'uppercase', fontWeight: 'bold' }}>
                       {sub.frequency} · {sub.category}
                     </ThemedText>
-                    {sub.splitEnabled && (
+                    {!!sub.splitEnabled && (
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: `${colors.debit}15`, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
                         <LucideUsers color={colors.debit} size={10} />
                         <ThemedText style={{ fontSize: 9, color: colors.debit, fontWeight: 'bold' }}>{totalPeople} people</ThemedText>
@@ -452,9 +479,113 @@ export const FinancesScreen = ({ navigation, route }: any) => {
     );
   };
 
+  const renderGoalCard = (goal: Goal) => {
+    const pct = goal.targetAmount > 0 ? Math.round((goal.currentAmount / goal.targetAmount) * 100) : 0;
+    const remaining = goal.targetAmount - goal.currentAmount;
+    const savedAcc = accountName(goal.linkedAccountId);
+    const daysToDeadline = goal.deadline ? daysUntilDate(goal.deadline) : null;
+    const monthsLeft = daysToDeadline !== null ? Math.ceil(daysToDeadline / 30) : null;
+    const impliedMonthly = monthsLeft && monthsLeft > 0 && remaining > 0
+      ? Math.ceil(remaining / monthsLeft)
+      : null;
+    const achieved = goal.targetAmount > 0 && goal.currentAmount >= goal.targetAmount;
+
+    const isHighlighted = highlightedId === goal.id;
+    const color = achieved ? colors.success : colors.credit;
+
+    return (
+      <TouchableOpacity
+        key={goal.id}
+        style={[
+          styles.card,
+          isHighlighted && { borderColor: colors.accent, borderWidth: 2, shadowColor: colors.accent, shadowOpacity: 0.3, shadowRadius: 10, elevation: 8 }
+        ]}
+        activeOpacity={0.8}
+        onPress={() => navigation.navigate('AddGoal', { goalToEdit: goal })}
+      >
+        <View style={styles.cardHeader}>
+          <View style={[styles.iconContainer, { backgroundColor: withAlpha(color, '15') }]}>
+            <LucideTarget color={color} size={20} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <ThemedText style={{ fontWeight: 'bold', fontSize: 16 }}>{goal.name}</ThemedText>
+            <ThemedText style={{ fontSize: 11, color: colors.secondary, textTransform: 'uppercase', fontWeight: 'bold' }}>
+              {goal.category}
+              {savedAcc ? ` · ${savedAcc}` : ''}
+            </ThemedText>
+          </View>
+          <View style={{ alignItems: 'flex-end' }}>
+            <ThemedText style={{ fontWeight: 'bold', fontSize: 16 }}>
+              {preferences.hideAmounts ? '****' : `${preferences.currency}${goal.currentAmount.toLocaleString('en-IN')}`}
+            </ThemedText>
+            <ThemedText style={{ fontSize: 10, color: colors.secondary }}>
+              of {preferences.currency}{goal.targetAmount.toLocaleString('en-IN')}
+            </ThemedText>
+          </View>
+        </View>
+
+        {renderProgressBar(goal.currentAmount, goal.targetAmount, color)}
+
+        <View style={[styles.cardFooter, { marginTop: 12 }]}>
+          <View>
+            <ThemedText style={{ fontSize: 10, color: colors.secondary }}>
+              {goal.deadline
+                ? `Deadline: ${new Date(goal.deadline).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}`
+                : 'No deadline'}
+            </ThemedText>
+            {goal.monthlyContribution && (
+              <ThemedText style={{ fontSize: 10, color: color }}>
+                Plan: {preferences.currency}{goal.monthlyContribution.toLocaleString('en-IN')}/mo
+              </ThemedText>
+            )}
+            {impliedMonthly && !goal.monthlyContribution && (
+              <ThemedText style={{ fontSize: 10, color: colors.secondary }}>
+                Need {preferences.currency}{impliedMonthly.toLocaleString('en-IN')}/mo to meet deadline
+              </ThemedText>
+            )}
+          </View>
+          <View style={{ alignItems: 'flex-end', gap: 4 }}>
+            <ThemedText style={{ color, fontSize: 11, fontWeight: 'bold' }}>{pct}% ACHIEVED</ThemedText>
+            {!achieved && (
+              /* Add Money button */
+              <TouchableOpacity
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: withAlpha(color, '20'), paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 }}
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  setQuickAction({
+                    type: 'contributeGoal',
+                    id: goal.id,
+                    label: `Add to "${goal.name}"`,
+                    defaultAmount: goal.monthlyContribution ?? 500,
+                    accentColor: color,
+                    accountId: goal.linkedAccountId,
+                  });
+                }}
+              >
+                <LucidePlus color={color} size={12} />
+                <ThemedText style={{ color, fontWeight: 'bold', fontSize: 11 }}>Add Money</ThemedText>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+
+        {goal.notes && (
+          <ThemedText style={{ fontSize: 11, color: colors.secondary, marginTop: 8 }}>{goal.notes}</ThemedText>
+        )}
+      </TouchableOpacity>
+    );
+  };
+
   const renderGoalsTab = () => {
     const totalSaved = goals.reduce((s, g) => s + g.currentAmount, 0);
     const totalTarget = goals.reduce((s, g) => s + g.targetAmount, 0);
+    const inProgressGoals = goals.filter(g => !(g.targetAmount > 0 && g.currentAmount >= g.targetAmount));
+    const completedGoals = goals.filter(g => g.targetAmount > 0 && g.currentAmount >= g.targetAmount);
+
+    const toggleCompleted = () => {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setShowCompletedGoals(v => !v);
+    };
 
     return (
       <MotiView from={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 1.05 }}>
@@ -478,107 +609,61 @@ export const FinancesScreen = ({ navigation, route }: any) => {
           </View>
         )}
 
-        {goals.length === 0 ? renderEmpty('goals') : goals.map(goal => {
-          const pct = goal.targetAmount > 0 ? Math.round((goal.currentAmount / goal.targetAmount) * 100) : 0;
-          const remaining = goal.targetAmount - goal.currentAmount;
-          const savedAcc = accountName(goal.linkedAccountId);
-          const daysToDeadline = goal.deadline ? daysUntilDate(goal.deadline) : null;
-          const monthsLeft = daysToDeadline !== null ? Math.ceil(daysToDeadline / 30) : null;
-          const impliedMonthly = monthsLeft && monthsLeft > 0 && remaining > 0
-            ? Math.ceil(remaining / monthsLeft)
-            : null;
-
-          const isHighlighted = highlightedId === goal.id;
-
-          return (
-            <TouchableOpacity
-              key={goal.id}
-              style={[
-                styles.card,
-                isHighlighted && { borderColor: colors.accent, borderWidth: 2, shadowColor: colors.accent, shadowOpacity: 0.3, shadowRadius: 10, elevation: 8 }
-              ]}
-              activeOpacity={0.8}
-              onPress={() => navigation.navigate('AddGoal', { goalToEdit: goal })}
-            >
-              <View style={styles.cardHeader}>
-                <View style={[styles.iconContainer, { backgroundColor: withAlpha(colors.credit, '15') }]}>
-                  <LucideTarget color={colors.credit} size={20} />
+        {goals.length === 0 ? renderEmpty('goals') : (
+          <>
+            {inProgressGoals.length === 0 ? (
+              <View style={[styles.emptyContainer, { marginTop: 24 }]}>
+                <View style={[styles.emptyIcon, { backgroundColor: colors.success + '15' }]}>
+                  <LucideCheck color={colors.success} size={32} />
                 </View>
-                <View style={{ flex: 1 }}>
-                  <ThemedText style={{ fontWeight: 'bold', fontSize: 16 }}>{goal.name}</ThemedText>
-                  <ThemedText style={{ fontSize: 11, color: colors.secondary, textTransform: 'uppercase', fontWeight: 'bold' }}>
-                    {goal.category}
-                    {savedAcc ? ` · ${savedAcc}` : ''}
-                  </ThemedText>
-                </View>
-                <View style={{ alignItems: 'flex-end' }}>
-                  <ThemedText style={{ fontWeight: 'bold', fontSize: 16 }}>
-                    {preferences.hideAmounts ? '****' : `${preferences.currency}${goal.currentAmount.toLocaleString('en-IN')}`}
-                  </ThemedText>
-                  <ThemedText style={{ fontSize: 10, color: colors.secondary }}>
-                    of {preferences.currency}{goal.targetAmount.toLocaleString('en-IN')}
-                  </ThemedText>
-                </View>
+                <ThemedText style={{ fontWeight: 'bold', textAlign: 'center' }}>All goals achieved</ThemedText>
+                <ThemedText style={{ fontSize: 12, color: colors.secondary, textAlign: 'center', marginTop: 8, paddingHorizontal: 24 }}>
+                  No goals waiting on contributions right now.
+                </ThemedText>
               </View>
+            ) : (
+              inProgressGoals.map(goal => renderGoalCard(goal))
+            )}
 
-              {renderProgressBar(goal.currentAmount, goal.targetAmount, colors.credit)}
-
-              <View style={[styles.cardFooter, { marginTop: 12 }]}>
-                <View>
-                  <ThemedText style={{ fontSize: 10, color: colors.secondary }}>
-                    {goal.deadline
-                      ? `Deadline: ${new Date(goal.deadline).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}`
-                      : 'No deadline'}
+            {completedGoals.length > 0 && (
+              <>
+                <TouchableOpacity
+                  onPress={toggleCompleted}
+                  activeOpacity={0.7}
+                  style={{
+                    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                    marginTop: inProgressGoals.length > 0 ? 8 : 0, marginBottom: 10, paddingVertical: 4,
+                  }}
+                >
+                  <ThemedText style={{ fontSize: 11, color: colors.secondary, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 1 }}>
+                    Completed ({completedGoals.length})
                   </ThemedText>
-                  {goal.monthlyContribution && (
-                    <ThemedText style={{ fontSize: 10, color: colors.credit }}>
-                      Plan: {preferences.currency}{goal.monthlyContribution.toLocaleString('en-IN')}/mo
-                    </ThemedText>
-                  )}
-                  {impliedMonthly && !goal.monthlyContribution && (
-                    <ThemedText style={{ fontSize: 10, color: colors.secondary }}>
-                      Need {preferences.currency}{impliedMonthly.toLocaleString('en-IN')}/mo to meet deadline
-                    </ThemedText>
-                  )}
-                </View>
-                <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                  <ThemedText style={{ color: colors.credit, fontSize: 11, fontWeight: 'bold' }}>{pct}% ACHIEVED</ThemedText>
-                  {/* Add Money button */}
-                  <TouchableOpacity
-                    style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: withAlpha(colors.credit, '20'), paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 }}
-                    onPress={() => {
-                      Haptics.selectionAsync();
-                      setQuickAction({
-                        type: 'contributeGoal',
-                        id: goal.id,
-                        label: `Add to "${goal.name}"`,
-                        defaultAmount: goal.monthlyContribution ?? 500,
-                        accentColor: colors.credit,
-                        accountId: goal.linkedAccountId,
-                      });
-                    }}
-                  >
-                    <LucidePlus color={colors.credit} size={12} />
-                    <ThemedText style={{ color: colors.credit, fontWeight: 'bold', fontSize: 11 }}>Add Money</ThemedText>
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              {goal.notes && (
-                <ThemedText style={{ fontSize: 11, color: colors.secondary, marginTop: 8 }}>{goal.notes}</ThemedText>
-              )}
-            </TouchableOpacity>
-          );
-        })}
+                  <LucideChevronDown
+                    color={colors.secondary} size={16}
+                    style={{ transform: [{ rotate: showCompletedGoals ? '180deg' : '0deg' }] }}
+                  />
+                </TouchableOpacity>
+                {showCompletedGoals && completedGoals.map(goal => renderGoalCard(goal))}
+              </>
+            )}
+          </>
+        )}
       </MotiView>
     );
   };
 
   const renderLoansTab = () => {
-    const borrowed = loans.filter(l => l.type === 'borrowed' || !l.type);
-    const lent = loans.filter(l => l.type === 'lent');
+    const inProgressLoans = loans.filter(l => l.remainingAmount > 0);
+    const completedLoans = loans.filter(l => l.remainingAmount <= 0);
+    const borrowed = inProgressLoans.filter(l => l.type === 'borrowed' || !l.type);
+    const lent = inProgressLoans.filter(l => l.type === 'lent');
     const totalOwed = borrowed.reduce((s, l) => s + l.remainingAmount, 0);
     const totalToReceive = lent.reduce((s, l) => s + l.remainingAmount, 0);
+
+    const toggleCompleted = () => {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setShowCompletedLoans(v => !v);
+    };
 
     return (
       <MotiView from={{ opacity: 0, translateX: 20 }} animate={{ opacity: 1, translateX: 0 }} exit={{ opacity: 0, translateX: -20 }}>
@@ -610,21 +695,63 @@ export const FinancesScreen = ({ navigation, route }: any) => {
 
         {loans.length === 0 ? renderEmpty('loans') : (
           <>
-            {lent.length > 0 && (
-              <>
-                <ThemedText style={{ fontSize: 11, color: colors.secondary, fontWeight: 'bold', textTransform: 'uppercase', marginBottom: 10, marginLeft: 2, letterSpacing: 1 }}>
-                  Money Owed to Me
+            {inProgressLoans.length === 0 ? (
+              <View style={[styles.emptyContainer, { marginTop: 24 }]}>
+                <View style={[styles.emptyIcon, { backgroundColor: colors.success + '15' }]}>
+                  <LucideCheck color={colors.success} size={32} />
+                </View>
+                <ThemedText style={{ fontWeight: 'bold', textAlign: 'center' }}>All settled</ThemedText>
+                <ThemedText style={{ fontSize: 12, color: colors.secondary, textAlign: 'center', marginTop: 8, paddingHorizontal: 24 }}>
+                  No outstanding loans right now.
                 </ThemedText>
-                {lent.map(loan => renderLoanCard(loan, colors.credit, <LucideUserPlus color={colors.credit} size={20} />))}
-                <View style={{ height: 16 }} />
+              </View>
+            ) : (
+              <>
+                {lent.length > 0 && (
+                  <>
+                    <ThemedText style={{ fontSize: 11, color: colors.secondary, fontWeight: 'bold', textTransform: 'uppercase', marginBottom: 10, marginLeft: 2, letterSpacing: 1 }}>
+                      Money Owed to Me
+                    </ThemedText>
+                    {lent.map(loan => renderLoanCard(loan, colors.credit, <LucideUserPlus color={colors.credit} size={20} />))}
+                    <View style={{ height: 16 }} />
+                  </>
+                )}
+                {borrowed.length > 0 && (
+                  <>
+                    <ThemedText style={{ fontSize: 11, color: colors.secondary, fontWeight: 'bold', textTransform: 'uppercase', marginBottom: 10, marginLeft: 2, letterSpacing: 1 }}>
+                      Money I Owe
+                    </ThemedText>
+                    {borrowed.map(loan => renderLoanCard(loan, colors.debit, <LucideLandmark color={colors.debit} size={20} />))}
+                  </>
+                )}
               </>
             )}
-            {borrowed.length > 0 && (
+
+            {completedLoans.length > 0 && (
               <>
-                <ThemedText style={{ fontSize: 11, color: colors.secondary, fontWeight: 'bold', textTransform: 'uppercase', marginBottom: 10, marginLeft: 2, letterSpacing: 1 }}>
-                  Money I Owe
-                </ThemedText>
-                {borrowed.map(loan => renderLoanCard(loan, colors.debit, <LucideLandmark color={colors.debit} size={20} />))}
+                <TouchableOpacity
+                  onPress={toggleCompleted}
+                  activeOpacity={0.7}
+                  style={{
+                    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                    marginTop: inProgressLoans.length > 0 ? 8 : 0, marginBottom: 10, paddingVertical: 4,
+                  }}
+                >
+                  <ThemedText style={{ fontSize: 11, color: colors.secondary, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 1 }}>
+                    Completed ({completedLoans.length})
+                  </ThemedText>
+                  <LucideChevronDown
+                    color={colors.secondary} size={16}
+                    style={{ transform: [{ rotate: showCompletedLoans ? '180deg' : '0deg' }] }}
+                  />
+                </TouchableOpacity>
+                {showCompletedLoans && completedLoans.map(loan => renderLoanCard(
+                  loan,
+                  colors.success,
+                  loan.type === 'lent'
+                    ? <LucideUserPlus color={colors.success} size={20} />
+                    : <LucideLandmark color={colors.success} size={20} />
+                ))}
               </>
             )}
           </>
@@ -732,117 +859,221 @@ export const FinancesScreen = ({ navigation, route }: any) => {
     );
   };
 
-  const renderCardsTab = () => (
-    <MotiView from={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 1.05 }}>
-      {creditCards.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <View style={[styles.emptyIcon, { backgroundColor: colors.translucent }]}>
-            <LucideCreditCard color={colors.secondary} size={32} />
-          </View>
-          <ThemedText style={{ fontWeight: 'bold', textAlign: 'center' }}>No credit cards added</ThemedText>
-          <ThemedText style={{ fontSize: 12, color: colors.secondary, textAlign: 'center', marginTop: 8, paddingHorizontal: 24 }}>
-            Add a credit card account to track outstanding dues and available credit.
-          </ThemedText>
-          <TouchableOpacity
-            onPress={() => navigation.navigate('AddAccount', { initialType: 'credit_card' })}
-            style={{ marginTop: 20, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 24, backgroundColor: colors.accent }}
-          >
-            <ThemedText style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>Add Credit Card</ThemedText>
-          </TouchableOpacity>
-        </View>
-      ) : creditCards.map(card => {
-        const utilPct = card.creditLimit && card.creditLimit > 0
-          ? Math.min((card.balance / card.creditLimit) * 100, 100)
-          : null;
-        const available = card.creditLimit ? card.creditLimit - card.balance : null;
-        const dueDays = card.billDueDay ? daysUntilDue(card.billDueDay) : null;
-        const isDueUrgent = dueDays !== null && dueDays <= 5;
-        const utilColor = utilPct === null ? colors.accent
-          : utilPct >= 80 ? colors.danger
-            : utilPct >= 50 ? colors.warning
-              : colors.success;
+  const renderCardsTab = () => {
+    const totalOutstanding = creditCards.reduce((s, c) => s + Math.max(c.balance, 0), 0);
 
-        return (
-          <TouchableOpacity
-            key={card.id}
-            style={[styles.card, isDueUrgent && { borderColor: `${colors.danger}60` }]}
-            onPress={() => navigation.navigate('AddAccount', { accountToEdit: card })}
-            activeOpacity={0.85}
-          >
-            <View style={styles.cardHeader}>
-              <View style={[styles.iconContainer, { backgroundColor: `${colors.accent}15` }]}>
-                <LucideCreditCard color={colors.accent} size={20} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <ThemedText style={{ fontWeight: 'bold', fontSize: 16 }}>{card.name}</ThemedText>
-                {card.creditLimit ? (
-                  <ThemedText style={{ fontSize: 11, color: colors.secondary, textTransform: 'uppercase', fontWeight: 'bold' }}>
-                    Limit: {preferences.currency}{card.creditLimit.toLocaleString('en-IN')}
-                  </ThemedText>
-                ) : (
-                  <ThemedText style={{ fontSize: 11, color: colors.secondary, textTransform: 'uppercase', fontWeight: 'bold' }}>Credit Card</ThemedText>
-                )}
-              </View>
-              <View style={{ alignItems: 'flex-end' }}>
-                <ThemedText style={{ color: colors.danger, fontWeight: 'bold', fontSize: 18 }}>
-                  {preferences.hideAmounts ? '****' : `-${preferences.currency}${card.balance.toLocaleString('en-IN')}`}
-                </ThemedText>
-                <ThemedText style={{ fontSize: 10, color: colors.secondary }}>OUTSTANDING</ThemedText>
-              </View>
+    return (
+      <MotiView from={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 1.05 }}>
+        {creditCards.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <View style={[styles.emptyIcon, { backgroundColor: colors.translucent }]}>
+              <LucideCreditCard color={colors.secondary} size={32} />
             </View>
-
-            {utilPct !== null && (
-              <View style={{ marginTop: 16 }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <ThemedText style={{ fontSize: 11, color: colors.secondary }}>Credit utilization</ThemedText>
-                  <ThemedText style={{ color: utilColor, fontSize: 11, fontWeight: 'bold' }}>{Math.round(utilPct)}%</ThemedText>
-                </View>
-                <View style={{ height: 6, backgroundColor: colors.border, borderRadius: 3, overflow: 'hidden' }}>
-                  <MotiView
-                    from={{ width: '0%' }}
-                    animate={{ width: `${utilPct}%` }}
-                    transition={{ type: 'timing', duration: 1000 }}
-                    style={{ height: '100%', backgroundColor: utilColor }}
-                  />
+            <ThemedText style={{ fontWeight: 'bold', textAlign: 'center' }}>No credit cards added</ThemedText>
+            <ThemedText style={{ fontSize: 12, color: colors.secondary, textAlign: 'center', marginTop: 8, paddingHorizontal: 24 }}>
+              Add a credit card account to track outstanding dues and available credit.
+            </ThemedText>
+            <TouchableOpacity
+              onPress={() => navigation.navigate('AddAccount', { initialType: 'credit_card' })}
+              style={{ marginTop: 20, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 24, backgroundColor: colors.accent }}
+            >
+              <ThemedText style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>Add Credit Card</ThemedText>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <>
+            {totalOutstanding > 0 && (
+              <View style={[styles.card, { backgroundColor: colors.danger + '12', borderColor: colors.danger + '40' }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <LucideCreditCard color={colors.danger} size={20} />
+                  <View>
+                    <ThemedText style={{ fontWeight: 'bold', fontSize: 15 }}>Total Outstanding</ThemedText>
+                    <ThemedText style={{ color: colors.danger, fontWeight: 'bold', fontSize: 20, marginTop: 2 }}>
+                      {preferences.hideAmounts ? '****' : `${preferences.currency}${totalOutstanding.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`}
+                    </ThemedText>
+                  </View>
                 </View>
               </View>
             )}
 
-            <View style={[styles.cardFooter, { marginTop: 12 }]}>
-              {available !== null ? (
-                <View>
-                  <ThemedText style={{ fontSize: 10, color: colors.secondary, textTransform: 'uppercase', fontWeight: 'bold' }}>Available</ThemedText>
-                  <ThemedText style={{ color: colors.success, fontWeight: 'bold', fontSize: 14 }}>
-                    {preferences.hideAmounts ? '****' : `${preferences.currency}${available.toLocaleString('en-IN')}`}
-                  </ThemedText>
-                </View>
-              ) : <View />}
+            {creditCards.map(card => {
+              const utilPct = card.creditLimit && card.creditLimit > 0
+                ? Math.min((card.balance / card.creditLimit) * 100, 100)
+                : null;
+              const available = card.creditLimit ? card.creditLimit - card.balance : null;
 
-              {dueDays !== null ? (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                  {isDueUrgent && <LucideAlertCircle color={colors.danger} size={12} />}
-                  <ThemedText style={{ color: isDueUrgent ? colors.danger : colors.secondary, fontSize: 12, fontWeight: isDueUrgent ? 'bold' : 'normal' }}>
-                    {dueDays === 0 ? 'Due today!' : dueDays === 1 ? 'Due tomorrow' : `Due in ${dueDays}d`}
-                  </ThemedText>
-                </View>
-              ) : (
+              const hasCycle = !!(card.statementDay || card.billDueDay);
+              const isPaidUp = hasCycle && card.balance <= 0;
+              const nextEvent = hasCycle && !isPaidUp ? getNextCardEvent(card.statementDay, card.billDueDay) : null;
+              const isDueUrgent = nextEvent?.kind === 'due' && nextEvent.daysUntil <= 5;
+
+              const utilColor = utilPct === null ? colors.accent
+                : utilPct >= 80 ? colors.danger
+                  : utilPct >= 50 ? colors.warning
+                    : colors.success;
+
+              return (
                 <TouchableOpacity
+                  key={card.id}
+                  style={[styles.card, isDueUrgent && { borderColor: `${colors.danger}60` }]}
                   onPress={() => navigation.navigate('AddAccount', { accountToEdit: card })}
-                  style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                  activeOpacity={0.85}
                 >
-                  <LucidePencil color={colors.muted} size={11} />
-                  <ThemedText style={{ fontSize: 11, color: colors.secondary }}>Set due date</ThemedText>
+                  <View style={styles.cardHeader}>
+                    <View style={[styles.iconContainer, { backgroundColor: `${colors.accent}15` }]}>
+                      <LucideCreditCard color={colors.accent} size={20} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <ThemedText style={{ fontWeight: 'bold', fontSize: 16 }}>{card.name}</ThemedText>
+                      {card.creditLimit ? (
+                        <ThemedText style={{ fontSize: 11, color: colors.secondary, textTransform: 'uppercase', fontWeight: 'bold' }}>
+                          Limit: {preferences.currency}{card.creditLimit.toLocaleString('en-IN')}
+                        </ThemedText>
+                      ) : (
+                        <ThemedText style={{ fontSize: 11, color: colors.secondary, textTransform: 'uppercase', fontWeight: 'bold' }}>Credit Card</ThemedText>
+                      )}
+                    </View>
+                    <View style={{ alignItems: 'flex-end' }}>
+                      <ThemedText style={{ color: colors.danger, fontWeight: 'bold', fontSize: 18 }}>
+                        {preferences.hideAmounts ? '****' : `-${preferences.currency}${card.balance.toLocaleString('en-IN')}`}
+                      </ThemedText>
+                      <ThemedText style={{ fontSize: 10, color: colors.secondary }}>OUTSTANDING</ThemedText>
+                    </View>
+                  </View>
+
+                  {utilPct !== null && (
+                    <View style={{ marginTop: 16 }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
+                        <ThemedText style={{ fontSize: 11, color: colors.secondary }}>Credit utilization</ThemedText>
+                        <ThemedText style={{ color: utilColor, fontSize: 11, fontWeight: 'bold' }}>{Math.round(utilPct)}%</ThemedText>
+                      </View>
+                      <View style={{ height: 6, backgroundColor: colors.border, borderRadius: 3, overflow: 'hidden' }}>
+                        <MotiView
+                          from={{ width: '0%' }}
+                          animate={{ width: `${utilPct}%` }}
+                          transition={{ type: 'timing', duration: 1000 }}
+                          style={{ height: '100%', backgroundColor: utilColor }}
+                        />
+                      </View>
+                    </View>
+                  )}
+
+                  <View style={[styles.cardFooter, { marginTop: 12 }]}>
+                    {available !== null ? (
+                      <View>
+                        <ThemedText style={{ fontSize: 10, color: colors.secondary, textTransform: 'uppercase', fontWeight: 'bold' }}>Available</ThemedText>
+                        <ThemedText style={{ color: colors.success, fontWeight: 'bold', fontSize: 14 }}>
+                          {preferences.hideAmounts ? '****' : `${preferences.currency}${available.toLocaleString('en-IN')}`}
+                        </ThemedText>
+                      </View>
+                    ) : <View />}
+
+                    {!hasCycle ? (
+                      <TouchableOpacity
+                        onPress={() => navigation.navigate('AddAccount', { accountToEdit: card })}
+                        style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                      >
+                        <LucidePencil color={colors.muted} size={11} />
+                        <ThemedText style={{ fontSize: 11, color: colors.secondary }}>Set due date</ThemedText>
+                      </TouchableOpacity>
+                    ) : isPaidUp ? (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                        <LucideCheck color={colors.success} size={12} />
+                        <ThemedText style={{ color: colors.success, fontSize: 12, fontWeight: 'bold' }}>Paid up</ThemedText>
+                      </View>
+                    ) : nextEvent ? (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                        {isDueUrgent && <LucideAlertCircle color={colors.danger} size={12} />}
+                        <ThemedText style={{ color: isDueUrgent ? colors.danger : colors.secondary, fontSize: 12, fontWeight: isDueUrgent ? 'bold' : 'normal' }}>
+                          {nextEvent.kind === 'bill'
+                            ? `Next bill: ${nextEvent.date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`
+                            : nextEvent.daysUntil === 0 ? 'Due today!' : nextEvent.daysUntil === 1 ? 'Due tomorrow' : `Due in ${nextEvent.daysUntil}d`}
+                        </ThemedText>
+                      </View>
+                    ) : <View />}
+                  </View>
                 </TouchableOpacity>
-              )}
-            </View>
-          </TouchableOpacity>
-        );
-      })}
-    </MotiView>
-  );
+              );
+            })}
+          </>
+        )}
+      </MotiView>
+    );
+  };
+
+  const renderSplitCard = (split: SplitWithStats) => {
+    const collected = split.collectedAmount ?? 0;
+    const pending = split.pendingAmount ?? 0;
+    const total = collected + pending;
+    const pct = total > 0 ? Math.round((collected / total) * 100) : 100;
+    const allSettled = (split.pendingCount ?? 0) === 0;
+
+    return (
+      <TouchableOpacity
+        key={split.id}
+        style={styles.card}
+        onPress={() => navigation.navigate('SplitDetail', { splitId: split.id })}
+        activeOpacity={0.8}
+      >
+        <View style={styles.cardHeader}>
+          <View style={[styles.iconContainer, { backgroundColor: allSettled ? colors.success + '15' : colors.credit + '15' }]}>
+            <LucideUsers color={allSettled ? colors.success : colors.credit} size={20} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <ThemedText style={{ fontWeight: 'bold', fontSize: 15 }} numberOfLines={1}>{split.title}</ThemedText>
+            <ThemedText style={{ fontSize: 11, color: colors.secondary }}>
+              {split.memberCount} {split.memberCount === 1 ? 'person' : 'people'} ·{' '}
+              {new Date(split.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+            </ThemedText>
+          </View>
+          <View style={{ alignItems: 'flex-end' }}>
+            <ThemedText style={{ color: allSettled ? colors.success : colors.credit, fontWeight: 'bold', fontSize: 16 }}>
+              {preferences.currency}{pending.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+            </ThemedText>
+            <ThemedText style={{ fontSize: 10, color: colors.secondary }}>
+              {allSettled ? 'SETTLED' : 'PENDING'}
+            </ThemedText>
+          </View>
+          <LucideChevronRight color={colors.muted} size={16} style={{ marginLeft: 4 }} />
+        </View>
+        <View style={{ marginTop: 12 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
+            <ThemedText style={{ fontSize: 11, color: colors.secondary }}>Collection progress</ThemedText>
+            <ThemedText style={{ color: allSettled ? colors.success : colors.credit, fontSize: 11, fontWeight: 'bold' }}>{pct}%</ThemedText>
+          </View>
+          <View style={{ height: 5, backgroundColor: colors.border, borderRadius: 3, overflow: 'hidden' }}>
+            <MotiView
+              from={{ width: '0%' }}
+              animate={{ width: `${pct}%` }}
+              transition={{ type: 'timing', duration: 900 }}
+              style={{ height: '100%', backgroundColor: allSettled ? colors.success : colors.credit }}
+            />
+          </View>
+        </View>
+        <View style={[styles.cardFooter, { marginTop: 10 }]}>
+          <ThemedText style={{ fontSize: 11, color: colors.secondary }}>
+            Total: {preferences.currency}{split.totalAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+          </ThemedText>
+          {!allSettled && (
+            <ThemedText style={{ fontSize: 11, color: colors.secondary }}>
+              {split.pendingCount} {split.pendingCount === 1 ? 'person' : 'people'} pending
+            </ThemedText>
+          )}
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
   const renderSplitsTab = () => {
-    const totalPending = splits.reduce((s, sp) => s + (sp.pendingAmount ?? 0), 0);
+    const inProgressSplits = splits.filter(sp => (sp.pendingCount ?? 0) > 0);
+    const completedSplits = splits.filter(sp => (sp.pendingCount ?? 0) === 0);
+    const totalPending = inProgressSplits.reduce((s, sp) => s + (sp.pendingAmount ?? 0), 0);
+
+    const toggleCompleted = () => {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setShowCompletedSplits(v => !v);
+    };
+
     return (
       <MotiView from={{ opacity: 0, translateX: 20 }} animate={{ opacity: 1, translateX: 0 }} exit={{ opacity: 0, translateX: -20 }}>
         {splits.length === 0 ? (
@@ -870,68 +1101,42 @@ export const FinancesScreen = ({ navigation, route }: any) => {
                 </View>
               </View>
             )}
-            {splits.map(split => {
-              const collected = split.collectedAmount ?? 0;
-              const pending = split.pendingAmount ?? 0;
-              const total = collected + pending;
-              const pct = total > 0 ? Math.round((collected / total) * 100) : 100;
-              const allSettled = (split.pendingCount ?? 0) === 0;
 
-              return (
+            {inProgressSplits.length === 0 ? (
+              <View style={[styles.emptyContainer, { marginTop: 24 }]}>
+                <View style={[styles.emptyIcon, { backgroundColor: colors.success + '15' }]}>
+                  <LucideCheck color={colors.success} size={32} />
+                </View>
+                <ThemedText style={{ fontWeight: 'bold', textAlign: 'center' }}>All caught up</ThemedText>
+                <ThemedText style={{ fontSize: 12, color: colors.secondary, textAlign: 'center', marginTop: 8, paddingHorizontal: 24 }}>
+                  No splits are waiting on collection right now.
+                </ThemedText>
+              </View>
+            ) : (
+              inProgressSplits.map(split => renderSplitCard(split))
+            )}
+
+            {completedSplits.length > 0 && (
+              <>
                 <TouchableOpacity
-                  key={split.id}
-                  style={styles.card}
-                  onPress={() => navigation.navigate('SplitDetail', { splitId: split.id })}
-                  activeOpacity={0.8}
+                  onPress={toggleCompleted}
+                  activeOpacity={0.7}
+                  style={{
+                    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                    marginTop: inProgressSplits.length > 0 ? 8 : 0, marginBottom: 10, paddingVertical: 4,
+                  }}
                 >
-                  <View style={styles.cardHeader}>
-                    <View style={[styles.iconContainer, { backgroundColor: allSettled ? colors.success + '15' : colors.credit + '15' }]}>
-                      <LucideUsers color={allSettled ? colors.success : colors.credit} size={20} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <ThemedText style={{ fontWeight: 'bold', fontSize: 15 }} numberOfLines={1}>{split.title}</ThemedText>
-                      <ThemedText style={{ fontSize: 11, color: colors.secondary }}>
-                        {split.memberCount} {split.memberCount === 1 ? 'person' : 'people'} ·{' '}
-                        {new Date(split.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
-                      </ThemedText>
-                    </View>
-                    <View style={{ alignItems: 'flex-end' }}>
-                      <ThemedText style={{ color: allSettled ? colors.success : colors.credit, fontWeight: 'bold', fontSize: 16 }}>
-                        {preferences.currency}{pending.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
-                      </ThemedText>
-                      <ThemedText style={{ fontSize: 10, color: colors.secondary }}>
-                        {allSettled ? 'SETTLED' : 'PENDING'}
-                      </ThemedText>
-                    </View>
-                    <LucideChevronRight color={colors.muted} size={16} style={{ marginLeft: 4 }} />
-                  </View>
-                  <View style={{ marginTop: 12 }}>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
-                      <ThemedText style={{ fontSize: 11, color: colors.secondary }}>Collection progress</ThemedText>
-                      <ThemedText style={{ color: allSettled ? colors.success : colors.credit, fontSize: 11, fontWeight: 'bold' }}>{pct}%</ThemedText>
-                    </View>
-                    <View style={{ height: 5, backgroundColor: colors.border, borderRadius: 3, overflow: 'hidden' }}>
-                      <MotiView
-                        from={{ width: '0%' }}
-                        animate={{ width: `${pct}%` }}
-                        transition={{ type: 'timing', duration: 900 }}
-                        style={{ height: '100%', backgroundColor: allSettled ? colors.success : colors.credit }}
-                      />
-                    </View>
-                  </View>
-                  <View style={[styles.cardFooter, { marginTop: 10 }]}>
-                    <ThemedText style={{ fontSize: 11, color: colors.secondary }}>
-                      Total: {preferences.currency}{split.totalAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
-                    </ThemedText>
-                    {!allSettled && (
-                      <ThemedText style={{ fontSize: 11, color: colors.secondary }}>
-                        {split.pendingCount} {split.pendingCount === 1 ? 'person' : 'people'} pending
-                      </ThemedText>
-                    )}
-                  </View>
+                  <ThemedText style={{ fontSize: 11, color: colors.secondary, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 1 }}>
+                    Completed ({completedSplits.length})
+                  </ThemedText>
+                  <LucideChevronDown
+                    color={colors.secondary} size={16}
+                    style={{ transform: [{ rotate: showCompletedSplits ? '180deg' : '0deg' }] }}
+                  />
                 </TouchableOpacity>
-              );
-            })}
+                {showCompletedSplits && completedSplits.map(split => renderSplitCard(split))}
+              </>
+            )}
           </>
         )}
       </MotiView>

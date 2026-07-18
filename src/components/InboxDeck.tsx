@@ -6,15 +6,17 @@
  * DISMISS (alert). Cards behind rise (scale + lift) as you drag, so the next
  * one is already arriving before the top leaves. Velocity flicks count too.
  *
- * The card height is FIXED — all editing (category / account / tags / rename)
- * happens in bottom sheets owned by the screen, never by growing the card.
- * That's what keeps the deck illusion stable.
+ * The card height is FIXED — category / account / tags editing happens in
+ * bottom sheets owned by the screen, never by growing the card. Rename is the
+ * one exception: it's inline (pencil icon toggles a same-height TextInput),
+ * so it doesn't disturb the deck illusion either.
  */
 import React, { useRef, useCallback, useMemo, useEffect } from "react";
 import {
   View,
   Pressable,
   TouchableOpacity,
+  TextInput,
   useWindowDimensions,
 } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
@@ -54,7 +56,7 @@ export interface CardHandlers {
   onEditAccount: (tx: Transaction) => void;
   onEditToAccount: (tx: Transaction) => void;
   onEditTags: (tx: Transaction) => void;
-  onRename: (tx: Transaction) => void;
+  onRename: (tx: Transaction, name: string) => void;
   onTypeChange: (
     tx: Transaction,
     type: "debit" | "credit" | "transfer",
@@ -132,6 +134,12 @@ const InboxCardFace: React.FC<CardFaceProps> = ({
   preview,
 }) => {
   const { colors } = useTheme();
+  const [isEditingName, setIsEditingName] = React.useState(false);
+  const [editedName, setEditedName] = React.useState(tx.merchant);
+  const commitName = useCallback(() => {
+    setIsEditingName(false);
+    handlers.onRename(tx, editedName);
+  }, [handlers, tx, editedName]);
   const isOffline = tx.confidence === "low" && !!tx.rawSms;
   const sourceLabel =
     tx.source === "sms"
@@ -285,23 +293,66 @@ const InboxCardFace: React.FC<CardFaceProps> = ({
           </ThemedText>
         </View>
 
-        {/* Merchant — tap to rename */}
-        <Pressable
-          onPress={() => !preview && handlers.onRename(tx)}
-          disabled={preview}
-          style={{ marginTop: 12 }}
+        {/* Merchant — pencil icon toggles inline rename */}
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            marginTop: 12,
+          }}
         >
-          <ThemedText
-            style={{
-              fontFamily: fonts.displayBold,
-              fontSize: 22,
-              letterSpacing: -0.3,
-            }}
-            numberOfLines={1}
-          >
-            {tx.merchant || "Unknown"}
-          </ThemedText>
-        </Pressable>
+          {isEditingName ? (
+            <TextInput
+              value={editedName}
+              onChangeText={setEditedName}
+              onSubmitEditing={commitName}
+              onBlur={commitName}
+              autoFocus
+              selectTextOnFocus
+              style={{
+                flex: 1,
+                fontFamily: fonts.displayBold,
+                fontSize: 22,
+                letterSpacing: -0.3,
+                color: colors.primary,
+                padding: 0,
+              }}
+            />
+          ) : (
+            <ThemedText
+              style={{
+                flexShrink: 1,
+                fontFamily: fonts.displayBold,
+                fontSize: 22,
+                letterSpacing: -0.3,
+              }}
+              numberOfLines={1}
+            >
+              {tx.merchant || "Unknown"}
+            </ThemedText>
+          )}
+          {!preview && (
+            <Pressable
+              hitSlop={8}
+              onPress={() => (isEditingName ? commitName() : setIsEditingName(true))}
+              style={{
+                marginLeft: 8,
+                width: 28,
+                height: 28,
+                borderRadius: 8,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: colors.translucent,
+              }}
+            >
+              {isEditingName ? (
+                <LucideCheck color={colors.success} size={15} />
+              ) : (
+                <LucidePencil color={colors.secondary} size={14} />
+              )}
+            </Pressable>
+          )}
+        </View>
         <ThemedText
           font="signal"
           type="secondary"

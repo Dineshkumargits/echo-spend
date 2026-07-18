@@ -670,10 +670,14 @@ export const getTransactions = async (opts?: {
     conditions.push('category = ?');
     params.push(opts.category);
   } else if (opts?.categoryGroup) {
-    // Match the parent category itself OR any of its subcategories (resolved from
-    // the categories tree in SQL, so callers don't need the category hierarchy).
+    // Match the group name directly against the transaction's own (denormalized)
+    // category text, OR any current subcategory of a live category with that name.
+    // The direct match is required even though the group name is also looked up in
+    // `categories` below: a category can be renamed/deleted after transactions were
+    // recorded under its old name (categories.name isn't a FK target), so an
+    // existing-category-only lookup would silently drop those older transactions.
     conditions.push(
-      `category IN (SELECT name FROM categories WHERE name = ? OR parentId = (SELECT id FROM categories WHERE name = ? AND parentId IS NULL))`
+      `(category = ? OR category IN (SELECT name FROM categories WHERE parentId = (SELECT id FROM categories WHERE name = ? AND parentId IS NULL)))`
     );
     params.push(opts.categoryGroup, opts.categoryGroup);
   }

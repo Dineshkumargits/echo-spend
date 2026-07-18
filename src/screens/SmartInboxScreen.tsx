@@ -48,7 +48,7 @@ import {
   Category,
 } from '../services/database';
 
-type SheetKind = null | 'category' | 'account' | 'toAccount' | 'rename' | 'tags';
+type SheetKind = null | 'category' | 'account' | 'toAccount' | 'tags';
 type CatType = 'expense' | 'income' | 'transfer';
 
 const SmartInboxScreen = ({ navigation }: any) => {
@@ -68,7 +68,6 @@ const SmartInboxScreen = ({ navigation }: any) => {
   const [sheet, setSheet] = useState<SheetKind>(null);
   const [catType, setCatType] = useState<CatType>('expense');
   const [catSearch, setCatSearch] = useState('');
-  const [tempName, setTempName] = useState('');
 
   // Pending soft-dismiss (swipe left) awaiting the undo window before real delete.
   const [pending, setPending] = useState<Transaction | null>(null);
@@ -197,15 +196,13 @@ const SmartInboxScreen = ({ navigation }: any) => {
     patchTx(activeTx.id, { tags });
   }, [activeTx, patchTx]);
 
-  const saveName = useCallback(async () => {
-    if (!activeTx) return;
-    const name = tempName.trim();
-    if (name && name !== activeTx.merchant) {
-      await updateTransaction(activeTx.id, { merchant: name });
-      patchTx(activeTx.id, { merchant: name });
+  const saveName = useCallback(async (tx: Transaction, rawName: string) => {
+    const name = rawName.trim();
+    if (name && name !== tx.merchant) {
+      await updateTransaction(tx.id, { merchant: name });
+      patchTx(tx.id, { merchant: name });
     }
-    setSheet(null);
-  }, [activeTx, tempName, patchTx]);
+  }, [patchTx]);
 
   // ─── Sheet openers wired into the deck's card chips ─────────────────────────
 
@@ -218,9 +215,9 @@ const SmartInboxScreen = ({ navigation }: any) => {
     onEditAccount: () => setSheet('account'),
     onEditToAccount: () => setSheet('toAccount'),
     onEditTags: () => setSheet('tags'),
-    onRename: (tx) => { setTempName(tx.merchant); setSheet('rename'); },
+    onRename: saveName,
     onTypeChange: handleTypeChange,
-  }), [handleTypeChange]);
+  }), [handleTypeChange, saveName]);
 
   // ─── Bulk actions ───────────────────────────────────────────────────────────
 
@@ -560,12 +557,6 @@ const SmartInboxScreen = ({ navigation }: any) => {
         </View>
       </BottomSheet>
 
-      <BottomSheet visible={sheet === 'rename'} onClose={() => setSheet(null)} title="Rename merchant">
-        <View style={{ paddingHorizontal: 20, paddingTop: 8 }}>
-          <TextField value={tempName} onChangeText={setTempName} placeholder="Merchant name" autoFocus onSubmitEditing={saveName} />
-          <PrimaryButton label="Save" onPress={saveName} tone="pulse" style={{ marginTop: 16 }} />
-        </View>
-      </BottomSheet>
     </ThemedSafeAreaView>
   );
 };
