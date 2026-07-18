@@ -29,6 +29,7 @@ import {
   LucideCoins,
   LucideEye,
   LucideEyeOff,
+  LucideChevronRight,
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { useStore } from "../store/useStore";
@@ -70,7 +71,8 @@ import {
   getCategoryBreakdown,
   CategoryBreakdown,
   getBudgetUtilization,
-  Budget,
+  BudgetUtilization,
+  budgetSelections,
   getPendingSplitMembers,
   PendingSplitMember,
   getActiveInsights,
@@ -138,9 +140,7 @@ const DashboardScreen = ({ navigation }: any) => {
   // ── New state (§4) ──────────────────────────────────────────────────────────
   const [trend14, setTrend14] = useState<SpendTrendPoint[]>([]);
   const [topCategories, setTopCategories] = useState<CategoryBreakdown[]>([]);
-  const [budgetWatch, setBudgetWatch] = useState<
-    { budget: Budget; spent: number; percentage: number }[]
-  >([]);
+  const [budgetWatch, setBudgetWatch] = useState<BudgetUtilization[]>([]);
   const [pendingSplits, setPendingSplits] = useState<PendingSplitMember[]>([]);
   const [insights, setInsights] = useState<Insight[]>([]);
   const [lastScanAt, setLastScanAt] = useState<string | null>(null);
@@ -389,11 +389,15 @@ const DashboardScreen = ({ navigation }: any) => {
     );
   }, [transactions]);
 
-  // §3.7 Budget watch — top 3, only if any ≥ 60%
+  // §3.7 Budget watch — top 3 (already urgency-sorted by the DB), shown when
+  // anything is ≥60% used OR pacing to blow its limit.
   const budgetWatchFiltered = useMemo(() => {
-    const sorted = [...budgetWatch].sort((a, b) => b.percentage - a.percentage);
-    const top3 = sorted.slice(0, 3);
-    return top3.some((b) => b.percentage >= 60) ? top3 : [];
+    const top3 = budgetWatch.filter((b) => !b.orphaned).slice(0, 3);
+    return top3.some(
+      (b) => b.percentage >= 60 || b.pace === "risk" || b.pace === "over",
+    )
+      ? top3
+      : [];
   }, [budgetWatch]);
 
   // §3.8 Owed total
@@ -922,25 +926,51 @@ const DashboardScreen = ({ navigation }: any) => {
 
         {/* §3.7 Budget watch mini */}
         {budgetWatchFiltered.length > 0 && (
-          <Pressable
-            onPress={() => {
-              triggerHaptic();
-              navigation.navigate("Budget");
-            }}
-            style={{ marginBottom: 24 }}
-          >
-            <SectionLabel style={{ marginBottom: 10 }}>
-              Budget watch
-            </SectionLabel>
+          <View style={{ marginBottom: 24 }}>
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 10,
+              }}
+            >
+              <SectionLabel>Budget watch</SectionLabel>
+              <TouchableOpacity
+                onPress={() => {
+                  triggerHaptic();
+                  navigation.navigate("Budget");
+                }}
+                style={{ flexDirection: "row", alignItems: "center", gap: 2 }}
+                hitSlop={8}
+              >
+                <ThemedText
+                  font="signal"
+                  style={{ fontSize: 10, color: colors.accent }}
+                >
+                  MANAGE
+                </ThemedText>
+                <LucideChevronRight color={colors.accent} size={13} />
+              </TouchableOpacity>
+            </View>
             {budgetWatchFiltered.map((item) => {
               const barColor =
-                item.percentage >= 100
+                item.pace === "over" || item.percentage >= 100
                   ? colors.danger
-                  : item.percentage >= 80
-                    ? colors.debit
+                  : item.pace === "risk"
+                    ? colors.warning
                     : colors.credit;
               return (
-                <View key={item.budget.id} style={{ marginBottom: 10 }}>
+                <Pressable
+                  key={item.budget.id}
+                  onPress={() => {
+                    triggerHaptic();
+                    navigation.navigate("Txns", {
+                      presetCategoryGroups: budgetSelections(item.budget),
+                    });
+                  }}
+                  style={{ marginBottom: 10 }}
+                >
                   <View
                     style={{
                       flexDirection: "row",
@@ -953,7 +983,7 @@ const DashboardScreen = ({ navigation }: any) => {
                       style={{ fontFamily: fonts.textSemibold, fontSize: 13 }}
                       numberOfLines={1}
                     >
-                      {item.budget.categoryName}
+                      {item.displayName}
                     </ThemedText>
                     <ThemedText
                       font="signal"
@@ -963,14 +993,33 @@ const DashboardScreen = ({ navigation }: any) => {
                         fontFamily: fonts.signalBold,
                       }}
                     >
-                      {item.percentage}%
+                      {item.pace === "risk"
+                        ? `${item.percentage}% · pacing over`
+                        : `${item.percentage}%`}
                     </ThemedText>
                   </View>
-                  <CycleBar pct={item.percentage} color={barColor} height={4} />
-                </View>
+                  <View>
+                    <CycleBar
+                      pct={item.percentage}
+                      color={barColor}
+                      height={4}
+                    />
+                    {/* Elapsed-cycle tick: where usage "should" be today */}
+                    <View
+                      style={{
+                        position: "absolute",
+                        left: `${Math.min(item.elapsedPct, 99)}%`,
+                        top: -1,
+                        width: 2,
+                        height: 6,
+                        backgroundColor: colors.secondary,
+                      }}
+                    />
+                  </View>
+                </Pressable>
               );
             })}
-          </Pressable>
+          </View>
         )}
 
         {/* §3.8 Owed to you */}

@@ -207,6 +207,9 @@ const TransactionsScreen = () => {
   const presetCategory: string | undefined = route.params?.presetCategory;
   const presetCategoryGroup: string | undefined =
     route.params?.presetCategoryGroup;
+  // Multi-group preset (e.g. a multi-category budget drill-down)
+  const presetCategoryGroups: string[] | undefined =
+    route.params?.presetCategoryGroups;
   const presetSearch: string | undefined = route.params?.presetSearch;
 
   // ── State ────────────────────────────────────────────────────────────────
@@ -216,6 +219,9 @@ const TransactionsScreen = () => {
     ...(presetAccountId ? { accountId: presetAccountId } : null),
     ...(presetCategory ? { categoryNames: [presetCategory] } : null),
     ...(presetCategoryGroup ? { categoryGroups: [presetCategoryGroup] } : null),
+    ...(presetCategoryGroups?.length
+      ? { categoryGroups: presetCategoryGroups }
+      : null),
   }));
   const [showFilters, setShowFilters] = useState(false);
   // One sheet-local search that narrows the account / category / tag pill
@@ -248,6 +254,7 @@ const TransactionsScreen = () => {
       !presetAccountId &&
       !presetCategory &&
       !presetCategoryGroup &&
+      !presetCategoryGroups?.length &&
       presetSearch === undefined
     )
       return;
@@ -260,6 +267,9 @@ const TransactionsScreen = () => {
     if (presetCategoryGroup) {
       setFilters((f) => ({ ...f, categoryGroups: [presetCategoryGroup], categoryNames: [] }));
     }
+    if (presetCategoryGroups?.length) {
+      setFilters((f) => ({ ...f, categoryGroups: presetCategoryGroups, categoryNames: [] }));
+    }
     if (presetSearch !== undefined) {
       setSearch(presetSearch);
     }
@@ -267,9 +277,10 @@ const TransactionsScreen = () => {
       presetAccountId: undefined,
       presetCategory: undefined,
       presetCategoryGroup: undefined,
+      presetCategoryGroups: undefined,
       presetSearch: undefined,
     });
-  }, [presetAccountId, presetCategory, presetCategoryGroup, presetSearch, navigation]);
+  }, [presetAccountId, presetCategory, presetCategoryGroup, presetCategoryGroups, presetSearch, navigation]);
 
   // ── Load metadata ─────────────────────────────────────────────────────────
   useEffect(() => {

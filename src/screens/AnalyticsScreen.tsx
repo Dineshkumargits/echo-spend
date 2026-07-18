@@ -56,7 +56,8 @@ import {
   CategoryBreakdown,
   Insight,
   Category,
-  Budget,
+  BudgetUtilization,
+  budgetSelections,
   Transaction,
 } from "../services/database";
 import { useAIInsights } from "../hooks/useAIInsights";
@@ -85,9 +86,7 @@ const AnalyticsScreen = () => {
     { tag: string; total: number; count: number }[]
   >([]);
   const [monthlyTotals, setMonthlyTotals] = useState<any[]>([]);
-  const [budgetUtil, setBudgetUtil] = useState<
-    { budget: Budget; spent: number; percentage: number }[]
-  >([]);
+  const [budgetUtil, setBudgetUtil] = useState<BudgetUtilization[]>([]);
   const [highSpends, setHighSpends] = useState<Transaction[]>([]);
   const [weekday, setWeekday] = useState<
     { weekday: number; total: number; count: number }[]
@@ -703,6 +702,18 @@ const AnalyticsScreen = () => {
                     );
                     const catIcon = parentDef?.icon || "HelpCircle";
                     const catColor = parentDef?.color || colors.secondary;
+                    const budgetRow = budgetUtil.find(
+                      (u) =>
+                        !u.orphaned &&
+                        budgetSelections(u.budget).includes(parentName),
+                    );
+                    const budgetColor = budgetRow
+                      ? budgetRow.pace === "over" || budgetRow.percentage >= 100
+                        ? colors.danger
+                        : budgetRow.pace === "risk"
+                          ? colors.warning
+                          : colors.credit
+                      : colors.muted;
                     const totalPct =
                       Math.round((data.total / (monthTotalSpend || 1)) * 100) ||
                       0;
@@ -728,9 +739,24 @@ const AnalyticsScreen = () => {
                             >
                               {renderCategoryIcon(catIcon, catColor, 14)}
                             </View>
-                            <ThemedText className="font-bold">
-                              {parentName}
-                            </ThemedText>
+                            <View style={{ flex: 1, minWidth: 0 }}>
+                              <ThemedText className="font-bold" numberOfLines={1}>
+                                {parentName}
+                              </ThemedText>
+                              {budgetRow && (
+                                <ThemedText
+                                  font="signal"
+                                  style={{
+                                    fontSize: 9,
+                                    color: budgetColor,
+                                    fontVariant: ["tabular-nums"],
+                                  }}
+                                >
+                                  {budgetRow.percentage}% of{" "}
+                                  {fmtShort(budgetRow.effectiveLimit)} budget
+                                </ThemedText>
+                              )}
+                            </View>
                           </View>
                           <View className="items-end flex-row" style={{ gap: 4 }}>
                             <View className="items-end">
@@ -1016,20 +1042,20 @@ const AnalyticsScreen = () => {
             </View>
             <View className="p-4 rounded-apple-md border" style={cardStyle}>
               {budgetUtil
-                .slice()
-                .sort((a, b) => b.percentage - a.percentage)
-                .map(({ budget, spent, percentage }, i) => {
+                .filter((u) => !u.orphaned)
+                .map((u, i) => {
+                  const { budget, spent, percentage } = u;
                   const barColor =
-                    percentage >= 100
+                    u.pace === "over" || percentage >= 100
                       ? colors.danger
-                      : percentage >= 80
-                        ? colors.debit
+                      : u.pace === "risk"
+                        ? colors.warning
                         : colors.credit;
                   return (
                     <View key={budget.id} className={i > 0 ? "mt-4" : ""}>
                       <View className="flex-row justify-between items-center mb-1.5">
                         <ThemedText className="text-sm font-bold">
-                          {budget.categoryName}
+                          {u.displayName}
                         </ThemedText>
                         <ThemedText
                           font="signal"
@@ -1039,8 +1065,10 @@ const AnalyticsScreen = () => {
                             fontVariant: ["tabular-nums"],
                           }}
                         >
-                          {fmtShort(spent)} / {fmtShort(budget.amount)} ·{" "}
-                          {percentage}%
+                          {fmtShort(spent)} / {fmtShort(u.effectiveLimit)} ·{" "}
+                          {u.pace === "risk"
+                            ? `${percentage}% · pacing over`
+                            : `${percentage}%`}
                         </ThemedText>
                       </View>
                       <View
@@ -1053,6 +1081,17 @@ const AnalyticsScreen = () => {
                           transition={{ type: "timing", duration: 700 }}
                           className="h-full rounded-full"
                           style={{ backgroundColor: barColor }}
+                        />
+                        {/* Elapsed-window tick — usage should be near this line */}
+                        <View
+                          style={{
+                            position: "absolute",
+                            left: `${Math.min(u.elapsedPct, 99)}%`,
+                            top: 0,
+                            bottom: 0,
+                            width: 2,
+                            backgroundColor: colors.secondary,
+                          }}
                         />
                       </View>
                     </View>

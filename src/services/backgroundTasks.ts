@@ -18,10 +18,10 @@ import {
   getCurrentMonthSpend,
   getCategoryBreakdown,
   getSpendTrend,
-  getBudgetUtilization,
   isRawSmsAlreadyExists,
   isSmsDuplicateTransaction,
 } from './database';
+import { runCategoryBudgetAlerts } from './budgetAlerts';
 import { SmsParserService, hashSms, matchSmsToAccount } from './smsParserService';
 import { NotificationService } from './notifications';
 import { AIModelManager } from './aiModelManager';
@@ -534,32 +534,9 @@ TaskManager.defineTask(BACKGROUND_ALERTS_TASK, async () => {
       }
     }
 
-    // ── 2. Per-category budget alerts ────────────────────────────────────────
+    // ── 2. Per-category budget alerts (shared with the foreground hook) ──────
     if (preferences.budgetAlerts) {
-      const utilizations = await getBudgetUtilization(preferences.salaryDay);
-      for (const u of utilizations) {
-        const pct = Math.floor(u.percentage / 10) * 10;
-        const lastPct = preferences.budgetNotificationHistory[u.budget.id] || 0;
-
-        if (pct >= 80 && pct > lastPct) {
-          if (pct >= 100) {
-            await NotificationService.scheduleLocalNotification(
-              `Budget Exceeded: ${u.budget.categoryName}`,
-              `You've overspent your ${u.budget.categoryName} budget by ${preferences.currency}${(u.spent - u.budget.amount).toFixed(0)}.`,
-              'budget',
-              { screen: 'Budget' }
-            );
-          } else {
-            await NotificationService.scheduleLocalNotification(
-              `Budget Alert: ${u.budget.categoryName}`,
-              `You've used ${u.percentage}% of your ${u.budget.categoryName} budget (${preferences.currency}${u.spent.toFixed(0)} / ${preferences.currency}${u.budget.amount.toFixed(0)}).`,
-              'budget',
-              { screen: 'Budget' }
-            );
-          }
-          updateBudgetNotificationHistory(u.budget.id, pct);
-        }
-      }
+      await runCategoryBudgetAlerts();
     }
 
     // ── 3. Weekly Digest (Sunday only, once per day) ─────────────────────────

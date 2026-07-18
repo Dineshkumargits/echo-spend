@@ -3,6 +3,7 @@ import {
   ThemedText,
 } from "../components/ThemedSafeAreaView";
 import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { showBudgetImpactToast } from "../services/budgetAlerts";
 import {
   View,
   StyleSheet,
@@ -1352,7 +1353,11 @@ export const AddTransactionScreen = ({ navigation: navProp, route }: any) => {
       );
     }
 
-    notify.success("Transaction saved");
+    if (type === "debit") {
+      showBudgetImpactToast(category);
+    } else {
+      notify.success("Transaction saved");
+    }
     checkBudgetAlerts();
     navigation.goBack();
   };

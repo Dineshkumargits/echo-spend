@@ -104,10 +104,18 @@ export interface Account {
 
 export interface Budget {
   id: number;
+  /** primary category (first selection) — kept for display and back-compat */
   categoryName: string;
+  /**
+   * All selected category names. A name that is a parent category implicitly
+   * covers its subcategories too. Absent/empty → treat as [categoryName].
+   */
+  categoryNames?: string[];
   amount: number;
   period: 'monthly' | 'weekly';
   startDate: string;
+  /** carry last window's leftover (or overspend) into the current limit */
+  rollover?: boolean;
 }
 
 export interface Insight {
@@ -395,6 +403,8 @@ const runMigrations = async () => {
 
   // Legacy migrations (catch failures if columns already exist)
   const migrations = [
+    'ALTER TABLE budgets ADD COLUMN rollover INTEGER DEFAULT 0',
+    'ALTER TABLE budgets ADD COLUMN categoryNames TEXT',
     'ALTER TABLE transactions ADD COLUMN isRecurring INTEGER DEFAULT 0',
     'ALTER TABLE transactions ADD COLUMN recurrenceRule TEXT',
     'ALTER TABLE transactions ADD COLUMN notes TEXT',
@@ -1693,36 +1703,126 @@ export const addCategory = async (category: Omit<Category, 'id'>) => {
 };
 
 export const updateCategory = async (category: Category) => {
+  // Budgets reference categories by loose name text — follow a rename so the
+  // budget doesn't silently orphan.
+  const before = await db.getFirstAsync<{ name: string }>(
+    'SELECT name FROM categories WHERE id = ?', category.id
+  );
   await db.runAsync(
     'UPDATE categories SET name = ?, icon = ?, color = ?, type = ?, parentId = ? WHERE id = ?',
     category.name, category.icon, category.color, category.type, category.parentId || null, category.id
   );
+  if (before && before.name !== category.name) {
+    await renameCategoryNameInBudgets(before.name, category.name);
+  }
 };
 
 export const deleteCategory = async (id: number) => {
+  // Collect the category and its subcategories (they cascade-delete) so their
+  // budgets don't linger as orphans.
+  const doomed = await db.getAllAsync<{ name: string }>(
+    'SELECT name FROM categories WHERE id = ? OR parentId = ?', id, id
+  );
   await db.runAsync('DELETE FROM categories WHERE id = ?', id);
+  for (const row of doomed) {
+    await removeCategoryNameFromBudgets(row.name);
+  }
+};
+
+/** Rename a category inside every budget selection that references it. */
+const renameCategoryNameInBudgets = async (oldName: string, newName: string) => {
+  const budgets = await getBudgets();
+  for (const b of budgets) {
+    const sel = budgetSelections(b);
+    if (!sel.includes(oldName)) continue;
+    const next = [...new Set(sel.map((n) => (n === oldName ? newName : n)))];
+    await db.runAsync(
+      'UPDATE budgets SET categoryName = ?, categoryNames = ? WHERE id = ?',
+      next[0], JSON.stringify(next), b.id
+    );
+  }
+};
+
+/**
+ * Drop a deleted category from budget selections: multi-category budgets keep
+ * their remaining selections; single-category budgets are removed entirely.
+ */
+const removeCategoryNameFromBudgets = async (name: string) => {
+  const budgets = await getBudgets();
+  for (const b of budgets) {
+    const sel = budgetSelections(b);
+    if (!sel.includes(name)) continue;
+    const rest = sel.filter((n) => n !== name);
+    if (rest.length === 0) {
+      await db.runAsync('DELETE FROM budgets WHERE id = ?', b.id);
+    } else {
+      await db.runAsync(
+        'UPDATE budgets SET categoryName = ?, categoryNames = ? WHERE id = ?',
+        rest[0], JSON.stringify(rest), b.id
+      );
+    }
+  }
 };
 
 // ─── Budgets ─────────────────────────────────────────────────────────────────
 
-export const getBudgets = async (): Promise<Budget[]> => {
-  return await db.getAllAsync<Budget>('SELECT * FROM budgets ORDER BY categoryName');
+const mapBudgetRow = (row: any): Budget => {
+  let categoryNames: string[] | undefined;
+  try {
+    categoryNames = row.categoryNames ? JSON.parse(row.categoryNames) : undefined;
+  } catch {
+    categoryNames = undefined;
+  }
+  return { ...row, categoryNames, rollover: !!row.rollover };
 };
 
-export const upsertBudget = async (budget: Omit<Budget, 'id'>) => {
-  const existing = await db.getFirstAsync<Budget>(
-    'SELECT id FROM budgets WHERE categoryName = ? AND period = ?',
-    budget.categoryName, budget.period
+/** The category names a budget explicitly targets (multi-select aware). */
+export const budgetSelections = (b: Budget): string[] =>
+  b.categoryNames && b.categoryNames.length > 0 ? b.categoryNames : [b.categoryName];
+
+/** Human label: single name, or "First + N more" for bundled budgets. */
+export const budgetDisplayName = (b: Budget): string => {
+  const sel = budgetSelections(b);
+  if (sel.length === 1) return sel[0];
+  if (sel.length === 2) return `${sel[0]} + ${sel[1]}`;
+  return `${sel[0]} + ${sel.length - 1} more`;
+};
+
+export const getBudgets = async (): Promise<Budget[]> => {
+  const rows = await db.getAllAsync<any>('SELECT * FROM budgets ORDER BY categoryName');
+  return rows.map(mapBudgetRow);
+};
+
+export const upsertBudget = async (budget: Omit<Budget, 'id'> & { id?: number }) => {
+  const selections =
+    budget.categoryNames && budget.categoryNames.length > 0
+      ? budget.categoryNames
+      : [budget.categoryName];
+  const primary = selections[0];
+  const namesJson = JSON.stringify(selections);
+
+  const update = (id: number) =>
+    db.runAsync(
+      'UPDATE budgets SET categoryName = ?, categoryNames = ?, amount = ?, period = ?, startDate = ?, rollover = ? WHERE id = ?',
+      primary, namesJson, budget.amount, budget.period, budget.startDate, budget.rollover ? 1 : 0, id
+    );
+
+  if (budget.id != null) {
+    await update(budget.id);
+    return;
+  }
+  // Same selection set + period → overwrite instead of duplicating. Legacy
+  // rows (null categoryNames) compare as their own single-name selection.
+  const existing = await db.getFirstAsync<{ id: number }>(
+    `SELECT id FROM budgets WHERE period = ? AND IFNULL(categoryNames, '["' || categoryName || '"]') = ?`,
+    budget.period, namesJson
   );
   if (existing) {
-    await db.runAsync(
-      'UPDATE budgets SET amount = ?, startDate = ? WHERE id = ?',
-      budget.amount, budget.startDate, existing.id
-    );
+    await update(existing.id);
   } else {
     await db.runAsync(
-      'INSERT INTO budgets (categoryName, amount, period, startDate) VALUES (?, ?, ?, ?)',
-      budget.categoryName, budget.amount, budget.period, budget.startDate
+      'INSERT INTO budgets (categoryName, categoryNames, amount, period, startDate, rollover) VALUES (?, ?, ?, ?, ?, ?)',
+      primary, namesJson, budget.amount, budget.period, budget.startDate, budget.rollover ? 1 : 0
     );
   }
 };
@@ -1731,46 +1831,271 @@ export const deleteBudget = async (id: number) => {
   await db.runAsync('DELETE FROM budgets WHERE id = ?', id);
 };
 
-export const getBudgetUtilization = async (salaryDay = 1): Promise<{
-  budget: Budget;
-  spent: number;
-  percentage: number;
-}[]> => {
-  // Mirror the same salary-day billing cycle used by getCurrentMonthSpend so
-  // that budget gauges and month-spend totals always agree.
+// ── Budget windows ───────────────────────────────────────────────────────────
+
+/** Salary-day billing cycle, shifted by `shift` cycles (0 = current, -1 = previous). */
+const getSalaryCycleWindow = (salaryDay: number, shift = 0) => {
   const now = new Date();
-  const currentDay = now.getDate();
-  const currentMonth = now.getMonth();
-  const currentYear = now.getFullYear();
+  const base =
+    now.getDate() >= salaryDay
+      ? new Date(now.getFullYear(), now.getMonth(), salaryDay)
+      : new Date(now.getFullYear(), now.getMonth() - 1, salaryDay);
+  const start = new Date(base.getFullYear(), base.getMonth() + shift, salaryDay);
+  const end = new Date(base.getFullYear(), base.getMonth() + shift + 1, salaryDay);
+  return { start, end };
+};
 
-  let cycleStart: Date;
-  let cycleEnd: Date;
+/** Monday-start local calendar week, shifted by `shift` weeks. */
+const getWeekWindow = (shift = 0) => {
+  const now = new Date();
+  const dow = (now.getDay() + 6) % 7; // Mon=0 … Sun=6
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dow + shift * 7);
+  const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 7);
+  return { start, end };
+};
 
-  if (currentDay >= salaryDay) {
-    cycleStart = new Date(currentYear, currentMonth, salaryDay);
-    cycleEnd = new Date(currentYear, currentMonth + 1, salaryDay);
-  } else {
-    cycleStart = new Date(currentYear, currentMonth - 1, salaryDay);
-    cycleEnd = new Date(currentYear, currentMonth, salaryDay);
+/** One grouped query: spend per category text within [start, end). */
+const getSpendByCategory = async (start: Date, end: Date): Promise<Map<string, number>> => {
+  const rows = await db.getAllAsync<{ category: string; total: number }>(
+    `SELECT t.category as category, SUM(${EFFECTIVE_DEBIT_AMOUNT}) as total FROM transactions t
+     WHERE t.type = 'debit' AND t.isConfirmed = 1
+       AND (t.isTransfer = 0 OR t.isTransfer IS NULL)
+       AND t.date >= ? AND t.date < ?
+     GROUP BY t.category`,
+    start.toISOString(), end.toISOString()
+  );
+  return new Map(rows.map((r) => [r.category, r.total ?? 0]));
+};
+
+/**
+ * Names a set of selections covers: each selected name, plus — when a name is
+ * a live parent category — all of its subcategory names. Keeps budgets
+ * consistent with the hierarchy-aware Transactions filter and Analytics.
+ */
+const coveredCategoryNames = (
+  selections: string[],
+  categories: Category[],
+): string[] => {
+  const out = new Set<string>();
+  for (const name of selections) {
+    out.add(name);
+    const parent = categories.find((c) => c.name === name && !c.parentId);
+    if (parent) {
+      categories
+        .filter((c) => c.parentId === parent.id)
+        .forEach((c) => out.add(c.name));
+    }
   }
+  return [...out];
+};
 
-  const startStr = cycleStart.toISOString();
-  const endStr = cycleEnd.toISOString();
+const sumCovered = (names: string[], byCategory: Map<string, number>): number =>
+  names.reduce((acc, n) => acc + (byCategory.get(n) ?? 0), 0);
 
-  const budgets = await getBudgets();
-  const results = [];
-  for (const b of budgets) {
-    const row = await db.getFirstAsync<{ total: number }>(
-      `SELECT SUM(${EFFECTIVE_DEBIT_AMOUNT}) as total FROM transactions t
-       WHERE t.category = ? AND t.type = 'debit' AND t.isConfirmed = 1
-         AND (t.isTransfer = 0 OR t.isTransfer IS NULL)
-         AND t.date >= ? AND t.date < ?`,
-      b.categoryName, startStr, endStr
+export type BudgetPace = 'under' | 'on_track' | 'risk' | 'over';
+
+export interface BudgetUtilization {
+  budget: Budget;
+  /** label for UI: single name or "First + N more" */
+  displayName: string;
+  /** how many category names this budget's spend matching covers */
+  coveredCount: number;
+  spent: number;
+  /** % of effective limit used (rounded) */
+  percentage: number;
+  /** amount + rollover carry from last window (never below 0) */
+  effectiveLimit: number;
+  /** carried from previous window when rollover enabled (may be negative) */
+  rolloverCarry: number;
+  remaining: number;
+  prevSpent: number;
+  daysTotal: number;
+  daysLeft: number;
+  /** % of the budget window elapsed (rounded) */
+  elapsedPct: number;
+  /** run-rate projection of spend at window end */
+  projectedSpend: number;
+  pace: BudgetPace;
+  /** true when the budget's category no longer exists */
+  orphaned: boolean;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export const getBudgetUtilization = async (salaryDay = 1): Promise<BudgetUtilization[]> => {
+  // Salary-day cycle mirrors getCurrentMonthSpend so gauges and month totals
+  // agree; weekly budgets get a real Monday-start week instead.
+  const [budgets, categories] = await Promise.all([getBudgets(), getCategories()]);
+  if (budgets.length === 0) return [];
+
+  const now = new Date();
+  const hasWeekly = budgets.some((b) => b.period === 'weekly');
+
+  const monthWin = getSalaryCycleWindow(salaryDay);
+  const prevMonthWin = getSalaryCycleWindow(salaryDay, -1);
+  const weekWin = getWeekWindow();
+  const prevWeekWin = getWeekWindow(-1);
+
+  const [monthSpendMap, prevMonthSpendMap, weekSpendMap, prevWeekSpendMap] = await Promise.all([
+    getSpendByCategory(monthWin.start, monthWin.end),
+    getSpendByCategory(prevMonthWin.start, prevMonthWin.end),
+    hasWeekly ? getSpendByCategory(weekWin.start, weekWin.end) : Promise.resolve(new Map<string, number>()),
+    hasWeekly ? getSpendByCategory(prevWeekWin.start, prevWeekWin.end) : Promise.resolve(new Map<string, number>()),
+  ]);
+
+  const liveNames = new Set(categories.map((c) => c.name));
+
+  const results: BudgetUtilization[] = budgets.map((b) => {
+    const weekly = b.period === 'weekly';
+    const win = weekly ? weekWin : monthWin;
+    const selections = budgetSelections(b);
+    const names = coveredCategoryNames(selections, categories);
+    const spent = sumCovered(names, weekly ? weekSpendMap : monthSpendMap);
+    const prevSpent = sumCovered(names, weekly ? prevWeekSpendMap : prevMonthSpendMap);
+
+    const rolloverCarry = b.rollover ? b.amount - prevSpent : 0;
+    const effectiveLimit = Math.max(b.amount + rolloverCarry, 0);
+
+    const daysTotal = Math.round((win.end.getTime() - win.start.getTime()) / DAY_MS);
+    // Fractional elapsed days (min ¼ day) keep early-window projections sane.
+    const elapsedDays = Math.min(
+      Math.max((now.getTime() - win.start.getTime()) / DAY_MS, 0.25),
+      daysTotal,
     );
-    const spent = row?.total ?? 0;
-    results.push({ budget: b, spent, percentage: b.amount > 0 ? Math.round((spent / b.amount) * 100) : 0 });
+    const daysLeft = Math.max(Math.ceil((win.end.getTime() - now.getTime()) / DAY_MS), 0);
+    const elapsedPct = Math.round((elapsedDays / daysTotal) * 100);
+    const projectedSpend = Math.round((spent / elapsedDays) * daysTotal);
+
+    const percentage =
+      effectiveLimit > 0 ? Math.round((spent / effectiveLimit) * 100) : spent > 0 ? 100 : 0;
+
+    let pace: BudgetPace;
+    if (spent >= effectiveLimit && spent > 0) pace = 'over';
+    else if (projectedSpend > effectiveLimit) pace = 'risk';
+    else if (percentage + 10 <= elapsedPct) pace = 'under';
+    else pace = 'on_track';
+
+    return {
+      budget: b,
+      displayName: budgetDisplayName(b),
+      coveredCount: names.length,
+      spent,
+      percentage,
+      effectiveLimit,
+      rolloverCarry,
+      remaining: effectiveLimit - spent,
+      prevSpent,
+      daysTotal,
+      daysLeft,
+      elapsedPct,
+      projectedSpend,
+      pace,
+      // Orphaned only when every selected category is gone — partial losses
+      // still match remaining names.
+      orphaned: selections.every((n) => !liveNames.has(n)),
+    };
+  });
+
+  // Urgency first: blown budgets, then at-risk pace, then the rest by usage.
+  // Orphaned budgets sink to the bottom for cleanup.
+  const paceRank: Record<BudgetPace, number> = { over: 0, risk: 1, on_track: 2, under: 3 };
+  return results.sort((a, b) => {
+    if (a.orphaned !== b.orphaned) return a.orphaned ? 1 : -1;
+    if (paceRank[a.pace] !== paceRank[b.pace]) return paceRank[a.pace] - paceRank[b.pace];
+    return b.percentage - a.percentage;
+  });
+};
+
+export interface BudgetSummary {
+  /** sum of effective limits of monthly category budgets */
+  totalBudgeted: number;
+  /** cycle spend inside categories covered by a monthly budget (deduped) */
+  budgetedSpent: number;
+  /** total cycle spend (same number the dashboard hero uses) */
+  cycleSpend: number;
+  /** spend in categories no budget covers */
+  unbudgetedSpend: number;
+}
+
+/** Reconciles category budgets against the overall cycle spend. */
+export const getBudgetSummary = async (salaryDay = 1): Promise<BudgetSummary> => {
+  const [util, categories] = await Promise.all([
+    getBudgetUtilization(salaryDay),
+    getCategories(),
+  ]);
+  const monthWin = getSalaryCycleWindow(salaryDay);
+  const spendMap = await getSpendByCategory(monthWin.start, monthWin.end);
+  const cycleSpend = [...spendMap.values()].reduce((a, v) => a + v, 0);
+
+  const monthly = util.filter((u) => u.budget.period === 'monthly' && !u.orphaned);
+  const covered = new Set<string>();
+  monthly.forEach((u) =>
+    coveredCategoryNames(budgetSelections(u.budget), categories).forEach((n) =>
+      covered.add(n),
+    ),
+  );
+  const budgetedSpent = sumCovered([...covered], spendMap);
+
+  return {
+    totalBudgeted: monthly.reduce((a, u) => a + u.effectiveLimit, 0),
+    budgetedSpent,
+    cycleSpend,
+    unbudgetedSpend: Math.max(cycleSpend - budgetedSpent, 0),
+  };
+};
+
+/**
+ * Average spend for a category (hierarchy-aware) over the last 3 completed
+ * windows — used to suggest a realistic amount when creating/editing a budget.
+ */
+export const getSuggestedBudgetAmount = async (
+  selections: string[],
+  period: 'monthly' | 'weekly',
+  salaryDay = 1,
+): Promise<number | null> => {
+  if (selections.length === 0) return null;
+  const categories = await getCategories();
+  const names = coveredCategoryNames(selections, categories);
+  const sums: number[] = [];
+  for (const shift of [-1, -2, -3]) {
+    const win = period === 'weekly' ? getWeekWindow(shift) : getSalaryCycleWindow(salaryDay, shift);
+    const map = await getSpendByCategory(win.start, win.end);
+    sums.push(sumCovered(names, map));
   }
-  return results;
+  const active = sums.filter((s) => s > 0);
+  if (active.length === 0) return null;
+  return Math.round(active.reduce((a, v) => a + v, 0) / active.length);
+};
+
+/**
+ * The budget affected by spend in `categoryName`: an exact budget on the
+ * category wins, otherwise a budget on its parent. Used for the post-save
+ * "budget impact" toast.
+ */
+export const getBudgetImpactForCategory = async (
+  categoryName: string,
+  salaryDay = 1,
+): Promise<BudgetUtilization | null> => {
+  const [util, categories] = await Promise.all([
+    getBudgetUtilization(salaryDay),
+    getCategories(),
+  ]);
+  // A budget explicitly selecting this category wins; otherwise any budget
+  // whose expanded coverage (parent → subs) includes it. `util` is urgency-
+  // sorted, so ties resolve to the most pressing budget.
+  const explicit = util.find(
+    (u) => !u.orphaned && budgetSelections(u.budget).includes(categoryName),
+  );
+  if (explicit) return explicit;
+  return (
+    util.find(
+      (u) =>
+        !u.orphaned &&
+        coveredCategoryNames(budgetSelections(u.budget), categories).includes(
+          categoryName,
+        ),
+    ) ?? null
+  );
 };
 
 // ─── Insights ────────────────────────────────────────────────────────────────

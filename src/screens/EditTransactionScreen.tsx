@@ -1,5 +1,6 @@
 import { ThemedSafeAreaView, ThemedText } from '../components/ThemedSafeAreaView';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { showBudgetImpactToast } from '../services/budgetAlerts';
 import { View, StyleSheet, TextInput, TouchableOpacity, ScrollView, Platform, KeyboardAvoidingView, Modal, ActivityIndicator, Alert } from 'react-native';
 import { MotiView } from 'moti';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -541,7 +542,11 @@ export const EditTransactionScreen = () => {
         }
       }
 
-      notify.success('Transaction updated');
+      if (type === 'debit') {
+        showBudgetImpactToast(category);
+      } else {
+        notify.success('Transaction updated');
+      }
       checkBudgetAlerts();
       navigation.goBack();
     } catch (err) {
