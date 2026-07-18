@@ -10,7 +10,7 @@ import {
 } from 'lucide-react-native';
 import { notify, NotifyMsg } from '../utils/notify';
 import { useTheme } from '../theme/ThemeProvider';
-import { withAlpha } from '../theme/tokens';
+import { withAlpha, fonts } from '../theme/tokens';
 
 // Tone resolves to a theme color at render time so toasts follow the active pack.
 const CONFIG = {
@@ -151,10 +151,11 @@ const styles = StyleSheet.create({
   },
   text: {
     fontSize: 13,
-    fontWeight: '600',
+    fontFamily: fonts.textSemibold,
   },
   sub: {
     fontSize: 11,
+    fontFamily: fonts.text,
     marginTop: 1,
   },
 });

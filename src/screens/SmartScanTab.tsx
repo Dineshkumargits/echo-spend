@@ -1,6 +1,6 @@
 import { ThemedSafeAreaView } from '../components/ThemedSafeAreaView';
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, TouchableOpacity, Alert } from 'react-native';
+import { View, TouchableOpacity, Alert } from 'react-native';
 import { MotiView } from 'moti';
 import {
   LucideZap,
@@ -109,15 +109,15 @@ const SmartScanTab = ({ navigation }: any) => {
             </View>
 
             <SectionLabel>On-device AI</SectionLabel>
-            <Text
+            <ThemedText
               className="text-center mb-2"
               style={{ fontFamily: fonts.displayBold, fontSize: 30, letterSpacing: -0.5, marginTop: 4, color: colors.primary }}
             >
               Smart Scan
-            </Text>
-            <Text className="text-center text-sm px-8 leading-5 mb-2" style={{ color: colors.muted }}>
+            </ThemedText>
+            <ThemedText className="text-center text-sm px-8 leading-5 mb-2" style={{ color: colors.muted }}>
               AI reads your bank SMS and auto-categorizes transactions — with account detection and anomaly alerts.
-            </Text>
+            </ThemedText>
 
             {/* Last scan indicator */}
             {lastScanTime && (
@@ -155,12 +155,12 @@ const SmartScanTab = ({ navigation }: any) => {
             >
               <View className="flex-row items-center">
                 <LucideZap color={colors.onAccent} size={18} />
-                <Text
+                <ThemedText
                   className="ml-2"
                   style={{ fontFamily: fonts.signalBold, fontSize: 13, letterSpacing: 1.4, textTransform: 'uppercase', color: colors.onAccent }}
                 >
                   Scan SMS
-                </Text>
+                </ThemedText>
               </View>
             </TouchableOpacity>
 
@@ -197,7 +197,7 @@ const SmartScanTab = ({ navigation }: any) => {
                         className="ml-2 px-2 py-0.5 rounded-full"
                         style={{ backgroundColor: colors.accent }}
                       >
-                        <Text className="text-white text-[10px] font-bold">{pendingCount}</Text>
+                        <ThemedText className="text-[10px] font-bold" style={{ color: '#fff' }}>{pendingCount}</ThemedText>
                       </View>
                     </View>
                     <LucideChevronRight color={colors.muted} size={16} />
@@ -236,20 +236,20 @@ const SmartScanTab = ({ navigation }: any) => {
           {/* Info pills */}
           <View className="flex-row">
             <View className="flex-1 p-4 rounded-apple-md border mr-2" style={{ backgroundColor: colors.surface, borderColor: colors.border }}>
-              <Text style={{ color: colors.accent, fontSize: 11, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>
+              <ThemedText style={{ color: colors.accent, fontSize: 11, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>
                 Privacy First
-              </Text>
-              <Text style={{ color: colors.secondary, fontSize: 11, lineHeight: 16 }}>
+              </ThemedText>
+              <ThemedText style={{ color: colors.secondary, fontSize: 11, lineHeight: 16 }}>
                 All data stays on your device. Nothing uploaded.
-              </Text>
+              </ThemedText>
             </View>
             <View className="flex-1 p-4 rounded-apple-md border ml-2" style={{ backgroundColor: colors.surface, borderColor: colors.border }}>
-              <Text style={{ color: colors.credit, fontSize: 11, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>
+              <ThemedText style={{ color: colors.credit, fontSize: 11, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>
                 AI Powered
-              </Text>
-              <Text style={{ color: colors.secondary, fontSize: 11, lineHeight: 16 }}>
+              </ThemedText>
+              <ThemedText style={{ color: colors.secondary, fontSize: 11, lineHeight: 16 }}>
                 Auto-categorizes, assigns accounts, detects anomalies.
-              </Text>
+              </ThemedText>
             </View>
           </View>
         </View>

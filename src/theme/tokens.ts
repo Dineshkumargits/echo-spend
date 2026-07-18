@@ -5,10 +5,12 @@
  * tailwind.config.js both derive from these values; never hardcode a hex
  * in a screen when a token exists.
  *
- * Concept: every transaction is a signal. Money out is a PULSE (warm amber —
- * energy spent, not a red failure state). Money in is an ECHO (cool aqua —
- * the signal returning). The aqua doubles as the AI/intelligence color.
- * Red is reserved for genuinely bad news (overbudget, destructive actions).
+ * Concept: every transaction is a signal. Money out is a PULSE (warm
+ * red/orange — energy spent). Money in is an ECHO (green — the signal
+ * returning, always green-family so credit reads unambiguously across every
+ * theme). The echo hue doubles as the AI/intelligence color. `alert` stays a
+ * separate, more saturated red reserved for genuinely bad news (overbudget,
+ * destructive actions) so it never gets confused with a debit amount.
  */
 
 // ─── Palette shape ───────────────────────────────────────────────────────────
@@ -54,8 +56,8 @@ export const inkPalette: Palette = {
   brandSoft: 'rgba(48, 209, 88, 0.16)',
   pulse: '#FFB454',
   pulseSoft: 'rgba(255, 180, 84, 0.12)',
-  echo: '#56D4C0',
-  echoSoft: 'rgba(86, 212, 192, 0.12)',
+  echo: '#3ECF7A',
+  echoSoft: 'rgba(62, 207, 122, 0.12)',
   alert: '#FF6B5E',
   alertSoft: 'rgba(255, 107, 94, 0.12)',
   violet: '#BF5AF2',
@@ -77,8 +79,8 @@ export const dayPalette: Palette = {
   brandSoft: 'rgba(20, 143, 69, 0.12)',
   pulse: '#B4761A',
   pulseSoft: 'rgba(180, 118, 26, 0.12)',
-  echo: '#0C8271',
-  echoSoft: 'rgba(12, 130, 113, 0.10)',
+  echo: '#128A4E',
+  echoSoft: 'rgba(18, 138, 78, 0.10)',
   alert: '#C2453B',
   alertSoft: 'rgba(194, 69, 59, 0.10)',
   violet: '#8B3FC4',
@@ -99,10 +101,10 @@ const midnightDark: Palette = {
   tideRaised: '#1B2440',
   brand: '#6C8CFF',
   brandSoft: 'rgba(108, 140, 255, 0.14)',
-  pulse: '#6C8CFF',
-  pulseSoft: 'rgba(108, 140, 255, 0.14)',
-  echo: '#3ED8E6',
-  echoSoft: 'rgba(62, 216, 230, 0.12)',
+  pulse: '#FF8A5C',
+  pulseSoft: 'rgba(255, 138, 92, 0.14)',
+  echo: '#4CD98A',
+  echoSoft: 'rgba(76, 217, 138, 0.12)',
   alert: '#FF6B8A',
   alertSoft: 'rgba(255, 107, 138, 0.12)',
   violet: '#B98CFF',
@@ -121,10 +123,10 @@ const midnightLight: Palette = {
   tideRaised: '#E9EDFF',
   brand: '#3A5BD9',
   brandSoft: 'rgba(58, 91, 217, 0.12)',
-  pulse: '#3A5BD9',
-  pulseSoft: 'rgba(58, 91, 217, 0.12)',
-  echo: '#0E8A96',
-  echoSoft: 'rgba(14, 138, 150, 0.10)',
+  pulse: '#D9622E',
+  pulseSoft: 'rgba(217, 98, 46, 0.12)',
+  echo: '#128A52',
+  echoSoft: 'rgba(18, 138, 82, 0.10)',
   alert: '#C93A5E',
   alertSoft: 'rgba(201, 58, 94, 0.10)',
   violet: '#7B45C4',
@@ -145,10 +147,10 @@ const roseDark: Palette = {
   tideRaised: '#2C1826',
   brand: '#FF7EB0',
   brandSoft: 'rgba(255, 126, 176, 0.14)',
-  pulse: '#FF7EB0',
-  pulseSoft: 'rgba(255, 126, 176, 0.14)',
-  echo: '#F0B15E',
-  echoSoft: 'rgba(240, 177, 94, 0.12)',
+  pulse: '#FF8F42',
+  pulseSoft: 'rgba(255, 143, 66, 0.14)',
+  echo: '#5CC98A',
+  echoSoft: 'rgba(92, 201, 138, 0.12)',
   alert: '#FF6B5E',
   alertSoft: 'rgba(255, 107, 94, 0.12)',
   violet: '#C58CFF',
@@ -167,10 +169,10 @@ const roseLight: Palette = {
   tideRaised: '#FBE7F0',
   brand: '#C63878',
   brandSoft: 'rgba(198, 56, 120, 0.12)',
-  pulse: '#C63878',
-  pulseSoft: 'rgba(198, 56, 120, 0.12)',
-  echo: '#B57314',
-  echoSoft: 'rgba(181, 115, 20, 0.10)',
+  pulse: '#C25A14',
+  pulseSoft: 'rgba(194, 90, 20, 0.12)',
+  echo: '#1F8F5A',
+  echoSoft: 'rgba(31, 143, 90, 0.10)',
   alert: '#C2453B',
   alertSoft: 'rgba(194, 69, 59, 0.10)',
   violet: '#8B3FC4',
@@ -185,8 +187,8 @@ const roseLight: Palette = {
 
 // ─── Ember — warm charcoal + coral-red ───────────────────────────────────────
 // Accent is a coral-orange (brand), deliberately kept distinct from the crimson
-// `alert` so a primary button never reads as a warning. Money-in echoes cool
-// teal for maximum contrast against the warm ground.
+// `alert` so a primary button never reads as a warning. Money-in echoes green
+// for maximum contrast against the warm ground.
 
 const emberDark: Palette = {
   ink: '#1A0B0B',
@@ -196,8 +198,8 @@ const emberDark: Palette = {
   brandSoft: 'rgba(255, 106, 77, 0.16)',
   pulse: '#FF6A4D',
   pulseSoft: 'rgba(255, 106, 77, 0.14)',
-  echo: '#4ECDC4',
-  echoSoft: 'rgba(78, 205, 196, 0.12)',
+  echo: '#4ECD7A',
+  echoSoft: 'rgba(78, 205, 122, 0.12)',
   alert: '#E23B5A',
   alertSoft: 'rgba(226, 59, 90, 0.14)',
   violet: '#C08CFF',
@@ -218,8 +220,8 @@ const emberLight: Palette = {
   brandSoft: 'rgba(210, 64, 42, 0.12)',
   pulse: '#D2402A',
   pulseSoft: 'rgba(210, 64, 42, 0.12)',
-  echo: '#0E8A80',
-  echoSoft: 'rgba(14, 138, 128, 0.10)',
+  echo: '#128A48',
+  echoSoft: 'rgba(18, 138, 72, 0.10)',
   alert: '#B4293F',
   alertSoft: 'rgba(180, 41, 63, 0.10)',
   violet: '#7B45C4',
@@ -240,10 +242,10 @@ const monoDark: Palette = {
   tideRaised: '#212125',
   brand: '#E6E6E9',
   brandSoft: 'rgba(230, 230, 233, 0.12)',
-  pulse: '#E6E6E9',
-  pulseSoft: 'rgba(230, 230, 233, 0.12)',
-  echo: '#5B9DFF',
-  echoSoft: 'rgba(91, 157, 255, 0.14)',
+  pulse: '#E08A6E',
+  pulseSoft: 'rgba(224, 138, 110, 0.12)',
+  echo: '#5BC98A',
+  echoSoft: 'rgba(91, 201, 138, 0.14)',
   alert: '#FF6B5E',
   alertSoft: 'rgba(255, 107, 94, 0.12)',
   violet: '#B18CFF',
@@ -262,10 +264,10 @@ const monoLight: Palette = {
   tideRaised: '#EAEAED',
   brand: '#26262B',
   brandSoft: 'rgba(38, 38, 43, 0.10)',
-  pulse: '#26262B',
-  pulseSoft: 'rgba(38, 38, 43, 0.10)',
-  echo: '#2F6FE0',
-  echoSoft: 'rgba(47, 111, 224, 0.10)',
+  pulse: '#C2551E',
+  pulseSoft: 'rgba(194, 85, 30, 0.10)',
+  echo: '#1E8A4E',
+  echoSoft: 'rgba(30, 138, 78, 0.10)',
   alert: '#C2453B',
   alertSoft: 'rgba(194, 69, 59, 0.10)',
   violet: '#6E45C4',
@@ -288,8 +290,8 @@ const solarDark: Palette = {
   brandSoft: 'rgba(255, 159, 69, 0.14)',
   pulse: '#FF9F45',
   pulseSoft: 'rgba(255, 159, 69, 0.14)',
-  echo: '#F2C94C',
-  echoSoft: 'rgba(242, 201, 76, 0.12)',
+  echo: '#5BC964',
+  echoSoft: 'rgba(91, 201, 100, 0.12)',
   alert: '#FF6B5E',
   alertSoft: 'rgba(255, 107, 94, 0.12)',
   violet: '#E08CFF',
@@ -310,8 +312,8 @@ const solarLight: Palette = {
   brandSoft: 'rgba(194, 104, 26, 0.12)',
   pulse: '#C2681A',
   pulseSoft: 'rgba(194, 104, 26, 0.12)',
-  echo: '#A67C0C',
-  echoSoft: 'rgba(166, 124, 12, 0.10)',
+  echo: '#2F8A3C',
+  echoSoft: 'rgba(47, 138, 60, 0.10)',
   alert: '#C2453B',
   alertSoft: 'rgba(194, 69, 59, 0.10)',
   violet: '#9B45C4',

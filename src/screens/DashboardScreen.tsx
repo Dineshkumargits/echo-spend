@@ -1030,9 +1030,7 @@ const DashboardScreen = ({ navigation }: any) => {
                 const color =
                   item.type === "goal"
                     ? colors.credit
-                    : item.type === "loan"
-                      ? colors.debit
-                      : colors.ai;
+                    : colors.debit;
                 const daysLeft = getDaysLeft(item.date);
                 const isOverdue = daysLeft === "Overdue";
 

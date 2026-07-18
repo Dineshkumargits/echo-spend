@@ -38,7 +38,8 @@ function AppContent() {
   const { preferences, updateLastActiveAt, dbReloadKey, googleUser, hasHydrated } = useStore();
   const { authenticate, checkSupport } = useBiometric();
   const { requestPermissions } = useNotifications();
-  const { isDark } = useTheme();
+  const { isDark, colors } = useTheme();
+  const lockStyles = React.useMemo(() => createLockStyles(colors), [colors]);
   // Brand typefaces. If loading fails we render anyway — RN falls back to
   // system fonts rather than blocking the app on typography.
   const [fontsLoaded, fontsError] = useFonts(fontFiles);
@@ -394,13 +395,13 @@ function AppContent() {
   );
 }
 
-const lockStyles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0A1416', alignItems: 'center', justifyContent: 'center', padding: 32 },
+const createLockStyles = (colors: ReturnType<typeof useTheme>['colors']) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.background, alignItems: 'center', justifyContent: 'center', padding: 32 },
   icon: { fontSize: 64, marginBottom: 24 },
-  title: { color: '#E8F2F0', fontSize: 24, fontWeight: 'bold', textAlign: 'center' },
-  subtitle: { color: '#7E9895', fontSize: 15, textAlign: 'center', marginTop: 8, marginBottom: 40 },
-  button: { backgroundColor: '#FFB454', paddingHorizontal: 32, paddingVertical: 16, borderRadius: 14 },
-  buttonText: { color: '#0A1416', fontSize: 16, fontWeight: 'bold' },
+  title: { color: colors.primary, fontSize: 24, fontWeight: 'bold', textAlign: 'center' },
+  subtitle: { color: colors.secondary, fontSize: 15, textAlign: 'center', marginTop: 8, marginBottom: 40 },
+  button: { backgroundColor: colors.accent, paddingHorizontal: 32, paddingVertical: 16, borderRadius: 14 },
+  buttonText: { color: colors.onAccent, fontSize: 16, fontWeight: 'bold' },
 });
 
 export default function App() {

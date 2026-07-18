@@ -27,7 +27,7 @@ type FilterId = 'high' | 'recurring' | null;
 // Removed static FILTERS declaration to make it dynamic inside the component
 
 const SearchScreen = () => {
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
   const { preferences } = useStore();
   const currency = preferences?.currency ?? '₹';
 
@@ -121,8 +121,9 @@ const SearchScreen = () => {
             </View>
           </View>
           <ThemedText
+            font="signal"
             className="font-bold text-base"
-            style={{ color: item.type === 'transfer' ? colors.warning : (item.type === 'credit' ? colors.success : colors.primary) }}
+            style={{ color: item.type === 'transfer' ? colors.warning : (item.type === 'credit' ? colors.credit : colors.debit) }}
           >
             {item.type === 'credit' ? '+' : (item.type === 'transfer' ? '⇄' : '-')}{currency}{item.amount.toLocaleString('en-IN')}
           </ThemedText>
@@ -181,10 +182,10 @@ const SearchScreen = () => {
                   borderColor: active ? colors.primary : colors.border
                 }}
               >
-                <f.icon color={active ? (isDark ? '#000000' : '#FFFFFF') : colors.secondary} size={14} />
+                <f.icon color={active ? colors.background : colors.secondary} size={14} />
                 <ThemedText
                   className="text-xs font-bold ml-1.5"
-                  style={{ color: active ? (isDark ? '#000000' : '#FFFFFF') : colors.primary }}
+                  style={{ color: active ? colors.background : colors.primary }}
                 >
                   {f.label}
                 </ThemedText>

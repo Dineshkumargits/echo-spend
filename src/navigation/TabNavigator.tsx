@@ -3,20 +3,16 @@ import { View, TouchableOpacity, StyleSheet } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import {
   LucideLayoutDashboard,
-  LucideCalendar,
   LucideSettings,
   LucideZap,
   LucideReceiptText,
   LucidePieChart,
-  LucideWallet,
 } from 'lucide-react-native';
 import DashboardScreen from '../screens/DashboardScreen';
 import TransactionsScreen from '../screens/TransactionsScreen';
 import SmartScanTab from '../screens/SmartScanTab';
-import FinancesScreen from '../screens/FinancesScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import AnalyticsScreen from '../screens/AnalyticsScreen';
-import BudgetScreen from '../screens/BudgetScreen';
 import { useTheme } from '../theme/ThemeProvider';
 import { useStore } from '../store/useStore';
 import { fonts } from '../theme/tokens';
@@ -29,7 +25,7 @@ const Tab = createBottomTabNavigator();
  * eliminating the jank caused by the former MotiView re-animating every time.
  */
 const ScanTabButton = memo(({ onPress }: { onPress?: (...args: any[]) => void }) => {
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
 
   return (
     <TouchableOpacity
@@ -87,7 +83,7 @@ const scanBtnStyles = StyleSheet.create({
 });
 
 export const TabNavigator = ({ navigation }: any) => {
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
   const launchScreen = useStore(state => state.preferences.defaultLaunchScreen);
 
   // Navigate to SmartInbox modal on first mount if preferred
@@ -103,6 +99,7 @@ export const TabNavigator = ({ navigation }: any) => {
   return (
     <Tab.Navigator
       initialRouteName="Home"
+      backBehavior="history"
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarStyle: {
@@ -122,17 +119,14 @@ export const TabNavigator = ({ navigation }: any) => {
         },
         tabBarIcon: ({ color, size }) => {
           if (route.name === 'Home') return <LucideLayoutDashboard color={color} size={size} />;
-          if (route.name === 'Txns') return <LucideReceiptText color={color} size={size} />;
           if (route.name === 'Analytics') return <LucidePieChart color={color} size={size} />;
-          if (route.name === 'Finances') return <LucideCalendar color={color} size={size} />;
-          if (route.name === 'Budget') return <LucideWallet color={color} size={size} />;
+          if (route.name === 'Txns') return <LucideReceiptText color={color} size={size} />;
           if (route.name === 'Settings') return <LucideSettings color={color} size={size} />;
           return null;
         },
       })}
     >
       <Tab.Screen name="Home" component={DashboardScreen} />
-      <Tab.Screen name="Txns" component={TransactionsScreen} options={{ tabBarLabel: 'Txns' }} />
       <Tab.Screen name="Analytics" component={AnalyticsScreen} options={{ tabBarLabel: 'Charts' }} />
       <Tab.Screen
         name="Scan"
@@ -143,8 +137,7 @@ export const TabNavigator = ({ navigation }: any) => {
           tabBarButton: (props) => <ScanTabButton onPress={props.onPress} />,
         }}
       />
-      <Tab.Screen name="Finances" component={FinancesScreen} options={{ tabBarLabel: 'Money' }} />
-      <Tab.Screen name="Budget" component={BudgetScreen} options={{ tabBarLabel: 'Budget' }} />
+      <Tab.Screen name="Txns" component={TransactionsScreen} options={{ tabBarLabel: 'Txns' }} />
       <Tab.Screen name="Settings" component={SettingsScreen} options={{ tabBarLabel: 'More' }} />
     </Tab.Navigator>
   );

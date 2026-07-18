@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { fonts } from '../theme/tokens';
 
 interface Props {
   children: React.ReactNode;
@@ -43,10 +44,10 @@ export class ErrorBoundary extends React.Component<Props, State> {
           }}
         >
           <Text style={{ color: '#FF6B5E', fontSize: 48, marginBottom: 16 }}>!</Text>
-          <Text style={{ color: '#FFFFFF', fontSize: 22, fontWeight: 'bold', marginBottom: 8, textAlign: 'center' }}>
+          <Text style={{ color: '#FFFFFF', fontSize: 22, fontFamily: fonts.displayBold, marginBottom: 8, textAlign: 'center' }}>
             Something went wrong
           </Text>
-          <Text style={{ color: '#7E9895', fontSize: 14, textAlign: 'center', marginBottom: 32, lineHeight: 20 }}>
+          <Text style={{ color: '#7E9895', fontSize: 14, fontFamily: fonts.text, textAlign: 'center', marginBottom: 32, lineHeight: 20 }}>
             {this.state.error?.message || 'An unexpected error occurred.'}
           </Text>
           <TouchableOpacity
@@ -58,7 +59,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
               borderRadius: 12,
             }}
           >
-            <Text style={{ color: '#FFFFFF', fontWeight: 'bold', fontSize: 16 }}>Try Again</Text>
+            <Text style={{ color: '#FFFFFF', fontFamily: fonts.textBold, fontSize: 16 }}>Try Again</Text>
           </TouchableOpacity>
         </ScrollView>
       </SafeAreaView>

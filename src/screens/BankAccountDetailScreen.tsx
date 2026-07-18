@@ -39,6 +39,7 @@ import {
 } from 'lucide-react-native';
 import { useIsFocused } from '@react-navigation/native';
 import { useTheme } from '../theme/ThemeProvider';
+import { fonts } from '../theme/tokens';
 import { useStore } from '../store/useStore';
 import {
   Account,
@@ -233,7 +234,7 @@ const CategoryGroupItem = React.memo(({
                   {group.count} txn{group.count !== 1 ? 's' : ''}
                 </ThemedText>
               </View>
-              <ThemedText style={{ fontSize: 14, fontWeight: '700', color: group.color }}>
+              <ThemedText font="signal" style={{ fontSize: 14, fontWeight: '700', color: group.color }}>
                 {currency}{group.total.toLocaleString('en-IN')}
               </ThemedText>
             </View>
@@ -279,7 +280,7 @@ const CategoryGroupItem = React.memo(({
               {tx.tags && tx.tags.length > 0 ? ` · ${tx.tags.map(t => '#' + t).join(' ')}` : ''}
             </ThemedText>
           </View>
-          <ThemedText style={{ fontSize: 13, fontWeight: '700', color: group.color, marginRight: 6 }}>
+          <ThemedText font="signal" style={{ fontSize: 13, fontWeight: '700', color: group.color, marginRight: 6 }}>
             {currency}{tx.amount.toLocaleString('en-IN')}
           </ThemedText>
           <LucideChevronRight color={colors.secondary} size={13} />
@@ -384,7 +385,7 @@ const AnalysisSection = React.memo(({
                     <ThemedText style={{ fontSize: 13, fontWeight: isSelected ? '700' : '500' }}>
                       {slice.category}
                     </ThemedText>
-                    <ThemedText style={{ fontSize: 13, fontWeight: '700' }}>
+                    <ThemedText font="signal" style={{ fontSize: 13, fontWeight: '700' }}>
                       {currency}{slice.total.toLocaleString('en-IN')}
                     </ThemedText>
                   </View>
@@ -678,13 +679,13 @@ const BankAccountDetailScreen = ({ navigation, route }: any) => {
   }));
 
   const insightCards = insights ? [
-    { label: 'Expenses', value: fmt(insights.totalExpense), icon: LucideTrendingDown, color: colors.danger, sub: `${insights.txCount} transactions` },
-    { label: 'Income', value: fmt(insights.totalIncome), icon: LucideTrendingUp, color: colors.success, sub: `avg ${fmt(insights.avgTxAmount)}` },
+    { label: 'Expenses', value: fmt(insights.totalExpense), icon: LucideTrendingDown, color: colors.debit, sub: `${insights.txCount} transactions` },
+    { label: 'Income', value: fmt(insights.totalIncome), icon: LucideTrendingUp, color: colors.credit, sub: `avg ${fmt(insights.avgTxAmount)}` },
     {
       label: 'Net Flow',
       value: fmt(Math.abs(insights.totalIncome - insights.totalExpense)),
       icon: LucideArrowRight,
-      color: insights.totalIncome >= insights.totalExpense ? colors.success : colors.warning,
+      color: insights.totalIncome >= insights.totalExpense ? colors.credit : colors.debit,
       sub: insights.totalIncome >= insights.totalExpense ? 'Surplus' : 'Deficit',
     },
   ] : [];
@@ -776,14 +777,14 @@ const BankAccountDetailScreen = ({ navigation, route }: any) => {
           <ThemedText style={{ fontSize: 11, fontWeight: '600', color: colors.secondary, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>
             {account.accountType === 'credit_card' ? 'Outstanding' : 'Current Balance'}
           </ThemedText>
-          <ThemedText style={{ fontSize: 36, fontWeight: '700' }}>
+          <ThemedText font="signal" style={{ fontSize: 36, fontWeight: '700' }}>
             {preferences.hideAmounts ? '****' : `${account.accountType === 'credit_card' ? '-' : ''}${preferences.currency}${account.balance.toLocaleString('en-IN')}`}
           </ThemedText>
           {account.accountType === 'credit_card' && account.creditLimit ? (
             <View style={{ marginTop: 12 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
                 <ThemedText style={{ fontSize: 11, color: colors.secondary }}>Credit Used</ThemedText>
-                <ThemedText style={{ fontSize: 11, fontWeight: '700', color: colors.warning }}>
+                <ThemedText font="signal" style={{ fontSize: 11, fontWeight: '700', color: colors.warning }}>
                   {Math.round((account.balance / account.creditLimit) * 100)}% of {preferences.currency}{account.creditLimit.toLocaleString('en-IN')}
                 </ThemedText>
               </View>
@@ -841,7 +842,7 @@ const BankAccountDetailScreen = ({ navigation, route }: any) => {
                 <ThemedText style={{ fontSize: 10, fontWeight: '600', color: colors.secondary, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>
                   {card.label}
                 </ThemedText>
-                <ThemedText style={{ fontSize: 15, fontWeight: '700', color: card.color }}>{card.value}</ThemedText>
+                <ThemedText font="signal" style={{ fontSize: 15, fontWeight: '700', color: card.color }}>{card.value}</ThemedText>
                 {card.sub ? <ThemedText style={{ fontSize: 10, color: colors.secondary, marginTop: 2 }}>{card.sub}</ThemedText> : null}
               </MotiView>
             ))}
@@ -856,11 +857,11 @@ const BankAccountDetailScreen = ({ navigation, route }: any) => {
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
             <View>
               <ThemedText style={{ fontSize: 11, fontWeight: '600', color: colors.secondary, textTransform: 'uppercase', letterSpacing: 0.8 }}>Spend Trend</ThemedText>
-              <ThemedText style={{ fontSize: 20, fontWeight: '700', marginTop: 2 }}>{fmt(trend.reduce((s, p) => s + p.total, 0))}</ThemedText>
+              <ThemedText font="signal" style={{ fontSize: 20, fontWeight: '700', marginTop: 2 }}>{fmt(trend.reduce((s, p) => s + p.total, 0))}</ThemedText>
             </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: `${colors.accent}15`, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 }}>
-              <LucideCalendar color={colors.accent} size={12} />
-              <ThemedText style={{ fontSize: 11, fontWeight: '700', color: colors.accent, marginLeft: 4 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: `${colors.debit}15`, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 }}>
+              <LucideCalendar color={colors.debit} size={12} />
+              <ThemedText style={{ fontSize: 11, fontWeight: '700', color: colors.debit, marginLeft: 4 }}>
                 {dateRange === 'all' ? '90D' : dateRange.toUpperCase()}
               </ThemedText>
             </View>
@@ -869,7 +870,7 @@ const BankAccountDetailScreen = ({ navigation, route }: any) => {
             <View style={{ overflow: 'hidden' }}>
               <LineChart.Provider data={chartData}>
                 <LineChart height={110} width={SCREEN_WIDTH - 72}>
-                  <LineChart.Path color={colors.accent} />
+                  <LineChart.Path color={colors.debit} />
                   <LineChart.CursorCrosshair color={colors.primary} />
                 </LineChart>
               </LineChart.Provider>
@@ -903,12 +904,12 @@ const BankAccountDetailScreen = ({ navigation, route }: any) => {
                 }}
               >
                 {tab === 'expense'
-                  ? <LucideArrowUpRight color={activeTab === tab ? colors.danger : colors.secondary} size={14} />
-                  : <LucideArrowDownLeft color={activeTab === tab ? colors.success : colors.secondary} size={14} />
+                  ? <LucideArrowUpRight color={activeTab === tab ? colors.debit : colors.secondary} size={14} />
+                  : <LucideArrowDownLeft color={activeTab === tab ? colors.credit : colors.secondary} size={14} />
                 }
                 <ThemedText style={{
                   fontSize: 13, fontWeight: '700', marginLeft: 6,
-                  color: activeTab === tab ? (tab === 'expense' ? colors.danger : colors.success) : colors.secondary,
+                  color: activeTab === tab ? (tab === 'expense' ? colors.debit : colors.credit) : colors.secondary,
                 }}>
                   {tab.charAt(0).toUpperCase() + tab.slice(1)}
                 </ThemedText>
@@ -982,7 +983,7 @@ const BankAccountDetailScreen = ({ navigation, route }: any) => {
                 className="p-4 rounded-xl mb-6 flex-row items-center border"
                 style={{ backgroundColor: colors.translucent, borderColor: colors.border }}
               >
-                <ThemedText className="text-2xl font-bold mr-2" style={{ color: colors.accent }}>{preferences.currency}</ThemedText>
+                <ThemedText font="signal" className="text-2xl font-bold mr-2" style={{ color: colors.accent }}>{preferences.currency}</ThemedText>
                 <TextInput
                   value={adjustAmount}
                   onChangeText={setAdjustAmount}
@@ -990,7 +991,7 @@ const BankAccountDetailScreen = ({ navigation, route }: any) => {
                   placeholder="0.00"
                   placeholderTextColor={colors.secondary}
                   autoFocus
-                  style={{ flex: 1, fontSize: 24, fontWeight: '700', color: colors.primary }}
+                  style={{ flex: 1, fontFamily: fonts.signalBold, fontSize: 24, color: colors.primary }}
                 />
               </View>
 

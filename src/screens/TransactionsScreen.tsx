@@ -80,6 +80,9 @@ type SourceFilter = "all" | "sms" | "manual" | "auto";
 interface Filters {
   type: "all" | "debit" | "credit" | "transfer";
   categoryName: string | null;
+  // Parent-inclusive category filter (parent + its subcategories), set by
+  // Analytics drill-downs. Kept separate from the exact `categoryName` picker.
+  categoryGroup: string | null;
   tagValue: string | null;
   accountId: number | null;
   datePreset: DatePreset;
@@ -95,6 +98,7 @@ interface Filters {
 const DEFAULT_FILTERS: Filters = {
   type: "all",
   categoryName: null,
+  categoryGroup: null,
   tagValue: null,
   accountId: null,
   datePreset: "all",
@@ -152,6 +156,7 @@ const countActiveFilters = (f: Filters): number => {
   let count = 0;
   if (f.type !== "all") count++;
   if (f.categoryName) count++;
+  if (f.categoryGroup) count++;
   if (f.tagValue) count++;
   if (f.accountId) count++;
   if (f.datePreset !== "all") count++;
@@ -199,14 +204,19 @@ const TransactionsScreen = () => {
   const canGoBack = navigation.canGoBack();
 
   const presetAccountId: number | undefined = route.params?.presetAccountId;
+  const presetCategory: string | undefined = route.params?.presetCategory;
+  const presetCategoryGroup: string | undefined =
+    route.params?.presetCategoryGroup;
+  const presetSearch: string | undefined = route.params?.presetSearch;
 
   // ── State ────────────────────────────────────────────────────────────────
-  const [search, setSearch] = useState("");
-  const [filters, setFilters] = useState<Filters>(() =>
-    presetAccountId
-      ? { ...DEFAULT_FILTERS, accountId: presetAccountId }
-      : DEFAULT_FILTERS,
-  );
+  const [search, setSearch] = useState(presetSearch ?? "");
+  const [filters, setFilters] = useState<Filters>(() => ({
+    ...DEFAULT_FILTERS,
+    ...(presetAccountId ? { accountId: presetAccountId } : null),
+    ...(presetCategory ? { categoryName: presetCategory } : null),
+    ...(presetCategoryGroup ? { categoryGroup: presetCategoryGroup } : null),
+  }));
   const [showFilters, setShowFilters] = useState(false);
 
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -224,12 +234,36 @@ const TransactionsScreen = () => {
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── Apply preset account filter when navigated with params ───────────────
+  // ── Apply preset filters when navigated with params (e.g. drill-down from
+  // Analytics: a tapped category or merchant). Params are consumed once and then
+  // cleared so returning to this tab later doesn't re-pin a stale filter.
   useEffect(() => {
+    if (
+      !presetAccountId &&
+      !presetCategory &&
+      !presetCategoryGroup &&
+      presetSearch === undefined
+    )
+      return;
     if (presetAccountId) {
       setFilters((f) => ({ ...f, accountId: presetAccountId }));
     }
-  }, [presetAccountId]);
+    if (presetCategory) {
+      setFilters((f) => ({ ...f, categoryName: presetCategory, categoryGroup: null }));
+    }
+    if (presetCategoryGroup) {
+      setFilters((f) => ({ ...f, categoryGroup: presetCategoryGroup, categoryName: null }));
+    }
+    if (presetSearch !== undefined) {
+      setSearch(presetSearch);
+    }
+    navigation.setParams({
+      presetAccountId: undefined,
+      presetCategory: undefined,
+      presetCategoryGroup: undefined,
+      presetSearch: undefined,
+    });
+  }, [presetAccountId, presetCategory, presetCategoryGroup, presetSearch, navigation]);
 
   // ── Load metadata ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -261,6 +295,7 @@ const TransactionsScreen = () => {
             ? (f.type as "credit" | "debit" | "transfer")
             : undefined,
         category: f.categoryName ?? undefined,
+        categoryGroup: f.categoryGroup ?? undefined,
         tag: f.tagValue ?? undefined,
         minAmount: f.minAmount ? parseFloat(f.minAmount) : undefined,
         maxAmount: f.maxAmount ? parseFloat(f.maxAmount) : undefined,
@@ -651,6 +686,15 @@ const TransactionsScreen = () => {
           keyExtractor={(item) => item.id}
           getItemType={(item) => item.kind}
           extraData={`${filters.accountId}-${filters.sort}-${preferences.hideAmounts}`}
+          // FlashList v2 turns maintainVisibleContentPosition ON by default (a
+          // chat-style scroll anchor). This is a top→bottom paginated ledger, not
+          // a chat, so the anchoring fights v2's on-the-fly cell re-measurement:
+          // after a fast fling down + scroll back up it shifts/blanks the top
+          // rows. Disable it so cells position by simple offset again.
+          maintainVisibleContentPosition={{ disabled: true }}
+          // Render further beyond the viewport so fast flings don't outrun the
+          // recycler and momentarily reveal unrendered (blank) cells.
+          drawDistance={500}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -876,9 +920,16 @@ const TransactionsScreen = () => {
                   >
                     <PillButton
                       label="All"
-                      active={filters.categoryName === null}
+                      active={
+                        filters.categoryName === null &&
+                        filters.categoryGroup === null
+                      }
                       onPress={() =>
-                        setFilters((f) => ({ ...f, categoryName: null }))
+                        setFilters((f) => ({
+                          ...f,
+                          categoryName: null,
+                          categoryGroup: null,
+                        }))
                       }
                     />
                     {categories.map((c) => (
@@ -886,10 +937,14 @@ const TransactionsScreen = () => {
                         key={c.id}
                         label={c.name}
                         color={c.color}
-                        active={filters.categoryName === c.name}
+                        active={
+                          filters.categoryName === c.name ||
+                          filters.categoryGroup === c.name
+                        }
                         onPress={() =>
                           setFilters((f) => ({
                             ...f,
+                            categoryGroup: null,
                             categoryName:
                               f.categoryName === c.name ? null : c.name,
                           }))

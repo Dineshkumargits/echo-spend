@@ -182,7 +182,7 @@ export const ManageAccountsScreen = () => {
                     </ThemedText>
                   </View>
                   <View style={{ alignItems: 'flex-end', marginLeft: 8 }}>
-                    <ThemedText className="font-bold text-sm">{acc.accountType === 'credit_card' ? '-' : ''}{currency}{acc.balance.toLocaleString('en-IN')}</ThemedText>
+                    <ThemedText font="signal" className="font-bold text-sm">{acc.accountType === 'credit_card' ? '-' : ''}{currency}{acc.balance.toLocaleString('en-IN')}</ThemedText>
                     <TouchableOpacity
                       onPress={() => navigation.navigate('BankAccountDetail', { accountId: acc.id })}
                       activeOpacity={0.6}

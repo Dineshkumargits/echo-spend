@@ -643,6 +643,12 @@ export const getTransactions = async (opts?: {
   offset?: number;
   search?: string;
   category?: string;
+  /**
+   * Parent-inclusive category filter: matches the named parent category AND all
+   * of its subcategories. Used by Analytics drill-downs where the tapped card is
+   * a parent group. Ignored if `category` (exact match) is also provided.
+   */
+  categoryGroup?: string;
   type?: 'credit' | 'debit' | 'transfer';
   tag?: string;
   minAmount?: number;
@@ -660,7 +666,17 @@ export const getTransactions = async (opts?: {
     conditions.push('(LOWER(merchant) LIKE ? OR LOWER(category) LIKE ? OR LOWER(tags) LIKE ?)');
     params.push(`%${opts.search.toLowerCase()}%`, `%${opts.search.toLowerCase()}%`, `%${opts.search.toLowerCase()}%`);
   }
-  if (opts?.category) { conditions.push('category = ?'); params.push(opts.category); }
+  if (opts?.category) {
+    conditions.push('category = ?');
+    params.push(opts.category);
+  } else if (opts?.categoryGroup) {
+    // Match the parent category itself OR any of its subcategories (resolved from
+    // the categories tree in SQL, so callers don't need the category hierarchy).
+    conditions.push(
+      `category IN (SELECT name FROM categories WHERE name = ? OR parentId = (SELECT id FROM categories WHERE name = ? AND parentId IS NULL))`
+    );
+    params.push(opts.categoryGroup, opts.categoryGroup);
+  }
   if (opts?.tag) { conditions.push('tags LIKE ?'); params.push(`%"${opts.tag}"%`); }
   if (opts?.type) { 
     if (opts.accountId !== undefined) {
@@ -1246,6 +1262,60 @@ export const getHighSpendTransactions = async (threshold = 2000): Promise<Transa
     threshold
   );
   return rows.map(mapTransactionRow);
+};
+
+/**
+ * Total confirmed debit spend grouped by weekday, over the last `days` window.
+ * Returns exactly 7 entries (weekday 0=Sunday … 6=Saturday), zero-filled, so the
+ * caller can render a stable Mon–Sun bar row. `count` is the number of debit
+ * transactions on that weekday across the window (used to derive per-day averages).
+ */
+export const getWeekdaySpending = async (
+  days = 84,
+): Promise<{ weekday: number; total: number; count: number }[]> => {
+  const since = new Date();
+  since.setDate(since.getDate() - days + 1);
+  since.setHours(0, 0, 0, 0);
+
+  const rows = await db.getAllAsync<{ weekday: string; total: number; count: number }>(
+    `SELECT strftime('%w', t.date, 'localtime') as weekday,
+            SUM(${EFFECTIVE_DEBIT_AMOUNT}) as total,
+            COUNT(*) as count
+     FROM transactions t
+     WHERE t.type = 'debit' AND t.isConfirmed = 1 AND (t.isTransfer = 0 OR t.isTransfer IS NULL) AND t.date >= ?
+     GROUP BY strftime('%w', t.date, 'localtime')`,
+    since.toISOString(),
+  );
+
+  const map = new Map(rows.map(r => [Number(r.weekday), { total: r.total, count: r.count }]));
+  return Array.from({ length: 7 }, (_, weekday) => ({
+    weekday,
+    total: map.get(weekday)?.total ?? 0,
+    count: map.get(weekday)?.count ?? 0,
+  }));
+};
+
+/**
+ * Top confirmed debit merchants for a given month ('YYYY-MM', defaults to the
+ * current month), ordered by total spend. Powers the interactive "Top merchants"
+ * bars on Analytics; tapping a row drills into the filtered transaction list.
+ */
+export const getTopMerchants = async (
+  month?: string,
+  limit = 6,
+): Promise<{ merchant: string; total: number; count: number }[]> => {
+  const target = month ?? new Date().toISOString().slice(0, 7);
+  return await db.getAllAsync<{ merchant: string; total: number; count: number }>(
+    `SELECT t.merchant, SUM(${EFFECTIVE_DEBIT_AMOUNT}) as total, COUNT(*) as count
+     FROM transactions t
+     WHERE t.type = 'debit' AND t.isConfirmed = 1 AND (t.isTransfer = 0 OR t.isTransfer IS NULL)
+       AND t.merchant IS NOT NULL AND t.merchant != ''
+       AND strftime('%Y-%m', t.date, 'localtime') = ?
+     GROUP BY t.merchant
+     ORDER BY total DESC
+     LIMIT ?`,
+    target, limit,
+  );
 };
 
 export const getCurrentMonthSpend = async (salaryDay = 1): Promise<number> => {

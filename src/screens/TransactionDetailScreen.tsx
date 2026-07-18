@@ -5,7 +5,6 @@ import {
   TouchableOpacity,
   Alert,
   StyleSheet,
-  Platform,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
@@ -102,10 +101,10 @@ const TransactionDetailScreen = () => {
 
   const amountColor =
     transaction.type === 'credit'
-      ? colors.success
+      ? colors.credit
       : transaction.type === 'transfer'
       ? colors.warning
-      : colors.danger;
+      : colors.debit;
 
   const amountPrefix =
     transaction.type === 'credit' ? '+' : transaction.type === 'transfer' ? '⇄ ' : '-';
@@ -166,9 +165,9 @@ const TransactionDetailScreen = () => {
 
   const TypeIcon = () => {
     const size = 28;
-    if (transaction.type === 'credit') return <LucideArrowDownLeft color={colors.success} size={size} />;
+    if (transaction.type === 'credit') return <LucideArrowDownLeft color={colors.credit} size={size} />;
     if (transaction.type === 'transfer') return <LucideRotateCw color={colors.warning} size={size} />;
-    return <LucideArrowUpRight color={colors.danger} size={size} />;
+    return <LucideArrowUpRight color={colors.debit} size={size} />;
   };
 
   const sourceLabel =
@@ -244,17 +243,17 @@ const TransactionDetailScreen = () => {
               {
                 backgroundColor:
                   transaction.type === 'credit'
-                    ? colors.success + '20'
+                    ? colors.credit + '20'
                     : transaction.type === 'transfer'
                     ? colors.warning + '20'
-                    : colors.danger + '20',
+                    : colors.debit + '20',
               },
             ]}
           >
             <TypeIcon />
           </View>
 
-          <ThemedText style={{ fontSize: 36, fontWeight: 'bold', color: amountColor, marginTop: 14 }}>
+          <ThemedText font="signal" style={{ fontSize: 36, fontWeight: 'bold', color: amountColor, marginTop: 14 }}>
             {amountPrefix}{formatAmount(transaction.amount, currency)}
           </ThemedText>
 
@@ -353,8 +352,8 @@ const TransactionDetailScreen = () => {
             </ThemedText>
             {goal && (
               <View style={s.linkRow}>
-                <LucideTarget color={colors.success} size={16} />
-                <ThemedText style={{ marginLeft: 8, color: colors.success, fontWeight: '600', fontSize: 14 }}>
+                <LucideTarget color={colors.credit} size={16} />
+                <ThemedText style={{ marginLeft: 8, color: colors.credit, fontWeight: '600', fontSize: 14 }}>
                   {goal.name}
                 </ThemedText>
                 <ThemedText type="secondary" style={{ fontSize: 12, marginLeft: 4 }}>· Goal</ThemedText>
@@ -362,8 +361,8 @@ const TransactionDetailScreen = () => {
             )}
             {loan && (
               <View style={s.linkRow}>
-                <LucideLandmark color={colors.warning} size={16} />
-                <ThemedText style={{ marginLeft: 8, color: colors.warning, fontWeight: '600', fontSize: 14 }}>
+                <LucideLandmark color={colors.debit} size={16} />
+                <ThemedText style={{ marginLeft: 8, color: colors.debit, fontWeight: '600', fontSize: 14 }}>
                   {loan.lender}
                 </ThemedText>
                 <ThemedText type="secondary" style={{ fontSize: 12, marginLeft: 4 }}>· Loan</ThemedText>
@@ -371,8 +370,8 @@ const TransactionDetailScreen = () => {
             )}
             {sub && (
               <View style={s.linkRow}>
-                <LucideRepeat color={colors.accent} size={16} />
-                <ThemedText style={{ marginLeft: 8, color: colors.accent, fontWeight: '600', fontSize: 14 }}>
+                <LucideRepeat color={colors.credit} size={16} />
+                <ThemedText style={{ marginLeft: 8, color: colors.credit, fontWeight: '600', fontSize: 14 }}>
                   {sub.name}
                 </ThemedText>
                 <ThemedText type="secondary" style={{ fontSize: 12, marginLeft: 4 }}>· Subscription</ThemedText>
@@ -407,11 +406,11 @@ const TransactionDetailScreen = () => {
             {rawSmsExpanded && (
               <ThemedText
                 type="secondary"
+                font="signal"
                 style={{
                   marginTop: 12,
                   fontSize: 12,
                   lineHeight: 19,
-                  fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
                 }}
               >
                 {transaction.rawSms}

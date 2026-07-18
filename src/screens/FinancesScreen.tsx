@@ -10,7 +10,7 @@ import {
   LucideUserPlus, LucideCreditCard,
   LucideAlertCircle, LucidePencil, LucideUsers, LucideChevronRight,
   LucideZap, LucideWallet, LucideBanknote,
-  LucideX, LucideCheck,
+  LucideX, LucideCheck, LucideChevronLeft,
 } from 'lucide-react-native';
 import { MotiView } from 'moti';
 import { useIsFocused } from '@react-navigation/native';
@@ -308,12 +308,12 @@ export const FinancesScreen = ({ navigation, route }: any) => {
     return (
       <MotiView from={{ opacity: 0, translateX: -20 }} animate={{ opacity: 1, translateX: 0 }} exit={{ opacity: 0, translateX: 20 }}>
         {subscriptions.length > 0 && (
-          <View style={[styles.summaryCard, { backgroundColor: `${colors.accent}12`, borderColor: `${colors.accent}30` }]}>
+          <View style={[styles.summaryCard, { backgroundColor: `${colors.debit}12`, borderColor: `${colors.debit}30` }]}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-              <LucideRepeat color={colors.accent} size={18} />
+              <LucideRepeat color={colors.debit} size={18} />
               <View>
                 <ThemedText style={{ fontSize: 11, color: colors.secondary, textTransform: 'uppercase', fontWeight: 'bold' }}>Monthly Burn</ThemedText>
-                <ThemedText style={{ fontWeight: 'bold', fontSize: 22, color: colors.accent }}>
+                <ThemedText style={{ fontWeight: 'bold', fontSize: 22, color: colors.debit }}>
                   {preferences.currency}{Math.round(totalMonthly).toLocaleString('en-IN')}
                 </ThemedText>
               </View>
@@ -375,8 +375,8 @@ export const FinancesScreen = ({ navigation, route }: any) => {
               activeOpacity={0.8}
             >
               <View style={styles.cardHeader}>
-                <View style={[styles.iconContainer, { backgroundColor: `${colors.accent}15` }]}>
-                  <LucideRepeat color={colors.accent} size={20} />
+                <View style={[styles.iconContainer, { backgroundColor: `${colors.debit}15` }]}>
+                  <LucideRepeat color={colors.debit} size={20} />
                 </View>
                 <View style={{ flex: 1 }}>
                   <ThemedText style={{ fontWeight: 'bold', fontSize: 16 }}>{sub.name}</ThemedText>
@@ -385,9 +385,9 @@ export const FinancesScreen = ({ navigation, route }: any) => {
                       {sub.frequency} · {sub.category}
                     </ThemedText>
                     {sub.splitEnabled && (
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: `${colors.accent}15`, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
-                        <LucideUsers color={colors.accent} size={10} />
-                        <ThemedText style={{ fontSize: 9, color: colors.accent, fontWeight: 'bold' }}>{totalPeople} people</ThemedText>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: `${colors.debit}15`, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
+                        <LucideUsers color={colors.debit} size={10} />
+                        <ThemedText style={{ fontSize: 9, color: colors.debit, fontWeight: 'bold' }}>{totalPeople} people</ThemedText>
                       </View>
                     )}
                   </View>
@@ -397,7 +397,7 @@ export const FinancesScreen = ({ navigation, route }: any) => {
                     {preferences.hideAmounts ? '****' : `${preferences.currency}${sub.amount.toLocaleString('en-IN')}`}
                   </ThemedText>
                   {myShare !== null && (
-                    <ThemedText style={{ fontSize: 10, color: colors.accent }}>
+                    <ThemedText style={{ fontSize: 10, color: colors.debit }}>
                       My share: {preferences.currency}{myShare.toLocaleString('en-IN')}
                     </ThemedText>
                   )}
@@ -424,7 +424,7 @@ export const FinancesScreen = ({ navigation, route }: any) => {
 
                 {/* Pay Now button */}
                 <TouchableOpacity
-                  style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: `${colors.accent}20`, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 }}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: `${colors.debit}20`, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 }}
                   onPress={() => {
                     Haptics.selectionAsync();
                     setQuickAction({
@@ -432,13 +432,13 @@ export const FinancesScreen = ({ navigation, route }: any) => {
                       id: sub.id,
                       label: `Pay ${sub.name}`,
                       defaultAmount: sub.amount,
-                      accentColor: colors.accent,
+                      accentColor: colors.debit,
                       accountId: sub.debitAccountId,
                     });
                   }}
                 >
-                  <LucideZap color={colors.accent} size={12} />
-                  <ThemedText style={{ color: colors.accent, fontWeight: 'bold', fontSize: 11 }}>Pay Now</ThemedText>
+                  <LucideZap color={colors.debit} size={12} />
+                  <ThemedText style={{ color: colors.debit, fontWeight: 'bold', fontSize: 11 }}>Pay Now</ThemedText>
                 </TouchableOpacity>
               </View>
 
@@ -588,7 +588,7 @@ export const FinancesScreen = ({ navigation, route }: any) => {
               {totalOwed > 0 && (
                 <View style={{ alignItems: 'center' }}>
                   <ThemedText style={{ fontSize: 10, color: colors.secondary, textTransform: 'uppercase', fontWeight: 'bold' }}>I Owe</ThemedText>
-                  <ThemedText style={{ fontWeight: 'bold', fontSize: 18, color: colors.warning }}>
+                  <ThemedText style={{ fontWeight: 'bold', fontSize: 18, color: colors.debit }}>
                     {preferences.currency}{totalOwed.toLocaleString('en-IN')}
                   </ThemedText>
                 </View>
@@ -599,7 +599,7 @@ export const FinancesScreen = ({ navigation, route }: any) => {
               {totalToReceive > 0 && (
                 <View style={{ alignItems: 'center' }}>
                   <ThemedText style={{ fontSize: 10, color: colors.secondary, textTransform: 'uppercase', fontWeight: 'bold' }}>Owed to Me</ThemedText>
-                  <ThemedText style={{ fontWeight: 'bold', fontSize: 18, color: colors.success }}>
+                  <ThemedText style={{ fontWeight: 'bold', fontSize: 18, color: colors.credit }}>
                     {preferences.currency}{totalToReceive.toLocaleString('en-IN')}
                   </ThemedText>
                 </View>
@@ -615,7 +615,7 @@ export const FinancesScreen = ({ navigation, route }: any) => {
                 <ThemedText style={{ fontSize: 11, color: colors.secondary, fontWeight: 'bold', textTransform: 'uppercase', marginBottom: 10, marginLeft: 2, letterSpacing: 1 }}>
                   Money Owed to Me
                 </ThemedText>
-                {lent.map(loan => renderLoanCard(loan, colors.success, <LucideUserPlus color={colors.success} size={20} />))}
+                {lent.map(loan => renderLoanCard(loan, colors.credit, <LucideUserPlus color={colors.credit} size={20} />))}
                 <View style={{ height: 16 }} />
               </>
             )}
@@ -624,7 +624,7 @@ export const FinancesScreen = ({ navigation, route }: any) => {
                 <ThemedText style={{ fontSize: 11, color: colors.secondary, fontWeight: 'bold', textTransform: 'uppercase', marginBottom: 10, marginLeft: 2, letterSpacing: 1 }}>
                   Money I Owe
                 </ThemedText>
-                {borrowed.map(loan => renderLoanCard(loan, colors.warning, <LucideLandmark color={colors.warning} size={20} />))}
+                {borrowed.map(loan => renderLoanCard(loan, colors.debit, <LucideLandmark color={colors.debit} size={20} />))}
               </>
             )}
           </>
@@ -668,7 +668,7 @@ export const FinancesScreen = ({ navigation, route }: any) => {
             </ThemedText>
           </View>
           <View style={{ alignItems: 'flex-end' }}>
-            <ThemedText style={{ color: isLent ? colors.success : colors.danger, fontWeight: 'bold', fontSize: 16 }}>
+            <ThemedText style={{ color, fontWeight: 'bold', fontSize: 16 }}>
               {preferences.hideAmounts ? '****' : `${preferences.currency}${loan.remainingAmount.toLocaleString('en-IN')}`}
             </ThemedText>
             <ThemedText style={{ fontSize: 10, color: colors.secondary }}>REMAINING</ThemedText>
@@ -858,12 +858,12 @@ export const FinancesScreen = ({ navigation, route }: any) => {
         ) : (
           <>
             {totalPending > 0 && (
-              <View style={[styles.card, { backgroundColor: colors.warning + '12', borderColor: colors.warning + '40' }]}>
+              <View style={[styles.card, { backgroundColor: colors.credit + '12', borderColor: colors.credit + '40' }]}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                  <LucideUsers color={colors.warning} size={20} />
+                  <LucideUsers color={colors.credit} size={20} />
                   <View>
                     <ThemedText style={{ fontWeight: 'bold', fontSize: 15 }}>Total Pending</ThemedText>
-                    <ThemedText style={{ color: colors.warning, fontWeight: 'bold', fontSize: 20, marginTop: 2 }}>
+                    <ThemedText style={{ color: colors.credit, fontWeight: 'bold', fontSize: 20, marginTop: 2 }}>
                       {preferences.currency}{totalPending.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                     </ThemedText>
                   </View>
@@ -885,8 +885,8 @@ export const FinancesScreen = ({ navigation, route }: any) => {
                   activeOpacity={0.8}
                 >
                   <View style={styles.cardHeader}>
-                    <View style={[styles.iconContainer, { backgroundColor: allSettled ? colors.success + '15' : colors.warning + '15' }]}>
-                      <LucideUsers color={allSettled ? colors.success : colors.warning} size={20} />
+                    <View style={[styles.iconContainer, { backgroundColor: allSettled ? colors.success + '15' : colors.credit + '15' }]}>
+                      <LucideUsers color={allSettled ? colors.success : colors.credit} size={20} />
                     </View>
                     <View style={{ flex: 1 }}>
                       <ThemedText style={{ fontWeight: 'bold', fontSize: 15 }} numberOfLines={1}>{split.title}</ThemedText>
@@ -896,7 +896,7 @@ export const FinancesScreen = ({ navigation, route }: any) => {
                       </ThemedText>
                     </View>
                     <View style={{ alignItems: 'flex-end' }}>
-                      <ThemedText style={{ color: allSettled ? colors.success : colors.warning, fontWeight: 'bold', fontSize: 16 }}>
+                      <ThemedText style={{ color: allSettled ? colors.success : colors.credit, fontWeight: 'bold', fontSize: 16 }}>
                         {preferences.currency}{pending.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                       </ThemedText>
                       <ThemedText style={{ fontSize: 10, color: colors.secondary }}>
@@ -908,14 +908,14 @@ export const FinancesScreen = ({ navigation, route }: any) => {
                   <View style={{ marginTop: 12 }}>
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
                       <ThemedText style={{ fontSize: 11, color: colors.secondary }}>Collection progress</ThemedText>
-                      <ThemedText style={{ color: allSettled ? colors.success : colors.accent, fontSize: 11, fontWeight: 'bold' }}>{pct}%</ThemedText>
+                      <ThemedText style={{ color: allSettled ? colors.success : colors.credit, fontSize: 11, fontWeight: 'bold' }}>{pct}%</ThemedText>
                     </View>
                     <View style={{ height: 5, backgroundColor: colors.border, borderRadius: 3, overflow: 'hidden' }}>
                       <MotiView
                         from={{ width: '0%' }}
                         animate={{ width: `${pct}%` }}
                         transition={{ type: 'timing', duration: 900 }}
-                        style={{ height: '100%', backgroundColor: allSettled ? colors.success : colors.accent }}
+                        style={{ height: '100%', backgroundColor: allSettled ? colors.success : colors.credit }}
                       />
                     </View>
                   </View>
@@ -973,6 +973,14 @@ export const FinancesScreen = ({ navigation, route }: any) => {
     <ThemedSafeAreaView>
       <View style={styles.container}>
         <View style={styles.header}>
+          {navigation.canGoBack() && (
+            <TouchableOpacity
+              onPress={() => navigation.goBack()}
+              style={{ width: 40, height: 40, alignItems: 'flex-start', justifyContent: 'center', marginBottom: 4, marginLeft: -6 }}
+            >
+              <LucideChevronLeft color={colors.primary} size={28} />
+            </TouchableOpacity>
+          )}
           <SectionLabel>Commitments</SectionLabel>
           <ThemedText style={{ fontFamily: fonts.displayBold, fontSize: 30, letterSpacing: -0.5, marginTop: 2 }}>Money</ThemedText>
         </View>

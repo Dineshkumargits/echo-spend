@@ -4,13 +4,14 @@ import { MotiView, AnimatePresence } from 'moti';
 import { useStore } from '../store/useStore';
 import { ThemedText } from './ThemedSafeAreaView';
 import { useTheme } from '../theme/ThemeProvider';
+import { withAlpha } from '../theme/tokens';
 import { LucideCloudSync } from 'lucide-react-native';
 
 const { width, height } = Dimensions.get('window');
 
 export const SyncOverlay = () => {
   const { isSyncing, syncProgressText } = useStore();
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
 
   return (
     <AnimatePresence>
@@ -22,7 +23,7 @@ export const SyncOverlay = () => {
           transition={{ type: 'timing', duration: 300 }}
           style={[
             styles.container,
-            { backgroundColor: isDark ? 'rgba(0,0,0,0.85)' : 'rgba(255,255,255,0.85)' }
+            { backgroundColor: withAlpha(colors.background, 'D9') }
           ]}
         >
           <MotiView

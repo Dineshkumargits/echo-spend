@@ -44,6 +44,8 @@ import {
   LucideAlertTriangle,
   LucideSparkles,
   LucideLightbulb,
+  LucideWallet,
+  LucideCalendar,
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { GoogleSignin } from "@react-native-google-signin/google-signin";
@@ -914,6 +916,18 @@ const SettingsScreen = ({ navigation }: any) => {
               label="Manage Categories"
               sub="Icons, colors and sub-groups"
               onPress={() => navigation.navigate("Categories")}
+            />
+            <Row
+              icon={<LucideWallet color={colors.primary} size={20} />}
+              label="Budgets & Salary"
+              sub="Monthly limits, salary day and spend tracking"
+              onPress={() => navigation.navigate("Budget")}
+            />
+            <Row
+              icon={<LucideCalendar color={colors.primary} size={20} />}
+              label="Money"
+              sub="Goals, loans, subscriptions and splits"
+              onPress={() => navigation.navigate("Finances")}
             />
           </View>
 

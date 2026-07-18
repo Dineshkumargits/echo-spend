@@ -366,7 +366,7 @@ const EmojiPicker = ({ selected, onSelect, selectedColor, colors }: EmojiPickerP
       ) : (
         filtered.map(group => (
           <View key={group.title} style={{ marginBottom: 20 }}>
-            <ThemedText style={pickerStyles.groupTitle}>{group.title}</ThemedText>
+            <ThemedText style={[pickerStyles.groupTitle, { color: colors.secondary }]}>{group.title}</ThemedText>
             <View style={pickerStyles.emojiGrid}>
               {group.emojis.map(item => {
                 const isSelected = selected === item.emoji;
@@ -404,7 +404,7 @@ const pickerStyles = StyleSheet.create({
   searchInput: { flex: 1, fontSize: 14, padding: 0 },
   groupTitle: {
     fontSize: 10, fontWeight: '700', textTransform: 'uppercase',
-    letterSpacing: 1, color: '#8E8E93', marginBottom: 10,
+    letterSpacing: 1, marginBottom: 10,
   },
   emojiGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   emojiBtn: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 12 },
@@ -567,7 +567,7 @@ export const CategoryManagerModal = ({ manager, onRefresh, onSaved }: CategoryMa
             }}
           >
             {/* Drag handle */}
-            <View style={modalStyles.handle} />
+            <View style={[modalStyles.handle, { backgroundColor: colors.border }]} />
 
             {/* Header */}
             <View style={modalStyles.header}>
@@ -613,7 +613,7 @@ export const CategoryManagerModal = ({ manager, onRefresh, onSaved }: CategoryMa
               {/* Type toggle — only for root categories */}
               {!isSubcategory && !editing?.parentId && (
                 <View style={{ marginBottom: 20 }}>
-                  <ThemedText style={s.label}>Type</ThemedText>
+                  <ThemedText type="secondary" style={s.label}>Type</ThemedText>
                   <View style={[modalStyles.toggleRow, { backgroundColor: colors.translucent }]}>
                     {(['expense', 'income'] as const).map(t => (
                       <TouchableOpacity
@@ -637,7 +637,7 @@ export const CategoryManagerModal = ({ manager, onRefresh, onSaved }: CategoryMa
               {/* Parent picker */}
               {(!editing?.id || editing.parentId !== undefined) && availableParents.length > 0 && !editing?.parentId && (
                 <View style={{ marginBottom: 20 }}>
-                  <ThemedText style={s.label}>Subcategory of</ThemedText>
+                  <ThemedText type="secondary" style={s.label}>Subcategory of</ThemedText>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -4 }}>
                     <TouchableOpacity
                       onPress={() => { setFormParentId(null); Haptics.selectionAsync(); }}
@@ -683,7 +683,7 @@ export const CategoryManagerModal = ({ manager, onRefresh, onSaved }: CategoryMa
               )}
 
               {/* Name input */}
-              <ThemedText style={s.label}>
+              <ThemedText type="secondary" style={s.label}>
                 {isSubcategory ? 'Subcategory Name' : 'Category Name'}
               </ThemedText>
               <TextInput
@@ -696,7 +696,7 @@ export const CategoryManagerModal = ({ manager, onRefresh, onSaved }: CategoryMa
               />
 
               {/* Color swatches */}
-              <ThemedText style={s.label}>Color</ThemedText>
+              <ThemedText type="secondary" style={s.label}>Color</ThemedText>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 24 }}>
                 {CATEGORY_COLORS.map((c) => (
                   <TouchableOpacity
@@ -715,7 +715,7 @@ export const CategoryManagerModal = ({ manager, onRefresh, onSaved }: CategoryMa
               </View>
 
               {/* Emoji picker */}
-              <ThemedText style={s.label}>Choose Icon</ThemedText>
+              <ThemedText type="secondary" style={s.label}>Choose Icon</ThemedText>
               <EmojiPicker
                 selected={selectedIcon}
                 onSelect={setSelectedIcon}
@@ -745,12 +745,12 @@ export const CategoryManagerModal = ({ manager, onRefresh, onSaved }: CategoryMa
 };
 
 const s = StyleSheet.create({
-  label: { fontSize: 11, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10, color: '#8E8E93' },
+  label: { fontSize: 11, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 },
 });
 
 const modalStyles = StyleSheet.create({
   handle: {
-    width: 40, height: 4, borderRadius: 2, backgroundColor: '#3C3C434A',
+    width: 40, height: 4, borderRadius: 2,
     alignSelf: 'center', marginTop: 12, marginBottom: 4,
   },
   header: {

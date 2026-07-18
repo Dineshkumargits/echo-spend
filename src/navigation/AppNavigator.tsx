@@ -26,6 +26,8 @@ import ManageAccountsScreen from '../screens/ManageAccountsScreen';
 import TipsScreen from '../screens/TipsScreen';
 import AIModelSetupStep from '../screens/AIModelSetupStep';
 import AccountBackupScreen from '../screens/AccountBackupScreen';
+import FinancesScreen from '../screens/FinancesScreen';
+import BudgetScreen from '../screens/BudgetScreen';
 
 const Stack = createStackNavigator();
 
@@ -62,6 +64,8 @@ export const AppNavigator = () => {
             <Stack.Screen name="BankAccountDetail" component={BankAccountDetailScreen} options={{ presentation: 'card' }} />
             <Stack.Screen name="SplitExpense" component={SplitExpenseScreen} options={{ presentation: 'modal' }} />
             <Stack.Screen name="SplitDetail" component={SplitDetailScreen} options={{ presentation: 'card' }} />
+            <Stack.Screen name="Finances" component={FinancesScreen} options={{ presentation: 'card' }} />
+            <Stack.Screen name="Budget" component={BudgetScreen} options={{ presentation: 'card' }} />
             <Stack.Screen name="Tips" component={TipsScreen} options={{ presentation: 'card' }} />
             <Stack.Screen name="AIModelSetup" component={AIModelSetupStep} options={{ presentation: 'modal' }} />
             <Stack.Screen name="AccountBackup" component={AccountBackupScreen} options={{ presentation: 'card' }} />

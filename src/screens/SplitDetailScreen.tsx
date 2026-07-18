@@ -65,7 +65,7 @@ const AccountRow = React.memo(({
         <View style={{ flex: 1 }}>
           <ThemedText style={{ fontSize: 14, fontWeight: '600' }}>{acc.name}</ThemedText>
           <ThemedText style={{ fontSize: 11, color: colors.secondary }}>
-            {acc.accountType.replace('_', ' ')} · Balance: {currency}{acc.balance.toLocaleString('en-IN')}
+            {acc.accountType.replace('_', ' ')} · Balance: <ThemedText font="signal" style={{ fontSize: 11, color: colors.secondary }}>{currency}{acc.balance.toLocaleString('en-IN')}</ThemedText>
           </ThemedText>
         </View>
         <MotiView
@@ -132,7 +132,7 @@ const ReceiveModal = ({
               Receive from {member.name}
             </ThemedText>
             <ThemedText style={{ fontSize: 13, color: colors.secondary, marginBottom: 16 }}>
-              Total share: {currency}{member.share.toLocaleString('en-IN')} · Already paid: {currency}{(member.paidAmount ?? 0).toLocaleString('en-IN')}
+              Total share: <ThemedText font="signal" style={{ fontSize: 13, color: colors.secondary }}>{currency}{member.share.toLocaleString('en-IN')}</ThemedText> · Already paid: <ThemedText font="signal" style={{ fontSize: 13, color: colors.secondary }}>{currency}{(member.paidAmount ?? 0).toLocaleString('en-IN')}</ThemedText>
             </ThemedText>
 
             <ThemedText style={{ fontSize: 11, fontWeight: '700', color: colors.secondary, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>
@@ -175,7 +175,7 @@ const ReceiveModal = ({
               style={{ marginTop: 8, padding: 16, borderRadius: 14, backgroundColor: colors.success, alignItems: 'center' }}
             >
               <ThemedText style={{ fontSize: 15, fontWeight: '700', color: '#fff' }}>
-                Confirm — Receive {currency}{parseFloat(amountStr || '0').toLocaleString('en-IN')}
+                Confirm — Receive <ThemedText font="signal" style={{ fontSize: 15, fontWeight: '700', color: '#fff' }}>{currency}{parseFloat(amountStr || '0').toLocaleString('en-IN')}</ThemedText>
               </ThemedText>
             </TouchableOpacity>
           </TouchableOpacity>
@@ -365,7 +365,7 @@ const SplitDetailScreen = ({ navigation, route }: any) => {
             </View>
             <View style={{ alignItems: 'flex-end', marginLeft: 12 }}>
               <ThemedText style={{ fontSize: 11, color: colors.secondary, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.6 }}>Total</ThemedText>
-              <ThemedText style={{ fontSize: 22, fontWeight: '700' }}>{cur}{split.totalAmount.toLocaleString('en-IN')}</ThemedText>
+              <ThemedText font="signal" style={{ fontSize: 22, fontWeight: '700' }}>{cur}{split.totalAmount.toLocaleString('en-IN')}</ThemedText>
             </View>
           </View>
 
@@ -373,7 +373,7 @@ const SplitDetailScreen = ({ navigation, route }: any) => {
           <View style={{ gap: 6 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
               <ThemedText style={{ fontSize: 12, color: colors.secondary }}>Collected</ThemedText>
-              <ThemedText style={{ fontSize: 12, fontWeight: '700', color: colors.success }}>
+              <ThemedText font="signal" style={{ fontSize: 12, fontWeight: '700', color: colors.success }}>
                 {cur}{collectedAmount.toLocaleString('en-IN')} / {cur}{(pendingAmount + collectedAmount).toLocaleString('en-IN')}
               </ThemedText>
             </View>
@@ -390,7 +390,7 @@ const SplitDetailScreen = ({ navigation, route }: any) => {
                 {paidMembers.length} of {others.length} paid
               </ThemedText>
               {pendingAmount > 0 && (
-                <ThemedText style={{ fontSize: 11, fontWeight: '700', color: colors.warning }}>
+                <ThemedText font="signal" style={{ fontSize: 11, fontWeight: '700', color: colors.credit }}>
                   {cur}{pendingAmount.toLocaleString('en-IN')} pending
                 </ThemedText>
               )}
@@ -420,7 +420,7 @@ const SplitDetailScreen = ({ navigation, route }: any) => {
                   <ThemedText style={{ fontSize: 13, fontWeight: '700', color: colors.credit }}>
                     Subscription Split — {linkedSub.name}
                   </ThemedText>
-                  <ThemedText style={{ fontSize: 11, color: colors.secondary }}>
+                  <ThemedText font="signal" style={{ fontSize: 11, color: colors.secondary }}>
                     {linkedSub.frequency} · {cur}{linkedSub.amount.toLocaleString('en-IN')} total · {linkedSub.category}
                   </ThemedText>
                 </>
@@ -430,7 +430,7 @@ const SplitDetailScreen = ({ navigation, route }: any) => {
                   <ThemedText style={{ fontSize: 13, fontWeight: '700', color: colors.credit }}>
                     Goal Contribution — {linkedGoal.name}
                   </ThemedText>
-                  <ThemedText style={{ fontSize: 11, color: colors.secondary }}>
+                  <ThemedText font="signal" style={{ fontSize: 11, color: colors.secondary }}>
                     {cur}{linkedGoal.currentAmount.toLocaleString('en-IN')} / {cur}{linkedGoal.targetAmount.toLocaleString('en-IN')} saved
                   </ThemedText>
                 </>
@@ -440,7 +440,7 @@ const SplitDetailScreen = ({ navigation, route }: any) => {
                   <ThemedText style={{ fontSize: 13, fontWeight: '700', color: colors.debit }}>
                     Loan Payment — {linkedLoan.lender}
                   </ThemedText>
-                  <ThemedText style={{ fontSize: 11, color: colors.secondary }}>
+                  <ThemedText font="signal" style={{ fontSize: 11, color: colors.secondary }}>
                     {cur}{linkedLoan.remainingAmount.toLocaleString('en-IN')} remaining · {linkedLoan.type === 'borrowed' ? 'Borrowing' : 'Lending'}
                   </ThemedText>
                 </>
@@ -475,7 +475,7 @@ const SplitDetailScreen = ({ navigation, route }: any) => {
               <ThemedText style={{ fontSize: 12, color: colors.secondary, marginTop: 2 }}>Already paid (you covered the bill)</ThemedText>
             </View>
             <View style={{ alignItems: 'flex-end' }}>
-              <ThemedText style={{ fontSize: 18, fontWeight: '700', color: colors.accent }}>{cur}{me.share.toLocaleString('en-IN')}</ThemedText>
+              <ThemedText font="signal" style={{ fontSize: 18, fontWeight: '700', color: colors.accent }}>{cur}{me.share.toLocaleString('en-IN')}</ThemedText>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
                 <LucideCheck color={colors.success} size={11} />
                 <ThemedText style={{ fontSize: 11, color: colors.success, fontWeight: '600' }}>Settled</ThemedText>
@@ -488,8 +488,8 @@ const SplitDetailScreen = ({ navigation, route }: any) => {
         {pendingMembers.length > 0 && (
           <View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 }}>
-              <LucideClock color={colors.warning} size={13} />
-              <ThemedText style={{ fontSize: 11, fontWeight: '700', color: colors.warning, textTransform: 'uppercase', letterSpacing: 0.8 }}>
+              <LucideClock color={colors.credit} size={13} />
+              <ThemedText style={{ fontSize: 11, fontWeight: '700', color: colors.credit, textTransform: 'uppercase', letterSpacing: 0.8 }}>
                 Pending ({pendingMembers.length})
               </ThemedText>
             </View>
@@ -507,22 +507,22 @@ const SplitDetailScreen = ({ navigation, route }: any) => {
                     borderBottomColor: colors.border,
                   }}
                 >
-                  <View style={{ width: 38, height: 38, borderRadius: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: `${colors.warning}18` }}>
-                    <ThemedText style={{ fontSize: 14, fontWeight: '700', color: colors.warning }}>
+                  <View style={{ width: 38, height: 38, borderRadius: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: `${colors.credit}18` }}>
+                    <ThemedText style={{ fontSize: 14, fontWeight: '700', color: colors.credit }}>
                       {m.name.charAt(0).toUpperCase()}
                     </ThemedText>
                   </View>
                   <View style={{ flex: 1 }}>
                     <ThemedText style={{ fontSize: 14, fontWeight: '600' }}>{m.name}</ThemedText>
                     {m.paidAmount > 0 ? (
-                      <ThemedText style={{ fontSize: 11, color: colors.secondary, marginTop: 2 }}>
+                      <ThemedText font="signal" style={{ fontSize: 11, color: colors.secondary, marginTop: 2 }}>
                         paid {cur}{m.paidAmount.toLocaleString('en-IN')} of {cur}{m.share.toLocaleString('en-IN')}
                       </ThemedText>
                     ) : (
                       <ThemedText style={{ fontSize: 12, color: colors.secondary, marginTop: 2 }}>Owes you</ThemedText>
                     )}
                   </View>
-                  <ThemedText style={{ fontSize: 16, fontWeight: '700', color: colors.warning, marginRight: 8 }}>
+                  <ThemedText font="signal" style={{ fontSize: 16, fontWeight: '700', color: colors.credit, marginRight: 8 }}>
                     {cur}{(m.share - m.paidAmount).toLocaleString('en-IN')}
                   </ThemedText>
                   {m.paidAmount > 0 && (
@@ -579,7 +579,7 @@ const SplitDetailScreen = ({ navigation, route }: any) => {
                         {repaidTo ? ` · to ${repaidTo.name}` : ''}
                       </ThemedText>
                     </View>
-                    <ThemedText style={{ fontSize: 15, fontWeight: '700', color: colors.success }}>
+                    <ThemedText font="signal" style={{ fontSize: 15, fontWeight: '700', color: colors.success }}>
                       {cur}{m.share.toLocaleString('en-IN')}
                     </ThemedText>
                     <TouchableOpacity
@@ -630,7 +630,7 @@ const SplitDetailScreen = ({ navigation, route }: any) => {
             <ThemedText style={{ fontSize: 24 }}>🎉</ThemedText>
             <ThemedText style={{ fontSize: 15, fontWeight: '700', color: colors.success }}>All settled!</ThemedText>
             <ThemedText style={{ fontSize: 12, color: colors.secondary, textAlign: 'center' }}>
-              You've collected {cur}{collectedAmount.toLocaleString('en-IN')} from {paidMembers.length} {paidMembers.length === 1 ? 'person' : 'people'}.
+              You've collected <ThemedText font="signal" style={{ fontSize: 12, color: colors.secondary }}>{cur}{collectedAmount.toLocaleString('en-IN')}</ThemedText> from {paidMembers.length} {paidMembers.length === 1 ? 'person' : 'people'}.
             </ThemedText>
           </MotiView>
         )}

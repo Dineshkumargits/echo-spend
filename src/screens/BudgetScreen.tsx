@@ -12,7 +12,8 @@ import {
 } from 'react-native';
 import { MotiView } from 'moti';
 import * as Haptics from 'expo-haptics';
-import { LucidePlus, LucideTrash2, LucideTarget, LucideX, LucideCheck, LucideWallet, LucideTimer } from 'lucide-react-native';
+import { LucidePlus, LucideTrash2, LucideTarget, LucideX, LucideCheck, LucideWallet, LucideTimer, LucideChevronLeft } from 'lucide-react-native';
+import { useNavigation } from '@react-navigation/native';
 import { renderCategoryIcon } from '../components/CategoryManager';
 import { notify } from '../utils/notify';
 import {
@@ -35,6 +36,7 @@ interface BudgetRow {
 }
 
 const BudgetScreen = () => {
+  const navigation = useNavigation<any>();
   const { colors, theme } = useTheme();
   const { preferences, setMonthlyBudget, setSalaryDay } = useStore();
   const currency = preferences?.currency ?? '₹';
@@ -158,6 +160,14 @@ const BudgetScreen = () => {
             animate={{ opacity: 1, translateY: 0 }}
             className="mt-4 mb-6"
           >
+            {navigation.canGoBack() && (
+              <TouchableOpacity
+                onPress={() => navigation.goBack()}
+                style={{ width: 40, height: 40, alignItems: 'flex-start', justifyContent: 'center', marginBottom: 4, marginLeft: -6 }}
+              >
+                <LucideChevronLeft color={colors.primary} size={28} />
+              </TouchableOpacity>
+            )}
             <ThemedText type="secondary" className="text-sm uppercase tracking-widest">Finance</ThemedText>
             <ThemedText className="text-3xl font-bold">Budgets</ThemedText>
           </MotiView>
@@ -287,10 +297,10 @@ const BudgetScreen = () => {
                     </View>
 
                     <View className="flex-row justify-between mb-2">
-                      <ThemedText type="secondary" className="text-xs">
+                      <ThemedText font="signal" type="secondary" className="text-xs">
                         {currency}{row.spent.toLocaleString('en-IN')} spent
                       </ThemedText>
-                      <ThemedText className="text-xs font-bold" style={{ color: barColor }}>
+                      <ThemedText font="signal" className="text-xs font-bold" style={{ color: barColor }}>
                         {row.percentage}% of {currency}{row.budget.amount.toLocaleString('en-IN')}
                       </ThemedText>
                     </View>
@@ -306,7 +316,7 @@ const BudgetScreen = () => {
                     </View>
 
                     {row.percentage >= 100 && (
-                      <ThemedText className="text-xs mt-2 font-bold" style={{ color: colors.danger }}>
+                      <ThemedText font="signal" className="text-xs mt-2 font-bold" style={{ color: colors.danger }}>
                         Over budget by {currency}{(row.spent - row.budget.amount).toLocaleString('en-IN')}
                       </ThemedText>
                     )}

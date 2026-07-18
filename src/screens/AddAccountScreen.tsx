@@ -1,6 +1,6 @@
 import { ThemedSafeAreaView, ThemedText } from '../components/ThemedSafeAreaView';
 import React, { useState, useEffect, useMemo } from 'react';
-import { View, StyleSheet, TextInput, TouchableOpacity, ScrollView, Alert, Platform, KeyboardAvoidingView, Text } from 'react-native';
+import { View, StyleSheet, TextInput, TouchableOpacity, ScrollView, Alert, Platform, KeyboardAvoidingView } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { LucideX, LucideCheck, LucideCalendar, LucideTrash2, LucideInfo } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
@@ -230,9 +230,9 @@ export const AddAccountScreen = () => {
                   { backgroundColor: selected === d ? colors.accent : colors.translucent },
                 ]}
               >
-                <Text style={{ color: selected === d ? '#fff' : colors.primary, fontWeight: 'bold', fontSize: 14 }}>
+                <ThemedText style={{ color: selected === d ? '#fff' : colors.primary, fontWeight: 'bold', fontSize: 14 }}>
                   {d}
-                </Text>
+                </ThemedText>
               </TouchableOpacity>
             ))}
           </ScrollView>
@@ -400,7 +400,7 @@ export const AddAccountScreen = () => {
                     ? <ThemedText style={{ color: colors.danger, fontSize: 12, marginTop: 4 }}>{errors.creditLimit}</ThemedText>
                     : creditLimit && !isNaN(parseFloat(creditLimit)) && !isNaN(parseFloat(balance)) && (
                       <ThemedText type="secondary" className="text-[11px] mt-1 italic">
-                        Available credit: {currency}{(parseFloat(creditLimit) - (parseFloat(balance) || 0)).toLocaleString('en-IN')}
+                        Available credit: <ThemedText type="secondary" font="signal" className="text-[11px] italic">{currency}{(parseFloat(creditLimit) - (parseFloat(balance) || 0)).toLocaleString('en-IN')}</ThemedText>
                       </ThemedText>
                     )
                   }

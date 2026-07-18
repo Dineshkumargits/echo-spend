@@ -11,6 +11,7 @@ import {
 } from 'lucide-react-native';
 import { ThemedSafeAreaView, ThemedText } from '../components/ThemedSafeAreaView';
 import { useTheme } from '../theme/ThemeProvider';
+import { fonts } from '../theme/tokens';
 import { useStore } from '../store/useStore';
 import { notify } from '../utils/notify';
 import {
@@ -259,7 +260,7 @@ const SplitExpenseScreen = ({ navigation, route }: any) => {
             Total Bill Amount
           </ThemedText>
           <View style={{ flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: colors.border, borderRadius: 14, backgroundColor: colors.surface, paddingHorizontal: 14, marginBottom: 20 }}>
-            <ThemedText style={{ fontSize: 20, fontWeight: '700', color: colors.secondary, marginRight: 6 }}>{cur}</ThemedText>
+            <ThemedText font="signal" style={{ fontSize: 20, fontWeight: '700', color: colors.secondary, marginRight: 6 }}>{cur}</ThemedText>
             <TextInput
               value={totalStr}
               onChangeText={setTotalStr}
@@ -267,10 +268,10 @@ const SplitExpenseScreen = ({ navigation, route }: any) => {
               placeholder="0"
               placeholderTextColor={colors.muted}
               editable={!transaction}
-              style={{ flex: 1, fontSize: 28, fontWeight: '700', paddingVertical: 14, color: transaction ? colors.secondary : colors.primary }}
+              style={{ flex: 1, fontFamily: fonts.signalBold, fontSize: 28, paddingVertical: 14, color: transaction ? colors.secondary : colors.primary }}
             />
             {transaction && (
-              <ThemedText style={{ fontSize: 11, color: colors.muted }}>from txn</ThemedText>
+              <ThemedText font="signal" style={{ fontSize: 11, color: colors.muted }}>from txn</ThemedText>
             )}
           </View>
 
@@ -322,7 +323,7 @@ const SplitExpenseScreen = ({ navigation, route }: any) => {
               <ThemedText style={{ fontSize: 14, fontWeight: '600', color: colors.accent }}>You (paid the full bill)</ThemedText>
             </View>
             <View style={{ alignItems: 'flex-end' }}>
-              <ThemedText style={{ fontSize: 16, fontWeight: '700', color: colors.accent }}>
+              <ThemedText font="signal" style={{ fontSize: 16, fontWeight: '700', color: colors.accent }}>
                 {cur}{myShare > 0 ? myShare.toFixed(2) : '—'}
               </ThemedText>
               <ThemedText style={{ fontSize: 10, color: colors.secondary }}>your share</ThemedText>
@@ -349,7 +350,7 @@ const SplitExpenseScreen = ({ navigation, route }: any) => {
                 style={{ flex: 1, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.border, color: colors.primary, backgroundColor: colors.surface, fontSize: 14 }}
               />
               <View style={{ flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: colors.border, borderRadius: 12, backgroundColor: colors.surface, paddingHorizontal: 8 }}>
-                <ThemedText style={{ fontSize: 13, color: colors.secondary }}>{cur}</ThemedText>
+                <ThemedText font="signal" style={{ fontSize: 13, color: colors.secondary }}>{cur}</ThemedText>
                 <TextInput
                   value={m.share}
                   onChangeText={v => !splitEqually && updateMember(m.key, 'share', v)}
@@ -357,7 +358,7 @@ const SplitExpenseScreen = ({ navigation, route }: any) => {
                   keyboardType="decimal-pad"
                   placeholder="0"
                   placeholderTextColor={colors.muted}
-                  style={{ width: 70, padding: 12, fontSize: 14, fontWeight: '600', color: splitEqually ? colors.secondary : colors.primary }}
+                  style={{ width: 70, padding: 12, fontFamily: fonts.signalBold, fontSize: 14, color: splitEqually ? colors.secondary : colors.primary }}
                 />
               </View>
               {members.length > 1 && (
@@ -378,15 +379,15 @@ const SplitExpenseScreen = ({ navigation, route }: any) => {
               <ThemedText style={{ fontSize: 11, fontWeight: '700', color: colors.secondary, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Summary</ThemedText>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                 <ThemedText style={{ color: colors.secondary, fontSize: 13 }}>Total bill</ThemedText>
-                <ThemedText style={{ fontWeight: '700', fontSize: 13 }}>{cur}{total.toLocaleString('en-IN')}</ThemedText>
+                <ThemedText font="signal" style={{ fontWeight: '700', fontSize: 13 }}>{cur}{total.toLocaleString('en-IN')}</ThemedText>
               </View>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                 <ThemedText style={{ color: colors.secondary, fontSize: 13 }}>Your share</ThemedText>
-                <ThemedText style={{ fontWeight: '700', fontSize: 13, color: colors.accent }}>{cur}{myShare.toFixed(2)}</ThemedText>
+                <ThemedText font="signal" style={{ fontWeight: '700', fontSize: 13, color: colors.accent }}>{cur}{myShare.toFixed(2)}</ThemedText>
               </View>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                 <ThemedText style={{ color: colors.secondary, fontSize: 13 }}>To collect from others</ThemedText>
-                <ThemedText style={{ fontWeight: '700', fontSize: 13, color: colors.success }}>{cur}{othersTotal.toFixed(2)}</ThemedText>
+                <ThemedText font="signal" style={{ fontWeight: '700', fontSize: 13, color: colors.success }}>{cur}{othersTotal.toFixed(2)}</ThemedText>
               </View>
               <View style={{ height: 1, backgroundColor: colors.border, marginVertical: 4 }} />
               <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
