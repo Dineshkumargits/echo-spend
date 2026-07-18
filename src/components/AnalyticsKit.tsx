@@ -304,11 +304,10 @@ export const TopMerchants: React.FC<{
           key={m.merchant}
           onPress={() => onPressMerchant?.(m.merchant)}
           className="px-4 py-4"
-          style={({ pressed }) => ({
+          style={{
             borderTopWidth: i > 0 ? 1 : 0,
             borderTopColor: colors.border,
-            opacity: pressed ? 0.6 : 1,
-          })}
+          }}
         >
           <View
             style={{

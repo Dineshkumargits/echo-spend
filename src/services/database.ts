@@ -649,6 +649,14 @@ export const getTransactions = async (opts?: {
    * a parent group. Ignored if `category` (exact match) is also provided.
    */
   categoryGroup?: string;
+  /**
+   * Multi-select variants used by the Transactions filter sheet. Any transaction
+   * matching an exact name in `categories` OR falling under a parent named in
+   * `categoryGroups` (parent itself + its subcategories) is included. When either
+   * array is non-empty, the single `category`/`categoryGroup` options are ignored.
+   */
+  categories?: string[];
+  categoryGroups?: string[];
   type?: 'credit' | 'debit' | 'transfer';
   tag?: string;
   minAmount?: number;
@@ -666,7 +674,28 @@ export const getTransactions = async (opts?: {
     conditions.push('(LOWER(merchant) LIKE ? OR LOWER(category) LIKE ? OR LOWER(tags) LIKE ?)');
     params.push(`%${opts.search.toLowerCase()}%`, `%${opts.search.toLowerCase()}%`, `%${opts.search.toLowerCase()}%`);
   }
-  if (opts?.category) {
+  const multiCats = opts?.categories ?? [];
+  const multiGroups = opts?.categoryGroups ?? [];
+  if (multiCats.length > 0 || multiGroups.length > 0) {
+    // OR together exact names and parent-inclusive groups. Groups match the
+    // group name itself (denormalized category text — see the single-group
+    // comment below) as well as any current subcategory of that parent.
+    const parts: string[] = [];
+    if (multiCats.length > 0) {
+      parts.push(`category IN (${multiCats.map(() => '?').join(',')})`);
+      params.push(...multiCats);
+    }
+    if (multiGroups.length > 0) {
+      const ph = multiGroups.map(() => '?').join(',');
+      parts.push(`category IN (${ph})`);
+      params.push(...multiGroups);
+      parts.push(
+        `category IN (SELECT name FROM categories WHERE parentId IN (SELECT id FROM categories WHERE name IN (${ph}) AND parentId IS NULL))`
+      );
+      params.push(...multiGroups);
+    }
+    conditions.push(`(${parts.join(' OR ')})`);
+  } else if (opts?.category) {
     conditions.push('category = ?');
     params.push(opts.category);
   } else if (opts?.categoryGroup) {

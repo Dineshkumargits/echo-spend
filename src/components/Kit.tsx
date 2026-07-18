@@ -428,10 +428,10 @@ export const PrimaryButton: React.FC<{ label: string; onPress: () => void; tone?
     <Pressable
       onPress={() => { if (!disabled) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); onPress(); } }}
       disabled={disabled}
-      style={({ pressed }) => [{
+      style={[{
         flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
         backgroundColor: bg, borderRadius: radius.md, paddingVertical: 16,
-        opacity: disabled ? 0.4 : pressed ? 0.85 : 1,
+        opacity: disabled ? 0.4 : 1,
       }, style]}
     >
       {icon}

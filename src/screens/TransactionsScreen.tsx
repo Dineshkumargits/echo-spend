@@ -79,10 +79,11 @@ type SourceFilter = "all" | "sms" | "manual" | "auto";
 
 interface Filters {
   type: "all" | "debit" | "credit" | "transfer";
-  categoryName: string | null;
-  // Parent-inclusive category filter (parent + its subcategories), set by
-  // Analytics drill-downs. Kept separate from the exact `categoryName` picker.
-  categoryGroup: string | null;
+  // Multi-select category filter. `categoryNames` are exact matches (typically
+  // subcategories); `categoryGroups` are parent-inclusive (parent + all its
+  // subcategories). A transaction matching either set passes.
+  categoryNames: string[];
+  categoryGroups: string[];
   tagValue: string | null;
   accountId: number | null;
   datePreset: DatePreset;
@@ -97,8 +98,8 @@ interface Filters {
 
 const DEFAULT_FILTERS: Filters = {
   type: "all",
-  categoryName: null,
-  categoryGroup: null,
+  categoryNames: [],
+  categoryGroups: [],
   tagValue: null,
   accountId: null,
   datePreset: "all",
@@ -155,8 +156,7 @@ const getDateRange = (
 const countActiveFilters = (f: Filters): number => {
   let count = 0;
   if (f.type !== "all") count++;
-  if (f.categoryName) count++;
-  if (f.categoryGroup) count++;
+  count += f.categoryNames.length + f.categoryGroups.length;
   if (f.tagValue) count++;
   if (f.accountId) count++;
   if (f.datePreset !== "all") count++;
@@ -214,10 +214,16 @@ const TransactionsScreen = () => {
   const [filters, setFilters] = useState<Filters>(() => ({
     ...DEFAULT_FILTERS,
     ...(presetAccountId ? { accountId: presetAccountId } : null),
-    ...(presetCategory ? { categoryName: presetCategory } : null),
-    ...(presetCategoryGroup ? { categoryGroup: presetCategoryGroup } : null),
+    ...(presetCategory ? { categoryNames: [presetCategory] } : null),
+    ...(presetCategoryGroup ? { categoryGroups: [presetCategoryGroup] } : null),
   }));
   const [showFilters, setShowFilters] = useState(false);
+  // One sheet-local search that narrows the account / category / tag pill
+  // lists together. Cleared whenever the sheet closes.
+  const [filterSearch, setFilterSearch] = useState("");
+  useEffect(() => {
+    if (!showFilters) setFilterSearch("");
+  }, [showFilters]);
 
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(false);
@@ -249,10 +255,10 @@ const TransactionsScreen = () => {
       setFilters((f) => ({ ...f, accountId: presetAccountId }));
     }
     if (presetCategory) {
-      setFilters((f) => ({ ...f, categoryName: presetCategory, categoryGroup: null }));
+      setFilters((f) => ({ ...f, categoryNames: [presetCategory], categoryGroups: [] }));
     }
     if (presetCategoryGroup) {
-      setFilters((f) => ({ ...f, categoryGroup: presetCategoryGroup, categoryName: null }));
+      setFilters((f) => ({ ...f, categoryGroups: [presetCategoryGroup], categoryNames: [] }));
     }
     if (presetSearch !== undefined) {
       setSearch(presetSearch);
@@ -294,8 +300,9 @@ const TransactionsScreen = () => {
           f.type !== "all"
             ? (f.type as "credit" | "debit" | "transfer")
             : undefined,
-        category: f.categoryName ?? undefined,
-        categoryGroup: f.categoryGroup ?? undefined,
+        categories: f.categoryNames.length > 0 ? f.categoryNames : undefined,
+        categoryGroups:
+          f.categoryGroups.length > 0 ? f.categoryGroups : undefined,
         tag: f.tagValue ?? undefined,
         minAmount: f.minAmount ? parseFloat(f.minAmount) : undefined,
         maxAmount: f.maxAmount ? parseFloat(f.maxAmount) : undefined,
@@ -439,11 +446,193 @@ const TransactionsScreen = () => {
     [categories],
   );
 
+  // Parent → children tree for the grouped category filter
+  const categoryTree = useMemo(() => {
+    const kids = new Map<number, Category[]>();
+    categories.forEach((c) => {
+      if (c.parentId) {
+        kids.set(c.parentId, [...(kids.get(c.parentId) ?? []), c]);
+      }
+    });
+    return categories
+      .filter((c) => !c.parentId)
+      .map((p) => ({ parent: p, children: kids.get(p.id) ?? [] }));
+  }, [categories]);
+
+  // ── Sheet search results ──────────────────────────────────────────────────
+  // `shown` is what the query matched; `children` stays complete so the group
+  // toggle / exclude-one logic always operates on the full membership.
+  const filterQuery = filterSearch.trim().toLowerCase();
+  const searchingFilters = filterQuery.length > 0;
+
+  const visibleCategoryTree = useMemo(() => {
+    const base = categoryTree.map((g) => ({ ...g, shown: g.children }));
+    if (!filterQuery) return base;
+    return base
+      .map((g) => {
+        if (g.parent.name.toLowerCase().includes(filterQuery)) return g;
+        const shown = g.children.filter((c) =>
+          c.name.toLowerCase().includes(filterQuery),
+        );
+        return shown.length > 0 ? { ...g, shown } : null;
+      })
+      .filter((g): g is NonNullable<typeof g> => g !== null);
+  }, [categoryTree, filterQuery]);
+
+  const visibleAccounts = useMemo(
+    () =>
+      filterQuery
+        ? accounts.filter((a) => a.name.toLowerCase().includes(filterQuery))
+        : accounts,
+    [accounts, filterQuery],
+  );
+
+  const visibleTags = useMemo(
+    () =>
+      filterQuery
+        ? tagsList.filter((t) => t.toLowerCase().includes(filterQuery))
+        : tagsList,
+    [tagsList, filterQuery],
+  );
+
+  const toggleCategoryGroup = (parent: Category, children: Category[]) => {
+    setFilters((f) => {
+      if (f.categoryGroups.includes(parent.name)) {
+        return {
+          ...f,
+          categoryGroups: f.categoryGroups.filter((g) => g !== parent.name),
+        };
+      }
+      // Selecting the whole group absorbs any individually-selected members
+      const members = new Set([parent.name, ...children.map((c) => c.name)]);
+      return {
+        ...f,
+        categoryGroups: [...f.categoryGroups, parent.name],
+        categoryNames: f.categoryNames.filter((n) => !members.has(n)),
+      };
+    });
+  };
+
+  const toggleCategoryName = (
+    cat: Category,
+    parent?: Category,
+    siblings: Category[] = [],
+  ) => {
+    setFilters((f) => {
+      if (parent && f.categoryGroups.includes(parent.name)) {
+        // Whole group is on: tapping one member excludes just that one — the
+        // group degrades to explicit picks of every other member.
+        const rest = [parent.name, ...siblings.map((c) => c.name)].filter(
+          (n) => n !== cat.name,
+        );
+        return {
+          ...f,
+          categoryGroups: f.categoryGroups.filter((g) => g !== parent.name),
+          categoryNames: [...new Set([...f.categoryNames, ...rest])],
+        };
+      }
+      return {
+        ...f,
+        categoryNames: f.categoryNames.includes(cat.name)
+          ? f.categoryNames.filter((n) => n !== cat.name)
+          : [...f.categoryNames, cat.name],
+      };
+    });
+  };
+
   // O(1) account name lookup — accounts are already loaded for the filter UI
   const accountMap = useMemo(
     () => new Map(accounts.map((a) => [a.id, a.name])),
     [accounts],
   );
+
+  // Active-filter chips shown on the main screen — tap one to clear just it.
+  const filterChips = useMemo(() => {
+    const chips: {
+      key: string;
+      label: string;
+      color?: string;
+      onClear: () => void;
+    }[] = [];
+    const dateLabels: Record<DatePreset, string> = {
+      all: "",
+      today: "Today",
+      week: "7 days",
+      month: "This month",
+      last_month: "Last month",
+      custom: `${filters.customStart} → ${filters.customEnd}`,
+    };
+    filters.categoryGroups.forEach((g) =>
+      chips.push({
+        key: `grp-${g}`,
+        label: `${g} · all`,
+        color: categoryMap.get(g)?.color,
+        onClear: () =>
+          setFilters((f) => ({
+            ...f,
+            categoryGroups: f.categoryGroups.filter((x) => x !== g),
+          })),
+      }),
+    );
+    filters.categoryNames.forEach((n) =>
+      chips.push({
+        key: `cat-${n}`,
+        label: n,
+        color: categoryMap.get(n)?.color,
+        onClear: () =>
+          setFilters((f) => ({
+            ...f,
+            categoryNames: f.categoryNames.filter((x) => x !== n),
+          })),
+      }),
+    );
+    if (filters.tagValue) {
+      chips.push({
+        key: "tag",
+        label: `#${filters.tagValue}`,
+        color: colors.ai,
+        onClear: () => setFilters((f) => ({ ...f, tagValue: null })),
+      });
+    }
+    if (filters.accountId) {
+      chips.push({
+        key: "acct",
+        label: accountMap.get(filters.accountId) ?? "Account",
+        onClear: () => setFilters((f) => ({ ...f, accountId: null })),
+      });
+    }
+    if (filters.datePreset !== "all") {
+      chips.push({
+        key: "date",
+        label: dateLabels[filters.datePreset],
+        onClear: () => setFilters((f) => ({ ...f, datePreset: "all" })),
+      });
+    }
+    if (filters.minAmount || filters.maxAmount) {
+      chips.push({
+        key: "amt",
+        label: `${currency}${filters.minAmount || "0"}–${filters.maxAmount || "∞"}`,
+        onClear: () =>
+          setFilters((f) => ({ ...f, minAmount: "", maxAmount: "" })),
+      });
+    }
+    if (filters.source !== "all") {
+      chips.push({
+        key: "src",
+        label: filters.source.toUpperCase(),
+        onClear: () => setFilters((f) => ({ ...f, source: "all" })),
+      });
+    }
+    if (filters.recurring) {
+      chips.push({
+        key: "rec",
+        label: "Recurring",
+        color: colors.ai,
+        onClear: () => setFilters((f) => ({ ...f, recurring: false })),
+      });
+    }
+    return chips;
+  }, [filters, categoryMap, accountMap, colors.ai, currency]);
 
   // Returns a formatted account label string (with leading " · ") or empty string
   const getAccountLabel = (item: Transaction): string => {
@@ -676,6 +865,43 @@ const TransactionsScreen = () => {
         />
       </View>
 
+      {/* ── Active filter chips ── */}
+      {filterChips.length > 0 && (
+        <View
+          style={{
+            borderBottomWidth: 1,
+            borderBottomColor: colors.border,
+            paddingVertical: 10,
+          }}
+        >
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ gap: 8, paddingHorizontal: 24 }}
+          >
+            {filterChips.map((chip) => (
+              <PillButton
+                key={chip.key}
+                label={chip.label}
+                color={chip.color}
+                active
+                icon={
+                  <LucideX color={chip.color ?? colors.accent} size={11} />
+                }
+                onPress={chip.onClear}
+              />
+            ))}
+            {filterChips.length > 1 && (
+              <PillButton
+                label="Clear all"
+                color={colors.danger}
+                onPress={() => setFilters(DEFAULT_FILTERS)}
+              />
+            )}
+          </ScrollView>
+        </View>
+      )}
+
       {/* ── Timeline list ── */}
       {loading && !refreshing ? (
         <ActivityIndicator color={colors.accent} style={{ marginTop: 48 }} />
@@ -791,13 +1017,41 @@ const TransactionsScreen = () => {
                   }
                 />
 
+                {/* One search across accounts, categories and tags */}
+                <View style={{ paddingHorizontal: 24, marginTop: 4 }}>
+                  <TextField
+                    placeholder="Find account, category or #tag…"
+                    value={filterSearch}
+                    onChangeText={setFilterSearch}
+                    autoCorrect={false}
+                    leading={<LucideSearch color={colors.muted} size={15} />}
+                    trailing={
+                      filterSearch.length > 0 ? (
+                        <TouchableOpacity
+                          onPress={() => setFilterSearch("")}
+                          hitSlop={8}
+                        >
+                          <LucideX color={colors.muted} size={14} />
+                        </TouchableOpacity>
+                      ) : undefined
+                    }
+                  />
+                </View>
+
                 <GHScrollView
+                  // Let the first tap land on a pill even while the search
+                  // keyboard is open (default "never" swallows it to dismiss).
+                  keyboardShouldPersistTaps="handled"
                   showsVerticalScrollIndicator={false}
                   contentContainerStyle={{
                     paddingHorizontal: 24,
                     paddingBottom: 24,
                   }}
                 >
+                  {/* Static controls step aside while searching so matches
+                      from the lists below are immediately visible. */}
+                  {!searchingFilters && (
+                    <>
                   {/* Date presets */}
                   <FieldLabel style={{ marginTop: 14 }}>Window</FieldLabel>
                   <View
@@ -882,83 +1136,138 @@ const TransactionsScreen = () => {
                     </View>
                   </View>
 
-                  {/* Account */}
-                  <FieldLabel style={{ marginTop: 20 }}>Account</FieldLabel>
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={{ gap: 8 }}
-                  >
-                    <PillButton
-                      label="All"
-                      active={filters.accountId === null}
-                      onPress={() =>
-                        setFilters((f) => ({ ...f, accountId: null }))
-                      }
-                    />
-                    {accounts.map((a) => (
-                      <PillButton
-                        key={a.id}
-                        label={a.name}
-                        active={filters.accountId === a.id}
-                        onPress={() =>
-                          setFilters((f) => ({
-                            ...f,
-                            accountId: f.accountId === a.id ? null : a.id,
-                          }))
-                        }
-                      />
-                    ))}
-                  </ScrollView>
+                    </>
+                  )}
 
-                  {/* Category */}
-                  <FieldLabel style={{ marginTop: 20 }}>Category</FieldLabel>
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={{ gap: 8 }}
+                  {/* Account */}
+                  {(!searchingFilters || visibleAccounts.length > 0) && (
+                    <>
+                      <FieldLabel style={{ marginTop: 20 }}>Account</FieldLabel>
+                      <ScrollView
+                        horizontal
+                        keyboardShouldPersistTaps="handled"
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={{ gap: 8 }}
+                      >
+                        <PillButton
+                          label="All"
+                          active={filters.accountId === null}
+                          onPress={() =>
+                            setFilters((f) => ({ ...f, accountId: null }))
+                          }
+                        />
+                        {visibleAccounts.map((a) => (
+                          <PillButton
+                            key={a.id}
+                            label={a.name}
+                            active={filters.accountId === a.id}
+                            onPress={() =>
+                              setFilters((f) => ({
+                                ...f,
+                                accountId: f.accountId === a.id ? null : a.id,
+                              }))
+                            }
+                          />
+                        ))}
+                      </ScrollView>
+                    </>
+                  )}
+
+                  {/* Categories — grouped multi-select */}
+                  {(!searchingFilters || visibleCategoryTree.length > 0) && (
+                    <>
+                  <FieldLabel style={{ marginTop: 20 }}>Categories</FieldLabel>
+                  <ThemedText
+                    style={{
+                      fontSize: 11,
+                      color: colors.muted,
+                      marginBottom: 10,
+                    }}
                   >
+                    Pick as many as you like. A parent includes all its
+                    subcategories — tap a sub to drop just that one.
+                  </ThemedText>
+                  {!searchingFilters && (
                     <PillButton
                       label="All"
                       active={
-                        filters.categoryName === null &&
-                        filters.categoryGroup === null
+                        filters.categoryNames.length === 0 &&
+                        filters.categoryGroups.length === 0
                       }
                       onPress={() =>
                         setFilters((f) => ({
                           ...f,
-                          categoryName: null,
-                          categoryGroup: null,
+                          categoryNames: [],
+                          categoryGroups: [],
                         }))
                       }
+                      style={{ alignSelf: "flex-start" }}
                     />
-                    {categories.map((c) => (
-                      <PillButton
-                        key={c.id}
-                        label={c.name}
-                        color={c.color}
-                        active={
-                          filters.categoryName === c.name ||
-                          filters.categoryGroup === c.name
-                        }
-                        onPress={() =>
-                          setFilters((f) => ({
-                            ...f,
-                            categoryGroup: null,
-                            categoryName:
-                              f.categoryName === c.name ? null : c.name,
-                          }))
-                        }
-                      />
-                    ))}
-                  </ScrollView>
+                  )}
+                  {visibleCategoryTree.map(({ parent, children, shown }) => {
+                    const groupOn = filters.categoryGroups.includes(
+                      parent.name,
+                    );
+                    const pickedCount = groupOn
+                      ? 0
+                      : [parent, ...children].filter((c) =>
+                          filters.categoryNames.includes(c.name),
+                        ).length;
+                    return (
+                      <ScrollView
+                        key={parent.id}
+                        horizontal
+                        keyboardShouldPersistTaps="handled"
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={{ gap: 8 }}
+                        style={{ marginTop: 8 }}
+                      >
+                        <PillButton
+                          label={
+                            children.length > 0
+                              ? `${parent.icon} ${parent.name} · all`
+                              : `${parent.icon} ${parent.name}`
+                          }
+                          color={parent.color}
+                          active={
+                            groupOn ||
+                            (children.length === 0 &&
+                              filters.categoryNames.includes(parent.name))
+                          }
+                          count={pickedCount}
+                          onPress={() =>
+                            children.length > 0
+                              ? toggleCategoryGroup(parent, children)
+                              : toggleCategoryName(parent)
+                          }
+                        />
+                        {shown.map((c) => (
+                          <PillButton
+                            key={c.id}
+                            label={c.name}
+                            color={c.color}
+                            active={
+                              groupOn ||
+                              filters.categoryNames.includes(c.name)
+                            }
+                            onPress={() =>
+                              toggleCategoryName(c, parent, children)
+                            }
+                          />
+                        ))}
+                      </ScrollView>
+                    );
+                  })}
+                    </>
+                  )}
 
                   {/* Tag */}
-                  {tagsList.length > 0 && (
+                  {visibleTags.length > 0 && (
                     <>
                       <FieldLabel style={{ marginTop: 20 }}>Tag</FieldLabel>
                       <ScrollView
                         horizontal
+                        keyboardShouldPersistTaps="handled"
                         showsHorizontalScrollIndicator={false}
                         contentContainerStyle={{ gap: 8 }}
                       >
@@ -969,7 +1278,7 @@ const TransactionsScreen = () => {
                             setFilters((f) => ({ ...f, tagValue: null }))
                           }
                         />
-                        {tagsList.map((t) => (
+                        {visibleTags.map((t) => (
                           <PillButton
                             key={t}
                             label={`#${t}`}
@@ -987,6 +1296,8 @@ const TransactionsScreen = () => {
                     </>
                   )}
 
+                  {!searchingFilters && (
+                    <>
                   {/* Source */}
                   <FieldLabel style={{ marginTop: 20 }}>Source</FieldLabel>
                   <View
@@ -1052,6 +1363,23 @@ const TransactionsScreen = () => {
                     }
                     style={{ alignSelf: "flex-start" }}
                   />
+                    </>
+                  )}
+
+                  {searchingFilters &&
+                    visibleAccounts.length === 0 &&
+                    visibleCategoryTree.length === 0 &&
+                    visibleTags.length === 0 && (
+                      <ThemedText
+                        style={{
+                          fontSize: 12,
+                          color: colors.muted,
+                          marginTop: 24,
+                        }}
+                      >
+                        Nothing matches “{filterSearch.trim()}”.
+                      </ThemedText>
+                    )}
 
                   <View style={{ height: 24 }} />
 

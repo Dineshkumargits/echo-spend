@@ -239,7 +239,7 @@ export const RippleButton: React.FC<RippleButtonProps> = ({
     <Pressable
       onPress={handlePress}
       disabled={disabled}
-      style={({ pressed }) => [
+      style={[
         {
           backgroundColor: bg,
           borderRadius: radius.pill,
@@ -247,7 +247,7 @@ export const RippleButton: React.FC<RippleButtonProps> = ({
           paddingHorizontal: 26,
           alignItems: 'center',
           justifyContent: 'center',
-          opacity: disabled ? 0.4 : pressed ? 0.85 : 1,
+          opacity: disabled ? 0.4 : 1,
         },
         style,
       ]}
