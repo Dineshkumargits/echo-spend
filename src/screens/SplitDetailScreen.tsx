@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, ScrollView, TouchableOpacity, Alert,
-  RefreshControl, Modal, TextInput,
+  RefreshControl, Modal, TextInput, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { MotiView } from 'moti';
 import * as LucideIcons from 'lucide-react-native';
@@ -111,6 +111,10 @@ const ReceiveModal = ({
 
   return (
     <Modal transparent animationType="none" onRequestClose={onClose}>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
       <TouchableOpacity
         style={{ flex: 1, backgroundColor: '#00000080', justifyContent: 'flex-end' }}
         activeOpacity={1}
@@ -181,6 +185,7 @@ const ReceiveModal = ({
           </TouchableOpacity>
         </MotiView>
       </TouchableOpacity>
+      </KeyboardAvoidingView>
     </Modal>
   );
 };

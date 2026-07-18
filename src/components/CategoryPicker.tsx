@@ -6,7 +6,8 @@ import {
   ScrollView,
   TextInput,
   StyleSheet,
-  Platform
+  Platform,
+  KeyboardAvoidingView
 } from 'react-native';
 import { GestureHandlerRootView, ScrollView as GHScrollView } from 'react-native-gesture-handler';
 import {
@@ -140,6 +141,7 @@ export const CategoryPicker: React.FC<CategoryPickerProps> = ({
         {/* Modal renders outside the root GestureHandlerRootView; re-establish one
             so the ScrollView scrolls over its TouchableOpacity rows (RNGH fix). */}
         <GestureHandlerRootView style={{ flex: 1 }}>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <View style={styles.modalOverlay}>
           <TouchableOpacity
             style={StyleSheet.absoluteFill}
@@ -258,6 +260,7 @@ export const CategoryPicker: React.FC<CategoryPickerProps> = ({
             </GHScrollView>
           </View>
         </View>
+        </KeyboardAvoidingView>
         </GestureHandlerRootView>
       </Modal>
 

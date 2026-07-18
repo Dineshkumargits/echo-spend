@@ -10,7 +10,7 @@
 import React from 'react';
 import {
   View, Text, Pressable, ScrollView, TextInput, Modal, useWindowDimensions,
-  ViewStyle, StyleProp, TextStyle, TextInputProps,
+  ViewStyle, StyleProp, TextStyle, TextInputProps, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { MotiView } from 'moti';
@@ -382,6 +382,10 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({ visible, onClose, titl
           touch arbitration for the inner ScrollView vs its Pressable rows — scroll
           only works over non-pressable areas (e.g. an icon). This wrapper fixes it. */}
       <GestureHandlerRootView style={{ flex: 1 }}>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
       <Pressable onPress={onClose} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' }}>
         <MotiView
           from={{ translateY: 32, opacity: 0 }}
@@ -408,6 +412,7 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({ visible, onClose, titl
           </Pressable>
         </MotiView>
       </Pressable>
+      </KeyboardAvoidingView>
       </GestureHandlerRootView>
     </Modal>
   );
