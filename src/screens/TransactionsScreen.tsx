@@ -211,6 +211,9 @@ const TransactionsScreen = () => {
   const presetCategoryGroups: string[] | undefined =
     route.params?.presetCategoryGroups;
   const presetSearch: string | undefined = route.params?.presetSearch;
+  // Date window to pair with a preset (e.g. Analytics drill-downs are scoped
+  // to "this month" data, so the filter should land on the same window).
+  const presetDatePreset: DatePreset | undefined = route.params?.presetDatePreset;
 
   // ── State ────────────────────────────────────────────────────────────────
   const [search, setSearch] = useState(presetSearch ?? "");
@@ -222,6 +225,7 @@ const TransactionsScreen = () => {
     ...(presetCategoryGroups?.length
       ? { categoryGroups: presetCategoryGroups }
       : null),
+    ...(presetDatePreset ? { datePreset: presetDatePreset } : null),
   }));
   const [showFilters, setShowFilters] = useState(false);
   // One sheet-local search that narrows the account / category / tag pill
@@ -255,6 +259,7 @@ const TransactionsScreen = () => {
       !presetCategory &&
       !presetCategoryGroup &&
       !presetCategoryGroups?.length &&
+      !presetDatePreset &&
       presetSearch === undefined
     )
       return;
@@ -270,6 +275,9 @@ const TransactionsScreen = () => {
     if (presetCategoryGroups?.length) {
       setFilters((f) => ({ ...f, categoryGroups: presetCategoryGroups, categoryNames: [] }));
     }
+    if (presetDatePreset) {
+      setFilters((f) => ({ ...f, datePreset: presetDatePreset }));
+    }
     if (presetSearch !== undefined) {
       setSearch(presetSearch);
     }
@@ -278,9 +286,18 @@ const TransactionsScreen = () => {
       presetCategory: undefined,
       presetCategoryGroup: undefined,
       presetCategoryGroups: undefined,
+      presetDatePreset: undefined,
       presetSearch: undefined,
     });
-  }, [presetAccountId, presetCategory, presetCategoryGroup, presetCategoryGroups, presetSearch, navigation]);
+  }, [
+    presetAccountId,
+    presetCategory,
+    presetCategoryGroup,
+    presetCategoryGroups,
+    presetDatePreset,
+    presetSearch,
+    navigation,
+  ]);
 
   // ── Load metadata ─────────────────────────────────────────────────────────
   useEffect(() => {

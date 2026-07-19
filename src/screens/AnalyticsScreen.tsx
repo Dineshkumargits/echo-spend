@@ -185,10 +185,19 @@ const AnalyticsScreen = () => {
 
   // Drill-downs into the (sibling tab) Transactions timeline. Category cards are
   // parent groups, so drill parent-inclusive (parent + its subcategories).
+  // Both the breakdown and top-merchants data here are scoped to the current
+  // calendar month, so carry that window along — otherwise the filtered list
+  // silently shows all-time totals instead of matching what was tapped.
   const drillCategory = (name: string) =>
-    navigation.navigate("Txns", { presetCategoryGroup: name });
+    navigation.navigate("Txns", {
+      presetCategoryGroup: name,
+      presetDatePreset: "month",
+    });
   const drillMerchant = (name: string) =>
-    navigation.navigate("Txns", { presetSearch: name });
+    navigation.navigate("Txns", {
+      presetSearch: name,
+      presetDatePreset: "month",
+    });
 
   // Tap a calendar day → fetch that day's spending to preview inline.
   const handleDayPress = useCallback(async (date: string, event?: GestureResponderEvent) => {
