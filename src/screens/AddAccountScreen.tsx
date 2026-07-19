@@ -245,7 +245,7 @@ export const AddAccountScreen = () => {
     <ThemedSafeAreaView edges={['top', 'bottom']}>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <View style={{ flex: 1, padding: 24 }}>
           <View style={themedStyles.header}>

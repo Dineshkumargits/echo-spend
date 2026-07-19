@@ -963,7 +963,7 @@ const BankAccountDetailScreen = ({ navigation, route }: any) => {
           style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 }}
           onPress={() => setAdjustModalVisible(false)}
         >
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
             <Pressable
               onPress={e => e.stopPropagation()}
               style={{ backgroundColor: colors.surface, borderRadius: 24, padding: 24, borderWidth: 1, borderColor: colors.border }}

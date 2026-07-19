@@ -548,7 +548,7 @@ export const CategoryManagerModal = ({ manager, onRefresh, onSaved }: CategoryMa
           so the ScrollView scrolls over its TouchableOpacity rows (RNGH fix). */}
       <GestureHandlerRootView style={{ flex: 1 }}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={{ flex: 1 }}
       >
         <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' }}>

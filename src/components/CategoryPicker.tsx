@@ -141,7 +141,7 @@ export const CategoryPicker: React.FC<CategoryPickerProps> = ({
         {/* Modal renders outside the root GestureHandlerRootView; re-establish one
             so the ScrollView scrolls over its TouchableOpacity rows (RNGH fix). */}
         <GestureHandlerRootView style={{ flex: 1 }}>
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={styles.modalOverlay}>
           <TouchableOpacity
             style={StyleSheet.absoluteFill}

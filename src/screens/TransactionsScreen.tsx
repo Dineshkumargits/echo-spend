@@ -1012,7 +1012,7 @@ const TransactionsScreen = () => {
             onPress={() => setShowFilters(false)}
           >
             <KeyboardAvoidingView
-              behavior={Platform.OS === "ios" ? "padding" : "height"}
+              behavior={Platform.OS === "ios" ? "padding" : undefined}
               style={{ maxHeight: "85%" }}
             >
               <Pressable

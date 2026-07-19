@@ -113,7 +113,7 @@ const ReceiveModal = ({
     <Modal transparent animationType="none" onRequestClose={onClose}>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
       <TouchableOpacity
         style={{ flex: 1, backgroundColor: '#00000080', justifyContent: 'flex-end' }}

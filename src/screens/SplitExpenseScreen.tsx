@@ -240,7 +240,7 @@ const SplitExpenseScreen = ({ navigation, route }: any) => {
         </TouchableOpacity>
       </View>
 
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 20, gap: 4 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
 
           {/* Title */}

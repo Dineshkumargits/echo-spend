@@ -591,7 +591,7 @@ export const EditTransactionScreen = () => {
     <ThemedSafeAreaView edges={['top', 'bottom']}>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <View style={themedStyles.content}>
           <View style={themedStyles.header}>

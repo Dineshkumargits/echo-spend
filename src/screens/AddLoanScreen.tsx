@@ -182,7 +182,7 @@ export const AddLoanScreen = () => {
 
   return (
     <ThemedSafeAreaView edges={['top', 'bottom']}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={s.content}>
           <View style={s.header}>
             <ThemedText className="text-2xl font-bold">
