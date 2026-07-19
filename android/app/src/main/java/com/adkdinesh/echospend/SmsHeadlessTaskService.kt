@@ -17,7 +17,7 @@ class SmsHeadlessTaskService : HeadlessJsTaskService() {
             HeadlessJsTaskConfig(
                 "SmsHeadlessTask",
                 data,
-                25000, // timeout in milliseconds (allow up to 25 seconds for AI models/db)
+                90000, // timeout in ms — must cover store rehydration + on-device AI model init + parse on a cold start
                 true // allowed in foreground
             )
         } else {

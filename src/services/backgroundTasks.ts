@@ -44,6 +44,30 @@ export const setForegroundScanActive = (active: boolean) => {
   _foregroundScanActive = active;
 };
 
+// Zustand persist rehydrates from SecureStore asynchronously. Background/headless
+// JS contexts start cold, so reading preferences via getState() before hydration
+// completes returns DEFAULT_PREFERENCES — where autoSmsScan is false — and the
+// task silently drops the SMS. Every background entry point must wait for
+// hydration before consulting preferences.
+const waitForHydration = (timeoutMs = 10000): Promise<void> =>
+  new Promise((resolve) => {
+    if (useStore.getState().hasHydrated) {
+      resolve();
+      return;
+    }
+    const unsub = useStore.subscribe((state) => {
+      if (state.hasHydrated) {
+        clearTimeout(timer);
+        unsub();
+        resolve();
+      }
+    });
+    const timer = setTimeout(() => {
+      unsub();
+      resolve();
+    }, timeoutMs);
+  });
+
 const BANK_KEYWORDS = [
   'debited', 'credited', 'spent', 'received', 'transferred', 'withdrawn',
   'paid', 'payment', 'purchase', 'txn', 'upi', 'vpa', 'neft', 'imps', 'atm', 'pos',
@@ -63,6 +87,7 @@ TaskManager.defineTask(BACKGROUND_SYNC_TASK, async () => {
 
   try {
     await initDatabase();
+    await waitForHydration();
     const { preferences, googleUser } = useStore.getState();
 
     if (!googleUser || preferences.syncSchedule === 'none') {
@@ -155,6 +180,7 @@ TaskManager.defineTask(BACKGROUND_NOTIFICATION_TASK, async ({ data, error }) => 
   if (payload?.triggerSync) {
     try {
       await initDatabase();
+      await waitForHydration();
       const { preferences, googleUser } = useStore.getState();
       if (googleUser && preferences.syncSchedule !== 'none') {
         const lastSyncIso = await getLastSyncTimeFromDb();
@@ -209,6 +235,7 @@ export const processIncomingSms = async (body: string, date: number) => {
 
   console.log('[BackgroundSms] Processing incoming SMS...');
   try {
+    await waitForHydration();
     const { preferences } = useStore.getState();
     if (!preferences.autoSmsScan) return;
 
@@ -311,6 +338,7 @@ export const performBackgroundSmsScan = async (silent = false) => {
 };
 
 const _doSmsScan = async (silent = false): Promise<BackgroundFetch.BackgroundFetchResult> => {
+  await waitForHydration();
   const { preferences } = useStore.getState();
 
   if (!preferences.autoSmsScan || Platform.OS !== 'android') {
@@ -498,6 +526,7 @@ TaskManager.defineTask(BACKGROUND_SMS_SCAN_TASK, async () => {
 TaskManager.defineTask(BACKGROUND_ALERTS_TASK, async () => {
   try {
     await initDatabase();
+    await waitForHydration();
     const {
       preferences,
       updateBudgetNotificationHistory,
