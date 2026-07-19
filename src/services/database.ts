@@ -382,6 +382,7 @@ export const initDatabase = async () => {
       // Run Migrations & Seeding
       await runMigrations();
       await seedDatabase();
+      // await seedMockData();
     } catch (err) {
       initPromise = null; // Reset on failure so we can retry
       throw err;
@@ -2915,3 +2916,229 @@ export const getPendingSplitMembers = async (excludeTxId?: number): Promise<Pend
     splitDate: r.splitDate,
   }));
 };
+
+// export const seedMockData = async () => {
+//   if (!db) return;
+
+//   try {
+//     // 1. Clear existing table data to guarantee clean totals
+//     await db.execAsync('DELETE FROM split_members;');
+//     await db.execAsync('DELETE FROM splits;');
+//     await db.execAsync('DELETE FROM transactions;');
+//     await db.execAsync('DELETE FROM subscriptions;');
+//     await db.execAsync('DELETE FROM goals;');
+//     await db.execAsync('DELETE FROM loans;');
+//     await db.execAsync('DELETE FROM budgets;');
+//     await db.execAsync('DELETE FROM accounts;');
+
+//     // 2. Insert Accounts (Indian context: Bank, Credit Card, Cash)
+//     await db.runAsync(
+//       `INSERT INTO accounts (id, name, balance, accountType, creditLimit, statementDay, billDueDay, startDate, last4Digits, displayOrder, startingBalance)
+//        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+//       1, 'HDFC Salary Account', 142500.00, 'bank', null, null, null, '2026-07-01', '4092', 1, 142500.00
+//     );
+
+//     await db.runAsync(
+//       `INSERT INTO accounts (id, name, balance, accountType, creditLimit, statementDay, billDueDay, startDate, last4Digits, displayOrder, startingBalance)
+//        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+//       2, 'ICICI Sapphiro Credit Card', -18450.00, 'credit_card', 250000.00, 15, 5, '2026-07-01', '8821', 2, 0.00
+//     );
+
+//     await db.runAsync(
+//       `INSERT INTO accounts (id, name, balance, accountType, creditLimit, statementDay, billDueDay, startDate, last4Digits, displayOrder, startingBalance)
+//        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+//       3, 'Cash Wallet', 3500.00, 'cash', null, null, null, '2026-07-01', null, 3, 3500.00
+//     );
+
+//     // 3. Inject Confirmed Transactions (For Analytics & Dashboard)
+//     const confirmedTxs = [
+//       {
+//         amount: 175000.00,
+//         category: 'Salary',
+//         merchant: 'Tech Corp Inc',
+//         type: 'credit',
+//         date: '2026-07-01T09:00:00.000Z',
+//         accountId: 1,
+//         isConfirmed: 1,
+//         source: 'auto',
+//         isTransfer: 0
+//       },
+//       {
+//         amount: 28000.00,
+//         category: 'Rent',
+//         merchant: 'Equity Residential',
+//         type: 'debit',
+//         date: '2026-07-02T10:00:00.000Z',
+//         accountId: 1,
+//         isConfirmed: 1,
+//         source: 'manual',
+//         isTransfer: 0
+//       },
+//       {
+//         amount: 25000.00,
+//         category: 'Transfer',
+//         merchant: 'Zerodha Mutual Fund',
+//         type: 'transfer',
+//         date: '2026-07-05T11:00:00.000Z',
+//         accountId: 1,
+//         toAccountId: null,
+//         isConfirmed: 1,
+//         source: 'manual',
+//         isTransfer: 1
+//       },
+//       {
+//         amount: 4250.00,
+//         category: 'Groceries',
+//         merchant: 'Blinkit Quick Commerce',
+//         type: 'debit',
+//         date: '2026-07-08T16:30:00.000Z',
+//         accountId: 2,
+//         isConfirmed: 1,
+//         source: 'sms',
+//         isTransfer: 0
+//       },
+//       {
+//         amount: 1450.00,
+//         category: 'Movies',
+//         merchant: 'PVR INOX Cinemas',
+//         type: 'debit',
+//         date: '2026-07-12T20:00:00.000Z',
+//         accountId: 2,
+//         isConfirmed: 1,
+//         source: 'sms',
+//         isTransfer: 0
+//       },
+//       {
+//         amount: 2850.00,
+//         category: 'Restaurants',
+//         merchant: 'Rameshwaram Cafe',
+//         type: 'debit',
+//         date: '2026-07-15T21:10:00.000Z',
+//         accountId: 2,
+//         isConfirmed: 1,
+//         source: 'sms',
+//         isTransfer: 0
+//       }
+//     ];
+
+//     for (const tx of confirmedTxs) {
+//       await db.runAsync(
+//         `INSERT INTO transactions (amount, category, merchant, type, date, accountId, toAccountId, isConfirmed, source, isTransfer)
+//          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+//         tx.amount, tx.category, tx.merchant, tx.type, tx.date, tx.accountId, tx.toAccountId ?? null, tx.isConfirmed, tx.source, tx.isTransfer
+//       );
+//     }
+
+//     // 4. Trigger Unconfirmed SMS Logs (For Smart Inbox swipe deck)
+//     const unconfirmedTxs = [
+//       {
+//         amount: 489.00,
+//         category: 'Takeout & Delivery',
+//         merchant: 'Swiggy',
+//         type: 'debit',
+//         date: '2026-07-19T13:45:00.000Z',
+//         accountId: 1,
+//         isConfirmed: 0,
+//         rawSms: 'Alert: You spent Rs 489.00 on HDFC card ending in 4092 at Swiggy on 19-Jul.',
+//         confidence: 'high',
+//         source: 'sms'
+//       },
+//       {
+//         amount: 340.00,
+//         category: 'Taxi & Rides',
+//         merchant: 'Uber Eats',
+//         type: 'debit',
+//         date: '2026-07-19T16:20:00.000Z',
+//         accountId: 1,
+//         isConfirmed: 0,
+//         rawSms: 'HDFC: Rs 340.00 debited at UBER EATS on 19-Jul.',
+//         confidence: 'high',
+//         source: 'sms'
+//       },
+//       {
+//         amount: 1250.00,
+//         category: 'Groceries',
+//         merchant: 'Zepto',
+//         type: 'debit',
+//         date: '2026-07-19T18:10:00.000Z',
+//         accountId: 2,
+//         isConfirmed: 0,
+//         rawSms: 'Alert: ICICI Bank Card ending 8821 spent Rs 1250.00 at Zepto Quick Grocery on 19-Jul.',
+//         confidence: 'medium',
+//         source: 'sms'
+//       }
+//     ];
+
+//     for (const tx of unconfirmedTxs) {
+//       await db.runAsync(
+//         `INSERT INTO transactions (amount, category, merchant, type, date, accountId, isConfirmed, rawSms, confidence, source)
+//          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+//         tx.amount, tx.category, tx.merchant, tx.type, tx.date, tx.accountId, tx.isConfirmed, tx.rawSms, tx.confidence, tx.source
+//       );
+//     }
+
+//     // 5. Populate Budgets
+//     await db.runAsync(
+//       `INSERT INTO budgets (categoryName, amount, period, startDate) VALUES (?, ?, ?, ?)`,
+//       'Food & Dining', 15000.00, 'monthly', '2026-07-01'
+//     );
+//     await db.runAsync(
+//       `INSERT INTO budgets (categoryName, amount, period, startDate) VALUES (?, ?, ?, ?)`,
+//       'Shopping', 10000.00, 'monthly', '2026-07-01'
+//     );
+
+//     // 6. Populate Subscriptions
+//     await db.runAsync(
+//       `INSERT INTO subscriptions (name, amount, category, frequency, nextDueDate, lastPaidDate, isActive, debitAccountId)
+//        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+//       'Netflix India', 649.00, 'Subscriptions', 'monthly', '2026-08-01', '2026-07-01', 1, 1
+//     );
+//     await db.runAsync(
+//       `INSERT INTO subscriptions (name, amount, category, frequency, nextDueDate, lastPaidDate, isActive, debitAccountId)
+//        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+//       'Cult.fit Gym', 1499.00, 'Health', 'monthly', '2026-08-05', '2026-07-05', 1, 1
+//     );
+
+//     // 7. Populate Split Expenses
+//     const splitRes = await db.runAsync(
+//       `INSERT INTO splits (title, totalAmount, paidByAccountId, date, notes) VALUES (?, ?, ?, ?, ?)`,
+//       'Dinner at Rameshwaram Cafe', 3600.00, 1, '2026-07-15T21:10:00.000Z', 'Team weekend dinner'
+//     );
+//     const splitId = splitRes.lastInsertRowId;
+
+//     await db.runAsync(
+//       `INSERT INTO split_members (splitId, name, share, isMe, isPaid, paidDate) VALUES (?, ?, ?, ?, ?, ?)`,
+//       splitId, 'Me (You)', 1200.00, 1, 1, '2026-07-15T21:10:00.000Z'
+//     );
+//     await db.runAsync(
+//       `INSERT INTO split_members (splitId, name, share, isMe, isPaid, paidDate) VALUES (?, ?, ?, ?, ?, ?)`,
+//       splitId, 'Sarah', 1200.00, 0, 0, null
+//     );
+//     await db.runAsync(
+//       `INSERT INTO split_members (splitId, name, share, isMe, isPaid, paidDate) VALUES (?, ?, ?, ?, ?, ?)`,
+//       splitId, 'Mike', 1200.00, 0, 1, '2026-07-16T12:00:00.000Z'
+//     );
+
+//     // 8. Populate Goals & Loans
+//     await db.runAsync(
+//       `INSERT INTO goals (name, targetAmount, currentAmount, deadline, category, isActive, linkedAccountId, monthlyContribution, notes)
+//        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+//       'Vacation to Japan', 250000.00, 100000.00, '2026-12-31', 'Travel', 1, 1, 25000.00, 'Savings for Tokyo flight and hotels'
+//     );
+
+//     await db.runAsync(
+//       `INSERT INTO loans (lender, totalAmount, remainingAmount, emiAmount, nextDueDate, interestRate, isActive, type, linkedAccountId, tenure, notes)
+//        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+//       'John', 15000.00, 5000.00, 2500.00, '2026-08-01', 0, 1, 'lent', 1, 6, 'Lent to John for laptop repair'
+//     );
+
+//     await db.runAsync(
+//       'INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)',
+//       'mock_data_seeded', 'true'
+//     );
+//     console.log('[Database] Mock data successfully seeded for Play Store screenshots.');
+//   } catch (err) {
+//     console.error('[Database] Failed to seed mock data:', err);
+//   }
+// };
+
