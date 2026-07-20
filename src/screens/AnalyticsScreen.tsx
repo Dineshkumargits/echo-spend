@@ -318,6 +318,12 @@ const AnalyticsScreen = () => {
   }, [breakdown, categories, colors]);
 
   const monthTotalSpend = donutSegments.reduce((s, seg) => s + seg.value, 0);
+  // Named (non-"Other") donut labels — used so tapping the synthetic "Other"
+  // segment filters the card list to the overflow parents instead of blanking it.
+  const donutNamedLabels = useMemo(
+    () => new Set(donutSegments.filter((s) => s.label !== "Other").map((s) => s.label)),
+    [donutSegments],
+  );
   const selectedSeg = donutSegments.find((s) => s.label === selectedCat);
   const rhythmMax = Math.max(...rhythm.map((p) => p.total), 1);
   const monthlyMax = Math.max(
@@ -702,19 +708,33 @@ const AnalyticsScreen = () => {
 
                 return Array.from(parentGroups.entries())
                   .sort((a, b) => b[1].total - a[1].total)
-                  .filter(
-                    ([name]) => selectedCat == null || selectedCat === name,
-                  )
+                  .filter(([name]) => {
+                    if (selectedCat == null) return true;
+                    // Tapping the donut's "Other" bucket shows the overflow
+                    // parents (everything not surfaced as its own donut slice).
+                    if (selectedCat === "Other") return !donutNamedLabels.has(name);
+                    return selectedCat === name;
+                  })
                   .map(([parentName, data], index) => {
                     const parentDef = categories.find(
                       (c) => c.name === parentName,
                     );
                     const catIcon = parentDef?.icon || "HelpCircle";
                     const catColor = parentDef?.color || colors.secondary;
+                    // A budget covers this card if it targets the parent OR any
+                    // of the parent's subcategories — otherwise a budget set on a
+                    // subcategory (e.g. "Dining" under "Food") would never surface
+                    // on the parent group its spend rolls into.
+                    const groupNames = new Set<string>([parentName]);
+                    if (parentDef) {
+                      categories
+                        .filter((c) => c.parentId === parentDef.id)
+                        .forEach((c) => groupNames.add(c.name));
+                    }
                     const budgetRow = budgetUtil.find(
                       (u) =>
                         !u.orphaned &&
-                        budgetSelections(u.budget).includes(parentName),
+                        budgetSelections(u.budget).some((n) => groupNames.has(n)),
                     );
                     const budgetColor = budgetRow
                       ? budgetRow.pace === "over" || budgetRow.percentage >= 100

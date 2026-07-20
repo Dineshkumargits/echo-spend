@@ -25,6 +25,7 @@ import {
   LucideAlertTriangle,
 } from "lucide-react-native";
 import { renderCategoryIcon } from "../components/CategoryManager";
+import { EmptyState, PrimaryButton } from "../components/Kit";
 import { useAISmsParser, ScanContext } from "../hooks/useAISmsParser";
 import { hashSms } from "../services/smsParserService";
 import {
@@ -775,7 +776,7 @@ const SmartScanScreen = ({ navigation }: any) => {
             {phase === "review" &&
               (queue.length > 0
                 ? `${queue.length} pending · ${newTxIds.size} new`
-                : "All caught up")}
+                : "All quiet")}
           </ThemedText>
         </View>
       </View>
@@ -1023,25 +1024,19 @@ const SmartScanScreen = ({ navigation }: any) => {
           keyboardShouldPersistTaps="handled"
         >
           {queue.length === 0 ? (
-            <View className="items-center py-20">
-              <LucideShieldCheck color={colors.success} size={56} />
-              <ThemedText className="font-bold text-xl mt-5">
-                All caught up!
-              </ThemedText>
-              <ThemedText type="secondary" className="text-center mt-2 px-8">
-                {newFoundCount > 0
-                  ? `${newFoundCount} transaction${newFoundCount !== 1 ? "s" : ""} were auto-approved.`
-                  : "No new transactions found since your last scan."}
-              </ThemedText>
-              <TouchableOpacity
-                onPress={() => navigation.goBack()}
-                className="mt-8 px-8 py-3 rounded-full"
-                style={{ backgroundColor: colors.accent }}
-              >
-                <ThemedText className="font-bold" style={{ color: "#FFFFFF" }}>
-                  Done
-                </ThemedText>
-              </TouchableOpacity>
+            <View>
+              {/* Same empty state as SmartInbox ("Review signals") so clearing
+                  a deck and an empty scan land on an identical screen. */}
+              <EmptyState
+                icon={<LucideShieldCheck color={colors.muted} size={56} />}
+                title="All quiet."
+                subtitle={
+                  newFoundCount > 0
+                    ? `${newFoundCount} transaction${newFoundCount !== 1 ? "s" : ""} were auto-approved. New transactions land here as they arrive.`
+                    : "No new transactions found since your last scan. New transactions land here as they arrive."
+                }
+                action={<PrimaryButton label="Back home" onPress={() => navigation.goBack()} tone="pulse" />}
+              />
 
               <View
                 style={{

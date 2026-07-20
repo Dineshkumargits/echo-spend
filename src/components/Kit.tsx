@@ -434,7 +434,7 @@ export const PrimaryButton: React.FC<{ label: string; onPress: () => void; tone?
       disabled={disabled}
       style={[{
         flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-        backgroundColor: bg, borderRadius: radius.md, paddingVertical: 16,
+        backgroundColor: bg, borderRadius: radius.md, paddingVertical: 16, paddingHorizontal: 28,
         opacity: disabled ? 0.4 : 1,
       }, style]}
     >

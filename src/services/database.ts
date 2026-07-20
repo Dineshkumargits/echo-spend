@@ -1301,8 +1301,13 @@ export const getSpendingByTag = async (startDate: string, endDate: string): Prom
 };
 
 export const getHighSpendTransactions = async (threshold = 2000): Promise<Transaction[]> => {
+  // "Biggest pulses" is an expense list: exclude income credits and transfers
+  // (which are not spend) so a large salary/transfer never shows up here.
   const rows = await db.getAllAsync<any>(
-    `SELECT * FROM transactions WHERE amount >= ? AND isConfirmed = 1 ORDER BY date DESC LIMIT 20`,
+    `SELECT * FROM transactions
+     WHERE amount >= ? AND isConfirmed = 1
+       AND type = 'debit' AND (isTransfer = 0 OR isTransfer IS NULL)
+     ORDER BY date DESC LIMIT 20`,
     threshold
   );
   return rows.map(mapTransactionRow);
