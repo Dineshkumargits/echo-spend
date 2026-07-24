@@ -227,7 +227,7 @@ const CATEGORY_KEYWORDS: Array<{ keys: string[]; category: string }> = [
 
 // Catches clear non-transaction SMS when AI is offline (regex fallback only).
 // Patterns are deliberately unambiguous — "paid/debited/credited" never appears here.
-const NON_TRANSACTION_RE = /\b(?:bill\s+(?:generated|due|amount|of\s+rs)|amount\s+(?:due|outstanding)|(?:amount|amt)\s+outstanding|outstanding\s+(?:amount|due|balance)|min(?:imum)?\s+(?:amount|amt|due|payment)|minimum\s+payment|total\s+(?:amount\s+)?due|payment\s+(?:due|reminder)|statement\s+(?:for|balance|generated)|pre-approved|limit\s+(?:increased|enhanced|update)|congratulations|eligible\s+for|apply\s+now|cashback\s+(?:of|earned|reward)|offer\s+(?:for|on|expires)|you\s+have\s+won|due\s+(?:by|on|date)|pay\s+by|payment\s+by|please\s+pay|avoid\s+(?:late\s+fee|interest|charges))\b/i;
+const NON_TRANSACTION_RE = /\b(?:bill\s+(?:generated|due|amount|of\s+rs)|amount\s+(?:due|outstanding)|(?:amount|amt)\s+outstanding|outstanding\s+(?:amount|due|balance)|min(?:imum)?\s+(?:amount|amt|due|payment)|minimum\s+payment|total\s+(?:amount\s+)?due|payment\s+(?:due|reminder)|statement\s+(?:for|balance|generated)|pre-approved|limit\s+(?:increased|enhanced|update)|congratulations|eligible\s+for|apply\s+now|cashback\s+(?:of|earned|reward)|offer\s+(?:for|on|expires)|you\s+have\s+won|due\s+(?:by|on|date)|pay\s+by|payment\s+by|please\s+pay|avoid\s+(?:late\s+fee|interest|charges)|will\s+be\s+(?:debited|deducted|charged|credited|auto[\s-]?debited))\b/i;
 
 function parseWithRegex(
   smsBody: string,
@@ -332,6 +332,17 @@ function parseWithRegex(
   } else {
     txType = 'debit';
   }
+
+  // ── 2b. Weak-match safeguard ──────────────────────────────────────────────
+  // A genuine transaction always states an ACTION (debited/credited/spent/…). If
+  // none fired, an amount-bearing bank SMS is almost certainly a non-transaction
+  // alert — a balance notice, reward/offer, or promo. For a strong last-4 match we
+  // stay lenient (the SMS is definitively tied to the account), but for a WEAK
+  // match (bank-name / UPI on an account-less SMS — exactly what the relaxed scan
+  // gate now admits) we require the action, so the loosened gate can never let a
+  // non-transaction through on the bank name alone.
+  const hasTxnAction = debitScore > 0 || creditScore > 0 || transferScore > 0;
+  if (!hasTxnAction && matchedAccount?.matchType !== 'last4') return null;
 
   // ── 3. Merchant ───────────────────────────────────────────────────────────
   let merchant = 'Unknown';
@@ -813,6 +824,26 @@ export type SmsMatchType = 'last4' | 'upi' | 'bankname';
 export type SmsAccountMatch = Account & { matchType: SmsMatchType };
 
 /**
+ * Does the SMS explicitly reference SOME account/card number?
+ *
+ * Uses only the RELIABLE indicators — masked runs ("xx1234") and keyword-anchored
+ * digits ("a/c 1234", "card ending 1234"). Deliberately excludes bare 4-digit
+ * groups and long digit runs, which match amounts, dates, and UPI reference
+ * hashes (e.g. "…03049cc642@upi") — noise that must not be mistaken for an
+ * account number.
+ *
+ * Used to decide whether a weak (bank-name / UPI) account match is trustworthy:
+ * an SMS that names NO account number can safely be attributed to the user's sole
+ * account at the named bank, whereas one that names a *different* number must not.
+ */
+export function smsReferencesAccountNumber(smsBody: string): boolean {
+  if (/\b[*xX]+\d{2,4}\b/.test(smsBody)) return true;
+  return /(?:a\/c|acct?|account|card|ending(?:\s+(?:with|in))?|no\.?)(?:\s+with|\s+number)?\s*[*xX\d]*?\d{2,4}\b/i.test(
+    smsBody,
+  );
+}
+
+/**
  * Match a raw SMS body against the user's registered accounts.
  *
  * Returns the matched account with a matchType indicating confidence:
@@ -903,13 +934,17 @@ export function matchSmsToAccount(smsBody: string, accounts: Account[]): SmsAcco
   }
 
   // ── 2. Bank name keyword in SMS body ──────────────────────────────────────
-  const hit = trackable.find(a => {
+  // Only trust a bank-name match when it is UNAMBIGUOUS — exactly one registered
+  // account matches the bank keyword. With multiple same-bank accounts and no
+  // digits to disambiguate we cannot safely assign, so we return no match rather
+  // than guess (the caller drops it; the user can still triage it in-app).
+  const bankHits = trackable.filter(a => {
     const nameLower = a.name.toLowerCase();
     const keyword = nameLower.split(' ')[0];
     if (keyword === 'sbi' && (lower.includes('sbi') || lower.includes('sbicrd'))) return true;
     return keyword.length >= 3 && lower.includes(keyword);
   });
-  if (hit) return { ...hit, matchType: 'bankname' };
+  if (bankHits.length === 1) return { ...bankHits[0], matchType: 'bankname' };
 
   return null;
 }

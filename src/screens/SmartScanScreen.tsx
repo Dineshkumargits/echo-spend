@@ -53,6 +53,7 @@ import {
 } from "../services/database";
 import {
   matchSmsToAccount,
+  smsReferencesAccountNumber,
   SmsAccountMatch,
 } from "../services/smsParserService";
 import { useStore } from "../store/useStore";
@@ -436,9 +437,12 @@ const SmartScanScreen = ({ navigation }: any) => {
           // 1. If it didn't match any account in Echo Spend, ignore it
           if (!matched) continue;
 
-          // 2. If the matched account has a registered last 2-4 digits, we require a strict last-digits match.
-          // This prevents transactions from other accounts at the same bank from leaking in.
-          if (matched.last4Digits && matched.matchType !== "last4") continue;
+          // 2. If the matched account has registered last 2-4 digits, require a
+          // strict last-digits match — UNLESS the SMS names no account number at
+          // all, where an unambiguous bank-name match is the best signal. Keeps
+          // account-less bank SMS ("…debited towards Airtel … - Axis Bank") while
+          // still blocking a *different* account's txn at the same bank.
+          if (matched.last4Digits && matched.matchType !== "last4" && smsReferencesAccountNumber(sms.body)) continue;
 
           // Range window check strictly enforces the per-account cursors.
           const range = rangeByAccountId[matched.id];

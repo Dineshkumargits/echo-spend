@@ -22,7 +22,7 @@ import {
   isSmsDuplicateTransaction,
 } from './database';
 import { runCategoryBudgetAlerts } from './budgetAlerts';
-import { SmsParserService, hashSms, matchSmsToAccount } from './smsParserService';
+import { SmsParserService, hashSms, matchSmsToAccount, smsReferencesAccountNumber } from './smsParserService';
 import { NotificationService } from './notifications';
 import { AIModelManager } from './aiModelManager';
 
@@ -248,7 +248,12 @@ export const processIncomingSms = async (body: string, date: number) => {
     const accountsForMatch = trackableRanges.map(r => r.account);
     const matched = matchSmsToAccount(body, accountsForMatch);
     if (!matched) return;
-    if (matched.last4Digits && matched.matchType !== 'last4') return;
+    // Strict-match guard: an account with registered last-4 normally only accepts
+    // SMS that match those digits (prevents sibling-account leakage). But when the
+    // SMS names NO account number at all (e.g. "Your A/c has been debited towards
+    // Airtel … - Axis Bank"), an unambiguous bank-name match is the best signal —
+    // accept it rather than drop a real transaction.
+    if (matched.last4Digits && matched.matchType !== 'last4' && smsReferencesAccountNumber(body)) return;
 
     // Check raw SMS hash or semantic duplicate first
     const hashed = hashSms(body);
@@ -426,9 +431,12 @@ const _doSmsScan = async (silent = false): Promise<BackgroundFetch.BackgroundFet
     // 1. If it didn't match any account in Echo Spend, ignore it
     if (!matched) continue;
 
-    // 2. If the matched account has a registered last 2-4 digits, we require a strict last-digits match.
-    // This prevents transactions from other accounts at the same bank from leaking in.
-    if (matched.last4Digits && matched.matchType !== 'last4') continue;
+    // 2. If the matched account has registered last 2-4 digits, require a strict
+    // last-digits match — UNLESS the SMS names no account number at all, in which
+    // case an unambiguous bank-name match is the best (and only) signal. This lets
+    // account-less bank SMS ("…debited towards Airtel … - Axis Bank") through while
+    // still blocking transactions that name a *different* account at the same bank.
+    if (matched.last4Digits && matched.matchType !== 'last4' && smsReferencesAccountNumber(sms.body)) continue;
 
     // Range window check strictly enforces the per-account cursors.
     const range = rangeByAccountId[matched.id];
