@@ -309,8 +309,26 @@ export const AIModelManager = {
     } catch (error: any) {
       console.error('[AIModelManager] Error during initLlama:', error);
       _context = null;
-      store.setAiModelStatus('error');
-      store.setAiModelError(error?.message || 'Failed to load AI model');
+
+      // A LOAD failure is not a DOWNLOAD failure. We only reach here after
+      // confirming the file exists on disk, and completed downloads are
+      // size-checked at fetch time — so initLlama throwing almost always means
+      // a runtime/native issue: missing JSI bindings on an unsupported ABI,
+      // transient OOM (common in headless background scans), etc. None of these
+      // are fixed by re-downloading the ~940 MB model, yet setting status to
+      // 'error' makes every screen nag "Echo AI Download Failed → redownload".
+      // Keep the model marked 'downloaded' so parsing silently falls back to
+      // regex and loading can be retried later. Only flag for redownload when
+      // the file is genuinely missing or truncated.
+      const sizeOnDisk = await AIModelManager.getModelSizeOnDisk();
+      const looksTruncated = sizeOnDisk > 0 && sizeOnDisk < 100 * 1024 * 1024;
+      if (sizeOnDisk === 0 || looksTruncated) {
+        store.setAiModelStatus('error');
+        store.setAiModelError('Echo AI model file is missing or incomplete. Please re-download.');
+      } else {
+        store.setAiModelStatus('downloaded');
+        store.setAiModelError(null);
+      }
       return false;
     }
   },
