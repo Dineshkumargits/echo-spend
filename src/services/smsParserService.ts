@@ -129,6 +129,64 @@ const TRANSFER_SCORING_PATTERNS = [
   { re: /\bself transfer\b/i, score: 4 },
 ];
 
+// ── Credit/debit tie-break for dual-mention SMS ─────────────────────────────
+// A single UPI/transfer SMS often names BOTH sides: "Your a/c X is credited …
+// debited from a/c Y". Both a credit and a debit verb fire, the scores tie, and
+// the plain fallback would default to 'debit' — flipping the sign for the person
+// whose account was actually credited. These verbs let us break the tie by
+// proximity to the user's own (matched) account.
+const CREDIT_VERBS_RE = /\b(?:credited|received|deposited|refunded|cashback|salary)\b/gi;
+const DEBIT_VERBS_RE = /\b(?:debited|spent|withdrawn|charged|paid|purchase|sent)\b/gi;
+
+const CREDIT_GROUP = 'credited|received|deposited|refunded';
+const DEBIT_GROUP = 'debited|withdrawn|spent|charged|paid';
+
+/**
+ * Does `verbs` grammatically GOVERN the account ending in `last4` within `text`?
+ * Character-distance is unreliable ("debited from a/c 1769 and credited to
+ * merchant" — the trailing verb governs the merchant, not the account), so we
+ * match the two Indian-bank constructions where a verb's object is the account:
+ *   • "<verb> … <last4>"   with NO opposing verb in between (account is object)
+ *   • "…<last4> is <verb>"                                  (account is subject)
+ * The "no opposing verb in between" bound (rather than a period bound) lets the
+ * match survive "a/c no." abbreviations while still refusing to cross into the
+ * other side of a transfer clause.
+ */
+const verbGovernsAccount = (
+  text: string,
+  last4: string,
+  verbs: string,
+  opposing: string,
+): boolean =>
+  new RegExp(`\\b(?:${verbs})\\b(?:(?!\\b(?:${opposing})\\b)[\\s\\S]){0,40}?${last4}`, 'i').test(text) ||
+  new RegExp(`${last4}[^.]{0,8}\\bis\\s+(?:${verbs})\\b`, 'i').test(text);
+
+/**
+ * Resolve a credit/debit tie for SMS that mention both actions (e.g. a UPI
+ * transfer naming both accounts).
+ * 1. If the user's account matched by last-4, attribute the type to whichever
+ *    action grammatically governs THEIR account.
+ * 2. Otherwise fall back to whichever action is stated first.
+ */
+const resolveAmbiguousType = (
+  text: string,
+  matched?: SmsAccountMatch | null,
+): 'credit' | 'debit' => {
+  const last4 = matched?.matchType === 'last4' ? matched.last4Digits : undefined;
+  if (last4 && text.includes(last4)) {
+    const credit = verbGovernsAccount(text, last4, CREDIT_GROUP, DEBIT_GROUP);
+    const debit = verbGovernsAccount(text, last4, DEBIT_GROUP, CREDIT_GROUP);
+    if (credit && !debit) return 'credit';
+    if (debit && !credit) return 'debit';
+  }
+  // Fallback: whichever action is stated first in the SMS.
+  CREDIT_VERBS_RE.lastIndex = 0;
+  DEBIT_VERBS_RE.lastIndex = 0;
+  const firstCredit = CREDIT_VERBS_RE.exec(text)?.index ?? Infinity;
+  const firstDebit = DEBIT_VERBS_RE.exec(text)?.index ?? Infinity;
+  return firstCredit <= firstDebit ? 'credit' : 'debit';
+};
+
 // Ordered from most-specific to least-specific.
 // "from MERCHANT" added for credit-style SMS ("received from Infosys").
 // UPI VPA pattern anchored with word boundary to avoid matching email addresses.
@@ -265,6 +323,10 @@ function parseWithRegex(
   // Choose the transaction type based on the scoring
   if (transferScore > debitScore && transferScore > creditScore) {
     txType = 'transfer';
+  } else if (creditScore === debitScore && creditScore > 0) {
+    // Both a credit and a debit verb fired and tied (e.g. a UPI transfer naming
+    // both accounts). Attribute to whichever action hit the user's own account.
+    txType = resolveAmbiguousType(cleanSmsForType, matchedAccount);
   } else if (creditScore > debitScore) {
     txType = 'credit';
   } else {
