@@ -30,12 +30,24 @@ const AUTO_RELEASE_MS = 60_000;
 let _context: LlamaContext | null = null;
 let _releaseTimer: ReturnType<typeof setTimeout> | null = null;
 let _downloadResumable: FileSystem.DownloadResumable | null = null;
+// Number of in-flight batch jobs that need the context to stay alive. Several
+// independent callers (real-time SMS handler, deferred AI enrichment, periodic
+// scan, SmartScan) can overlap, and without this an early finisher's
+// releaseModel() would null the context out from under a job still mid-batch —
+// every remaining inference then throws "AI model is not loaded".
+let _refCount = 0;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function resetReleaseTimer() {
   if (_releaseTimer) clearTimeout(_releaseTimer);
   _releaseTimer = setTimeout(() => {
+    _releaseTimer = null;
+    // Don't unload out from under an active holder — re-arm and check again.
+    if (_refCount > 0) {
+      resetReleaseTimer();
+      return;
+    }
     AIModelManager.releaseModel();
   }, AUTO_RELEASE_MS);
 }
@@ -222,7 +234,8 @@ export const AIModelManager = {
   /** Delete model files and directory cache */
   async deleteModelFiles(): Promise<void> {
     try {
-      await AIModelManager.releaseModel();
+      // Forced: the file is about to be deleted, so no holder may keep it open.
+      await AIModelManager.releaseModel(true);
       await FileSystem.deleteAsync(MODEL_PATH, { idempotent: true });
       const dirInfo = await FileSystem.getInfoAsync(MODEL_DIR);
       if (dirInfo.exists) {
@@ -333,8 +346,54 @@ export const AIModelManager = {
     }
   },
 
-  /** Unload model from memory to free RAM */
-  async releaseModel(): Promise<void> {
+  /**
+   * Take a hold on the model for a batch of inferences, loading it if needed.
+   * Every successful acquire MUST be paired with a releaseHold() in a `finally`.
+   * While any hold is outstanding, releaseModel() and the idle timer will not
+   * unload the context. Returns whether the model is usable.
+   */
+  async acquireModel(): Promise<boolean> {
+    if (_releaseTimer) {
+      clearTimeout(_releaseTimer);
+      _releaseTimer = null;
+    }
+    _refCount++;
+    if (_context) return true;
+
+    const ok = await AIModelManager.initModel();
+    if (!ok) _refCount = Math.max(0, _refCount - 1);
+    return ok;
+  },
+
+  /**
+   * Drop a hold taken by acquireModel(). The last holder decides what happens:
+   * `immediate` unloads right away (headless/background callers, where RAM
+   * pressure kills the task), otherwise the context is left warm for the idle
+   * timer so a foreground screen doesn't pay a ~940 MB reload.
+   */
+  async releaseHold(immediate = false): Promise<void> {
+    _refCount = Math.max(0, _refCount - 1);
+    if (_refCount > 0) return;
+    if (immediate) {
+      await AIModelManager.releaseModel();
+    } else {
+      resetReleaseTimer();
+    }
+  },
+
+  /**
+   * Unload model from memory to free RAM. Skipped while another caller holds
+   * the model via acquireModel(), unless `force` is set — the download flow
+   * forces it because it is about to overwrite the file on disk.
+   */
+  async releaseModel(force = false): Promise<void> {
+    if (!force && _refCount > 0) {
+      console.log(`[AIModelManager] Release skipped — ${_refCount} holder(s) still using the model.`);
+      return;
+    }
+    // Past this point the context really is going away, so any stale holds
+    // (e.g. a forced release during re-download) are void.
+    _refCount = 0;
     if (_releaseTimer) {
       clearTimeout(_releaseTimer);
       _releaseTimer = null;

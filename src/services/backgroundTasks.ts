@@ -41,6 +41,13 @@ let _syncRunning = false;
 // (which loads the AI model) would make every SMS arriving during it drop
 // silently — a major cause of "auto-detect only works half the time".
 let _realtimeRunning = false;
+// Deferred AI enrichment has its own lock too — it is reachable from both the
+// periodic scan task and the Smart Inbox screen gaining focus.
+let _enrichRunning = false;
+// Set by _doSmsScan when it takes a model hold, cleared by performBackgroundSmsScan
+// (its only caller) when it drops that hold. Keeps the acquire/release balanced
+// even though the scan can return early before ever acquiring.
+let _scanHoldsModel = false;
 
 // Set to true while SmartScanScreen is running a foreground scan.
 // The background SMS scan task respects this flag and skips entirely —
@@ -325,6 +332,9 @@ export const processIncomingSms = async (body: string, date: number) => {
   } finally {
     _realtimeRunning = false;
     // Free any model context we may have used, to keep the headless task's RAM low.
+    // This path never acquires a hold (it is regex-only and merely borrows an
+    // already-warm context), so releaseModel() is correct here — and it no-ops
+    // while a scan or enrichment batch still holds the model.
     AIModelManager.releaseModel().catch(() => {});
   }
 };
@@ -337,6 +347,19 @@ export const processIncomingSms = async (body: string, date: number) => {
 // the per-SMS headless task. Returns the number of transactions enriched.
 export const enrichPendingSmsWithAI = async (): Promise<number> => {
   if (_foregroundScanActive) return 0; // don't contend for the model with a live scan
+  // The periodic task and a Smart Inbox focus can both call this, and focus fires
+  // again on every navigate-back — without this lock two runs share one batch and
+  // the first to finish tears down the model mid-inference for the other.
+  if (_enrichRunning) return 0;
+  _enrichRunning = true;
+  try {
+    return await _doEnrichPendingSms();
+  } finally {
+    _enrichRunning = false;
+  }
+};
+
+const _doEnrichPendingSms = async (): Promise<number> => {
   await waitForHydration();
   const { preferences } = useStore.getState();
   if (!preferences.autoSmsScan) return 0;
@@ -345,12 +368,10 @@ export const enrichPendingSmsWithAI = async (): Promise<number> => {
   const pending = await getSmsTransactionsPendingEnrichment(20);
   if (pending.length === 0) return 0;
 
-  // Load the model once for the whole batch. If it can't load, leave everything
-  // queued (aiEnriched stays 0) and retry on the next cycle — never mark as done.
-  if (!AIModelManager.isModelLoaded()) {
-    await AIModelManager.initModel().catch(() => {});
-  }
-  if (!AIModelManager.isModelLoaded()) return 0;
+  // Hold the model for the whole batch so no other caller can unload it mid-run.
+  // If it can't load, leave everything queued (aiEnriched stays 0) and retry on
+  // the next cycle — never mark as done.
+  if (!(await AIModelManager.acquireModel())) return 0;
 
   const { context, merchantHints } = await SmsParserService.getContext();
   let enriched = 0;
@@ -363,9 +384,10 @@ export const enrichPendingSmsWithAI = async (): Promise<number> => {
           tx.rawSms, [], merchantHints, context, new Date(tx.date).getTime(),
           { skipProcessedCheck: true },
         );
-        if (!result.isTransaction || result.alreadySaved) {
-          // Regex already saved it as a transaction; keep the row but stop
-          // re-parsing it forever.
+        if (!result.isTransaction) {
+          // The AI disagrees with regex about this being a transaction. The row
+          // is already in the inbox for the user to confirm or dismiss, so keep
+          // it — just stop re-parsing it forever.
           await updateTransaction(tx.id, { aiEnriched: true });
           continue;
         }
@@ -381,8 +403,8 @@ export const enrichPendingSmsWithAI = async (): Promise<number> => {
           merchant: t.merchant || tx.merchant,
           category: t.category || tx.category,
           // Keep regex's structural fields (amount, date, account) — only the
-          // semantic fields benefit from AI. Never leave confidence 'low' so the
-          // row won't re-qualify for enrichment.
+          // semantic fields benefit from AI. An AI-reviewed row is worth at least
+          // 'medium', so don't let it read as low-confidence in the inbox.
           confidence: result.confidence === 'low' ? 'medium' : result.confidence,
           aiEnriched: true,
         });
@@ -393,7 +415,9 @@ export const enrichPendingSmsWithAI = async (): Promise<number> => {
       }
     }
   } finally {
-    AIModelManager.releaseModel().catch(() => {});
+    // Not `immediate`: this runs in the foreground too, so leave the context warm
+    // for the idle timer rather than forcing the next caller to reload ~940 MB.
+    AIModelManager.releaseHold().catch(() => {});
   }
 
   console.log(`[Enrich] AI-enriched ${enriched}/${pending.length} pending SMS transactions.`);
@@ -418,9 +442,14 @@ export const performBackgroundSmsScan = async (silent = false) => {
     return result;
   } finally {
     _scanRunning = false;
-    // Release the model from memory after a background scan to free RAM
-    console.log('[BackgroundSmsScan] Releasing AI model context.');
-    AIModelManager.releaseModel().catch(() => {});
+    // Drop the hold _doSmsScan took (if any) to free RAM after a background scan.
+    // `immediate` because this is the headless path, where RAM pressure kills the
+    // task — but it still won't unload while another caller holds the model.
+    if (_scanHoldsModel) {
+      console.log('[BackgroundSmsScan] Releasing AI model context.');
+      _scanHoldsModel = false;
+      AIModelManager.releaseHold(true).catch(() => {});
+    }
   }
 };
 
@@ -494,11 +523,11 @@ const _doSmsScan = async (silent = false): Promise<BackgroundFetch.BackgroundFet
 
   const { context, merchantHints } = await SmsParserService.getContext();
 
-  // Try to init the on-device AI model for better parsing accuracy.
-  // If it fails (e.g. not enough background RAM), regex fallback is used.
-  if (!AIModelManager.isModelLoaded()) {
-    await AIModelManager.initModel().catch(() => {});
-  }
+  // Try to hold the on-device AI model for better parsing accuracy. If it fails
+  // (e.g. not enough background RAM), regex fallback is used. The hold keeps a
+  // concurrently-arriving SMS from unloading the context mid-scan; it is dropped
+  // by performBackgroundSmsScan's finally, which is the only caller.
+  _scanHoldsModel = await AIModelManager.acquireModel().catch(() => false);
 
   let newTxCount = 0;
   let totalAmount = 0;
