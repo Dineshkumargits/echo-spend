@@ -28,6 +28,13 @@ export interface Transaction {
   loanId?: number;
   confidence?: 'high' | 'medium' | 'low';
   source?: 'sms' | 'csv' | 'manual' | 'auto';
+  /**
+   * Whether the on-device AI has parsed this transaction. Real-time incoming SMS
+   * are parsed REGEX-ONLY (the model can't safely load in the headless task), so
+   * they're saved with aiEnriched=0 and later upgraded by the deferred AI
+   * enrichment pass (see enrichPendingSmsWithAI) while still unconfirmed.
+   */
+  aiEnriched?: boolean;
   isTransfer?: boolean;
   tags?: string[];
   balanceAfter?: number;
@@ -267,6 +274,7 @@ export const initDatabase = async () => {
         balanceAfter REAL,
         toAccountId INTEGER,
         splitMemberId INTEGER,
+        aiEnriched INTEGER DEFAULT 0,
         FOREIGN KEY(accountId) REFERENCES accounts(id) ON DELETE SET NULL,
         FOREIGN KEY(toAccountId) REFERENCES accounts(id) ON DELETE SET NULL,
         FOREIGN KEY(splitMemberId) REFERENCES split_members(id) ON DELETE SET NULL
@@ -523,6 +531,15 @@ const runMigrations = async () => {
     }
     await db.execAsync('PRAGMA user_version = 5');
   }
+
+  if (dbVersion < 6) {
+    try {
+      await db.execAsync('ALTER TABLE transactions ADD COLUMN aiEnriched INTEGER DEFAULT 0');
+    } catch (e) {
+      console.warn('[Database] Migration to v6 warning:', e);
+    }
+    await db.execAsync('PRAGMA user_version = 6');
+  }
 };
 
 export const seedDatabase = async () => {
@@ -642,6 +659,7 @@ const mapTransactionRow = (row: any): Transaction => {
     isConfirmed: !!row.isConfirmed,
     isRecurring: !!row.isRecurring,
     isTransfer: !!row.isTransfer,
+    aiEnriched: !!row.aiEnriched,
     tags: row.tags ? (() => {
       try { return JSON.parse(row.tags); } catch { return []; }
     })() : [],
@@ -784,8 +802,8 @@ export const getTransactions = async (opts?: {
 export const addTransaction = async (transaction: Omit<Transaction, 'id'>) => {
   const result = await db.runAsync(
     `INSERT INTO transactions
-      (amount, category, merchant, type, date, accountId, toAccountId, isConfirmed, rawSms, isRecurring, recurrenceRule, notes, subscriptionId, goalId, loanId, confidence, source, isTransfer, tags, balanceAfter, splitMemberId)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (amount, category, merchant, type, date, accountId, toAccountId, isConfirmed, rawSms, isRecurring, recurrenceRule, notes, subscriptionId, goalId, loanId, confidence, source, isTransfer, tags, balanceAfter, splitMemberId, aiEnriched)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     transaction.amount,
     transaction.category,
     transaction.merchant,
@@ -807,6 +825,7 @@ export const addTransaction = async (transaction: Omit<Transaction, 'id'>) => {
     transaction.tags ? JSON.stringify(transaction.tags) : null,
     transaction.balanceAfter ?? null,
     (transaction as any).splitMemberId ?? null,
+    transaction.aiEnriched ? 1 : 0,
   );
 
   const insertId = result.lastInsertRowId;
@@ -1083,6 +1102,22 @@ export const deleteTransaction = async (id: number) => {
 export const getTransactionById = async (id: number): Promise<Transaction | null> => {
   const row = await db.getFirstAsync<any>('SELECT * FROM transactions WHERE id = ?', id);
   return row ? mapTransactionRow(row) : null;
+};
+
+/**
+ * SMS transactions that were saved by the fast regex path and are still awaiting
+ * on-device AI enrichment. Limited to unconfirmed rows with a stored rawSms so the
+ * AI has something to re-parse, newest first (most relevant to the user).
+ */
+export const getSmsTransactionsPendingEnrichment = async (limit = 20): Promise<Transaction[]> => {
+  const rows = await db.getAllAsync<any>(
+    `SELECT * FROM transactions
+     WHERE source = 'sms' AND isConfirmed = 0 AND (aiEnriched = 0 OR aiEnriched IS NULL)
+       AND rawSms IS NOT NULL AND rawSms != ''
+     ORDER BY date DESC LIMIT ?`,
+    limit,
+  );
+  return rows.map(mapTransactionRow);
 };
 
 export const getUnconfirmedTransactions = async (): Promise<Transaction[]> => {

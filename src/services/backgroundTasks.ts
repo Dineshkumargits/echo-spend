@@ -20,6 +20,9 @@ import {
   getSpendTrend,
   isRawSmsAlreadyExists,
   isSmsDuplicateTransaction,
+  getSmsTransactionsPendingEnrichment,
+  getTransactionById,
+  updateTransaction,
 } from './database';
 import { runCategoryBudgetAlerts } from './budgetAlerts';
 import { SmsParserService, hashSms, matchSmsToAccount, smsReferencesAccountNumber } from './smsParserService';
@@ -33,6 +36,11 @@ const BACKGROUND_ALERTS_TASK = 'BACKGROUND_BUDGET_ALERTS';
 // Re-entrancy locks: prevent concurrent runs from duplicating work.
 let _scanRunning = false;
 let _syncRunning = false;
+// Real-time incoming-SMS handler gets its OWN lock, independent of the periodic
+// scan's _scanRunning. Sharing it meant a long-running 15-min background scan
+// (which loads the AI model) would make every SMS arriving during it drop
+// silently — a major cause of "auto-detect only works half the time".
+let _realtimeRunning = false;
 
 // Set to true while SmartScanScreen is running a foreground scan.
 // The background SMS scan task respects this flag and skips entirely —
@@ -230,8 +238,8 @@ TaskManager.defineTask(BACKGROUND_NOTIFICATION_TASK, async ({ data, error }) => 
 // ─── Real-time Incoming SMS processor ────────────────────────────────────────
 export const processIncomingSms = async (body: string, date: number) => {
   if (_foregroundScanActive) return;
-  if (_scanRunning) return; // Prevent concurrent runs
-  _scanRunning = true;
+  if (_realtimeRunning) return; // Prevent processing the same SMS twice concurrently
+  _realtimeRunning = true;
 
   console.log('[BackgroundSms] Processing incoming SMS...');
   try {
@@ -267,11 +275,13 @@ export const processIncomingSms = async (body: string, date: number) => {
 
     const { context, merchantHints } = await SmsParserService.getContext();
 
-    if (!AIModelManager.isModelLoaded()) {
-      await AIModelManager.initModel().catch(() => {});
-    }
-
-    const result = await SmsParserService.parse(body, [], merchantHints, context, date);
+    // Real-time path is REGEX-ONLY (preferRegexOnly) — it must never load the
+    // ~940 MB model in a headless context, which OOMs/times out and drops the SMS.
+    // Regex parses standard bank SMS reliably and fast; the AI enriches later
+    // during the periodic/foreground scan. AI is still used here if already warm.
+    const result = await SmsParserService.parse(body, [], merchantHints, context, date, {
+      preferRegexOnly: true,
+    });
     if (result.alreadySaved || !result.isTransaction) {
       await markSmsProcessed(hashed);
       return;
@@ -313,9 +323,81 @@ export const processIncomingSms = async (body: string, date: number) => {
   } catch (error) {
     console.error('[BackgroundSms] Failed to process incoming SMS:', error);
   } finally {
-    _scanRunning = false;
+    _realtimeRunning = false;
+    // Free any model context we may have used, to keep the headless task's RAM low.
     AIModelManager.releaseModel().catch(() => {});
   }
+};
+
+// ─── Deferred AI enrichment ──────────────────────────────────────────────────
+// Real-time SMS are parsed regex-only for reliability (see processIncomingSms).
+// This pass re-parses those saved rawSms bodies with the on-device AI when the
+// model can safely load (during the periodic scan or a foreground trigger), and
+// upgrades the still-unconfirmed transaction's semantic fields. It NEVER runs in
+// the per-SMS headless task. Returns the number of transactions enriched.
+export const enrichPendingSmsWithAI = async (): Promise<number> => {
+  if (_foregroundScanActive) return 0; // don't contend for the model with a live scan
+  await waitForHydration();
+  const { preferences } = useStore.getState();
+  if (!preferences.autoSmsScan) return 0;
+  if (!AIModelManager.isDeviceCompatible()) return 0;
+
+  const pending = await getSmsTransactionsPendingEnrichment(20);
+  if (pending.length === 0) return 0;
+
+  // Load the model once for the whole batch. If it can't load, leave everything
+  // queued (aiEnriched stays 0) and retry on the next cycle — never mark as done.
+  if (!AIModelManager.isModelLoaded()) {
+    await AIModelManager.initModel().catch(() => {});
+  }
+  if (!AIModelManager.isModelLoaded()) return 0;
+
+  const { context, merchantHints } = await SmsParserService.getContext();
+  let enriched = 0;
+
+  try {
+    for (const tx of pending) {
+      if (!tx.rawSms) continue;
+      try {
+        const result = await SmsParserService.parse(
+          tx.rawSms, [], merchantHints, context, new Date(tx.date).getTime(),
+          { skipProcessedCheck: true },
+        );
+        if (!result.isTransaction || result.alreadySaved) {
+          // Regex already saved it as a transaction; keep the row but stop
+          // re-parsing it forever.
+          await updateTransaction(tx.id, { aiEnriched: true });
+          continue;
+        }
+
+        // Re-check it's still unconfirmed — the user may have reviewed it
+        // meanwhile; never overwrite a confirmed/edited transaction.
+        const fresh = await getTransactionById(tx.id);
+        if (!fresh || fresh.isConfirmed) continue;
+
+        const t = result.transaction;
+        await updateTransaction(tx.id, {
+          type: (t.type as Transaction['type']) ?? tx.type,
+          merchant: t.merchant || tx.merchant,
+          category: t.category || tx.category,
+          // Keep regex's structural fields (amount, date, account) — only the
+          // semantic fields benefit from AI. Never leave confidence 'low' so the
+          // row won't re-qualify for enrichment.
+          confidence: result.confidence === 'low' ? 'medium' : result.confidence,
+          aiEnriched: true,
+        });
+        enriched++;
+      } catch (e) {
+        console.warn('[Enrich] Failed to enrich tx', tx.id, e);
+        // leave aiEnriched=0 → retried next cycle
+      }
+    }
+  } finally {
+    AIModelManager.releaseModel().catch(() => {});
+  }
+
+  console.log(`[Enrich] AI-enriched ${enriched}/${pending.length} pending SMS transactions.`);
+  return enriched;
 };
 
 // ─── 2. Auto SMS Scan Task ───────────────────────────────────────────────────
@@ -483,6 +565,9 @@ const _doSmsScan = async (silent = false): Promise<BackgroundFetch.BackgroundFet
         isConfirmed: false,
         rawSms: sms.body,
         source: 'sms' as const,
+        // AI parsed this only if the model was actually loaded for the scan;
+        // otherwise it was regex and stays queued for later enrichment.
+        aiEnriched: AIModelManager.isModelLoaded(),
       } as Omit<Transaction, 'id'>;
 
       await addTransaction(txData);
@@ -522,7 +607,11 @@ const _doSmsScan = async (silent = false): Promise<BackgroundFetch.BackgroundFet
 TaskManager.defineTask(BACKGROUND_SMS_SCAN_TASK, async () => {
   try {
     await initDatabase();
-    return await performBackgroundSmsScan();
+    const result = await performBackgroundSmsScan();
+    // Upgrade any regex-only real-time transactions with the on-device AI now
+    // that we're in the (heavier-budget) periodic task where the model can load.
+    await enrichPendingSmsWithAI().catch(() => {});
+    return result;
   } catch (error) {
     console.error('[Background] SMS scan failed:', error);
     return BackgroundFetch.BackgroundFetchResult.Failed;

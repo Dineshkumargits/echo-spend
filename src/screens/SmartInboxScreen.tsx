@@ -47,6 +47,7 @@ import {
   Account,
   Category,
 } from '../services/database';
+import { enrichPendingSmsWithAI } from '../services/backgroundTasks';
 
 type SheetKind = null | 'category' | 'account' | 'toAccount' | 'tags';
 type CatType = 'expense' | 'income' | 'transfer';
@@ -63,6 +64,10 @@ const SmartInboxScreen = ({ navigation }: any) => {
   const [categories, setCategories] = useState<Category[]>([]);
   const [accountOverrides, setAccountOverrides] = useState<Record<number, number>>({});
   const [cleared, setCleared] = useState(0);
+  // Live mirror of `cleared` for async callbacks (e.g. AI enrichment) that must
+  // not act on a stale value captured at effect-setup time.
+  const clearedRef = useRef(0);
+  useEffect(() => { clearedRef.current = cleared; }, [cleared]);
 
   // Sheet state — every editor acts on the top card (queue[0]).
   const [sheet, setSheet] = useState<SheetKind>(null);
@@ -93,6 +98,21 @@ const SmartInboxScreen = ({ navigation }: any) => {
   useEffect(() => {
     if (isFocused) loadQueue();
   }, [loadQueue, isFocused]);
+
+  // Opening the review inbox is a natural moment to upgrade the regex-parsed
+  // real-time SMS with the on-device AI (the model can load safely in the
+  // foreground). Runs in the background; refreshes the deck only if the user
+  // hasn't started triaging yet, so it never disrupts a swipe in progress.
+  useEffect(() => {
+    if (!isFocused) return;
+    let cancelled = false;
+    enrichPendingSmsWithAI()
+      .then((n) => {
+        if (!cancelled && n > 0 && isFocused && clearedRef.current === 0) loadQueue();
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [isFocused, loadQueue]);
 
   // On unmount only: cancel the timer and commit any still-pending delete.
   useEffect(() => {

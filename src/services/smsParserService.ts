@@ -692,6 +692,7 @@ export const SmsParserService = {
     merchantHints: Array<{ raw: string; clean: string; category: string }> = [],
     context?: Partial<ScanContext>,
     smsTimestamp?: number,
+    opts?: { preferRegexOnly?: boolean; skipProcessedCheck?: boolean },
   ): Promise<ParsedSmsResult> {
     const {
       subscriptions = [],
@@ -707,14 +708,18 @@ export const SmsParserService = {
       : new Date().toISOString();
     const hash = hashSms(smsBody);
 
-    const alreadySaved = await isSmsAlreadyProcessed(hash);
-    if (alreadySaved) {
-      return {
-        isTransaction: true,
-        transaction: { rawSms: smsBody, isConfirmed: false },
-        confidence: 'low',
-        alreadySaved: true,
-      };
+    // The deferred AI enrichment pass re-parses an SMS whose hash is already in the
+    // processed table, so it opts out of this dedup short-circuit.
+    if (!opts?.skipProcessedCheck) {
+      const alreadySaved = await isSmsAlreadyProcessed(hash);
+      if (alreadySaved) {
+        return {
+          isTransaction: true,
+          transaction: { rawSms: smsBody, isConfirmed: false },
+          confidence: 'low',
+          alreadySaved: true,
+        };
+      }
     }
 
     // ── Step 1: Always run regex to extract structural fields ───────────────
@@ -727,7 +732,11 @@ export const SmsParserService = {
     // We never skip AI just because regex was confident — regex can tie-break
     // incorrectly on SMSes that contain both "credited" and "debited" words.
     let modelLoaded = AIModelManager.isModelLoaded();
-    if (!modelLoaded && await AIModelManager.isModelDownloaded() && AIModelManager.isDeviceCompatible()) {
+    // Low-latency callers (real-time incoming-SMS handler) pass preferRegexOnly to
+    // skip the heavy on-demand model load — loading ~940 MB in a headless context
+    // frequently OOMs or overruns the task timeout, which silently drops the SMS.
+    // They use the AI only if it is ALREADY warm; otherwise regex handles it.
+    if (!modelLoaded && !opts?.preferRegexOnly && await AIModelManager.isModelDownloaded() && AIModelManager.isDeviceCompatible()) {
       console.log('[SmsParserService] Model is downloaded but not loaded. Initializing model on-demand...');
       modelLoaded = await AIModelManager.initModel();
     }
