@@ -185,7 +185,7 @@ export const NotificationService = {
         content: {
           title,
           body,
-          data: { screen: 'Home' },
+          data: { screen: 'Budget' },
           sound: 'default',
           ...(Platform.OS === 'android' && { 
             channelId: 'alerts',
@@ -264,7 +264,7 @@ export const NotificationService = {
         content: {
           title,
           body,
-          data: { screen: 'Home' },
+          data: { screen: 'Finances' },
           sound: 'default',
           ...(Platform.OS === 'android' && {
             channelId: 'alerts',
@@ -307,7 +307,7 @@ export const NotificationService = {
         content: {
           title,
           body,
-          data: { screen: 'Home' },
+          data: { screen: 'Finances' },
           sound: 'default',
           ...(Platform.OS === 'android' && {
             channelId: 'alerts',
@@ -352,7 +352,7 @@ export const NotificationService = {
         content: {
           title: 'Daily Expense Check-in',
           body: "Don't forget to add today's expenses! Tap to open Echo Spend.",
-          data: { screen: 'Home' },
+          data: { screen: 'SmartScan' },
           sound: 'default',
           ...(Platform.OS === 'android' && { 
             channelId: 'alerts',

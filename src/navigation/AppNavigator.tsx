@@ -2,6 +2,7 @@ import React from 'react';
 import { createStackNavigator } from '@react-navigation/stack';
 import { NavigationContainer } from '@react-navigation/native';
 import { navigationRef } from '../../App';
+import { flushPendingNavigation } from './notificationRouting';
 import { useStore } from '../store/useStore';
 import OnboardingScreen from '../screens/OnboardingScreen';
 import { TabNavigator } from './TabNavigator';
@@ -36,7 +37,13 @@ export const AppNavigator = () => {
   const { colors } = useTheme();
 
   return (
-    <NavigationContainer ref={navigationRef}>
+    <NavigationContainer
+      ref={navigationRef}
+      // A notification tap that cold-starts the app resolves its target before
+      // this container exists. flushPendingNavigation delivers whatever was
+      // queued the moment navigation becomes usable.
+      onReady={() => flushPendingNavigation(navigationRef)}
+    >
       <Stack.Navigator
         screenOptions={{
           headerShown: false,

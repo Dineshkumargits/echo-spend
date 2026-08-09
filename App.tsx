@@ -18,6 +18,7 @@ import SyncOverlay from './src/components/SyncOverlay';
 import * as Notifications from 'expo-notifications';
 import { createNavigationContainerRef } from '@react-navigation/native';
 import { NotificationService } from "./src/services/notifications";
+import { resolveNotificationTarget, navigateWhenReady } from './src/navigation/notificationRouting';
 import { performBackgroundSmsScan } from './src/services/backgroundTasks';
 import { SyncService } from './src/services/sync';
 import { AIModelManager } from './src/services/aiModelManager';
@@ -43,6 +44,26 @@ function AppContent() {
   // Brand typefaces. If loading fails we render anyway — RN falls back to
   // system fonts rather than blocking the app on typography.
   const [fontsLoaded, fontsError] = useFonts(fontFiles);
+
+  // Cold start: a tap that LAUNCHES the app dispatches its response before the
+  // listener in the effect below is registered, so that listener never sees it —
+  // which is why tapping a notification from a killed app always landed on the
+  // dashboard. This hook replays the launching tap. It also re-fires for later
+  // taps, so dedupe on the notification identifier to avoid navigating twice.
+  const lastResponse = Notifications.useLastNotificationResponse();
+  const handledResponseId = React.useRef<string | null>(null);
+  useEffect(() => {
+    if (!lastResponse) return;
+    const id = lastResponse.notification.request.identifier;
+    if (handledResponseId.current === id) return;
+    handledResponseId.current = id;
+
+    const target = resolveNotificationTarget(lastResponse.notification.request.content.data);
+    if (target) {
+      console.log('[App] Notification tap →', target.name);
+      navigateWhenReady(navigationRef, target);
+    }
+  }, [lastResponse]);
 
   // Initial Lock Check
   useEffect(() => {
@@ -108,7 +129,6 @@ function AppContent() {
   useEffect(() => {
     if (!dbInitialized) return;
 
-    let notifSub: ReturnType<typeof Notifications.addNotificationResponseReceivedListener> | null = null;
     let receivedSub: ReturnType<typeof Notifications.addNotificationReceivedListener> | null = null;
 
     const setup = async () => {
@@ -161,25 +181,15 @@ function AppContent() {
         }
       });
 
-      // Deep-link handler: tap a notification → navigate to the right screen.
-      notifSub = Notifications.addNotificationResponseReceivedListener(response => {
-        const screen = response.notification.request.content.data?.screen as string | undefined;
-        if (!screen || !navigationRef.isReady()) return;
-        const navigableScreens = ['SmartInbox', 'Budget', 'Analytics', 'Home', 'Txns', 'Finances', 'Settings'];
-        
-        let targetScreen = screen;
-        if (targetScreen === 'Dashboard') {
-          targetScreen = 'Home';
-        }
+      // NOTE: notification taps are handled by the useLastNotificationResponse
+      // hook above, which covers cold start as well as warm taps. Registering an
+      // addNotificationResponseReceivedListener here too would navigate twice for
+      // the same tap and push the target screen onto the stack in duplicate.
 
-        if (navigableScreens.includes(targetScreen)) {
-          navigationRef.navigate(targetScreen as never);
-        }
-      });
     };
 
     setup();
-    return () => { notifSub?.remove(); receivedSub?.remove(); };
+    return () => { receivedSub?.remove(); };
   // preferences.dailyReminder intentionally excluded: handled by the effect below.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dbInitialized]);
