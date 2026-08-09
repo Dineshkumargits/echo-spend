@@ -28,10 +28,15 @@ import {
   addSalaryDate,
   setPendingSalaryDate,
   clearPendingSalaryDate,
+  upsertCardStatement,
+  applyCardPayment,
+  getOpenStatements,
+  getAccounts,
 } from './database';
 import { toLocalDateKey, cycleAnchorFrom } from './salaryCycle';
+import { nextOccurrenceOfDay } from '../components/dashboard/derive';
 import { runCategoryBudgetAlerts } from './budgetAlerts';
-import { SmsParserService, hashSms, matchSmsToAccount, smsReferencesAccountNumber } from './smsParserService';
+import { SmsParserService, hashSms, matchSmsToAccount, smsReferencesAccountNumber, parseCardStatementSms } from './smsParserService';
 import { NotificationService } from './notifications';
 import { AIModelManager } from './aiModelManager';
 
@@ -296,6 +301,8 @@ export const processIncomingSms = async (body: string, date: number) => {
       preferRegexOnly: true,
     });
     if (result.alreadySaved || !result.isTransaction) {
+      // Not a transaction — but it may still be a card bill worth recording.
+      await captureCardStatement(body);
       await markSmsProcessed(hashed);
       return;
     }
@@ -322,6 +329,7 @@ export const processIncomingSms = async (body: string, date: number) => {
 
       await addTransaction(txData);
       await handleSalaryCredit(txData);
+      await applyCardPaymentFromTx(txData);
       const nowStr = new Date().toISOString();
       await updateAccountLastScanned(accountId, nowStr);
 
@@ -487,6 +495,200 @@ export const handleSalaryCredit = async (tx: {
   }
 };
 
+
+// ─── Credit card statements ──────────────────────────────────────────────────
+
+/**
+ * Mine a bill/reminder SMS for statement data. These are not transactions, so
+ * they never reach the normal parse path — but they carry total due, minimum due
+ * and the due date, which is the richest card data a bank sends.
+ *
+ * Safe to call on every SMS: non-statement messages return null, and repeated
+ * reminders for the same bill collapse onto one row (see upsertCardStatement).
+ */
+export const captureCardStatement = async (body: string): Promise<boolean> => {
+  try {
+    const parsed = parseCardStatementSms(body);
+    if (!parsed) return false;
+
+    const accounts = await getAccounts();
+    const cards = accounts.filter((a) => a.accountType === 'credit_card');
+    if (cards.length === 0) return false;
+
+    // Prefer an explicit last-4 match; fall back to the only card on file.
+    const card =
+      (parsed.last4 && cards.find((c) => c.last4Digits === parsed.last4)) ??
+      (cards.length === 1 ? cards[0] : null);
+    if (!card) {
+      console.log('[CardStatement] Could not match SMS to a card; skipping.');
+      return false;
+    }
+
+    await upsertCardStatement({
+      accountId: card.id,
+      // Local midnight of the due date — the key repeated reminders dedup on.
+      dueDate: parsed.dueDate.toISOString(),
+      totalDue: parsed.totalDue,
+      minimumDue: parsed.minimumDue,
+      source: 'sms',
+      rawSms: body,
+    });
+    console.log('[CardStatement] Captured bill for', card.name, parsed.totalDue);
+    return true;
+  } catch (e) {
+    console.warn('[CardStatement] Failed to capture statement:', e);
+    return false;
+  }
+};
+
+/**
+ * A payment landing on a card reduces its open statements, oldest first — the
+ * same waterfall banks use, so partial payments leave the bill open with a
+ * smaller remaining rather than flipping it to paid.
+ */
+export const applyCardPaymentFromTx = async (tx: {
+  type?: string;
+  amount?: number;
+  accountId?: number;
+  toAccountId?: number;
+}) => {
+  try {
+    const accounts = await getAccounts();
+    const isCard = (id?: number) =>
+      !!id && accounts.some((a) => a.id === id && a.accountType === 'credit_card');
+
+    // Money reaching a card: a credit on the card, or a transfer into it.
+    const cardId =
+      tx.type === 'credit' && isCard(tx.accountId) ? tx.accountId
+        : tx.type === 'transfer' && isCard(tx.toAccountId) ? tx.toAccountId
+          : null;
+    if (!cardId || !(tx.amount && tx.amount > 0)) return;
+
+    const applied = await applyCardPayment(cardId, tx.amount);
+    if (applied > 0) console.log('[CardStatement] Applied payment', applied, 'to card', cardId);
+  } catch (e) {
+    console.warn('[CardStatement] Failed to apply payment:', e);
+  }
+};
+
+
+
+/** Days before the due date a card reminder fires. */
+const CARD_REMINDER_DAYS = [7, 3, 1, 0];
+
+/**
+ * Remind about open card statements approaching their due date.
+ *
+ * Only unpaid statements are considered, so a bill settled early goes quiet
+ * immediately — the repeated bank reminders keep arriving, but ours stop.
+ * History is keyed per statement+threshold so each stage fires once.
+ */
+export const runCardDueReminders = async () => {
+  try {
+    await waitForHydration();
+    const { preferences } = useStore.getState();
+    if (!preferences.recurringAlerts) return;
+
+    const [open, accounts] = await Promise.all([getOpenStatements(), getAccounts()]);
+    if (open.length === 0) return;
+
+    const now = new Date();
+    const history = (preferences.budgetNotificationHistory ?? {}) as Record<string, number>;
+    const { updateBudgetNotificationHistory } = useStore.getState();
+
+    for (const st of open) {
+      const remaining = Math.max(st.totalDue - st.paidAmount, 0);
+      if (remaining <= 0) continue;
+
+      const daysLeft = Math.ceil(
+        (new Date(st.dueDate).getTime() - now.getTime()) / 86_400_000,
+      );
+      if (daysLeft < 0 || daysLeft > 7) continue;
+
+      // Fire at the tightest threshold reached, once each.
+      const threshold = CARD_REMINDER_DAYS.find((d) => daysLeft <= d);
+      if (threshold === undefined) continue;
+
+      // Reuse the notification-history map, namespaced so it cannot collide
+      // with budget ids (which are positive integers).
+      const key = -(1000 + st.id);
+      if (history[String(key)] === threshold) continue;
+
+      const card = accounts.find((a) => a.id === st.accountId);
+      if (!card) continue;
+
+      await NotificationService.notifyCardDue(
+        card.name, remaining, daysLeft, preferences.currency, st.minimumDue,
+      );
+      updateBudgetNotificationHistory(key, threshold);
+    }
+  } catch (e) {
+    console.warn('[CardDue] Reminder pass failed:', e);
+  }
+};
+
+
+
+/** Utilization at or above this is worth acting on before the statement closes. */
+const HIGH_UTILIZATION_PCT = 30;
+/** How many days before the statement date to nudge. */
+const UTILIZATION_NUDGE_DAYS = 3;
+
+/**
+ * Nudge before the statement closes when utilization is high.
+ *
+ * Bureaus read utilization from the statement-date snapshot, so this is the only
+ * window where paying down changes the reported number. After the statement is
+ * generated it is too late for that month — which is why this fires on
+ * statementDay, not the due date.
+ */
+export const runUtilizationNudges = async () => {
+  try {
+    await waitForHydration();
+    const { preferences } = useStore.getState();
+    if (!preferences.recurringAlerts) return;
+
+    const accounts = await getAccounts();
+    const cards = accounts.filter(
+      (a) => a.accountType === 'credit_card' && a.statementDay && (a.creditLimit ?? 0) > 0,
+    );
+    if (cards.length === 0) return;
+
+    const now = new Date();
+    const history = (preferences.budgetNotificationHistory ?? {}) as Record<string, number>;
+    const { updateBudgetNotificationHistory } = useStore.getState();
+
+    for (const card of cards) {
+      const outstanding = Math.max(card.balance, 0);
+      const limit = card.creditLimit as number;
+      const pct = (outstanding / limit) * 100;
+      if (pct < HIGH_UTILIZATION_PCT) continue;
+
+      const statementDate = nextOccurrenceOfDay(card.statementDay as number, now);
+      const daysToStatement = Math.ceil(
+        (statementDate.getTime() - now.getTime()) / 86_400_000,
+      );
+      if (daysToStatement < 0 || daysToStatement > UTILIZATION_NUDGE_DAYS) continue;
+
+      // Once per card per statement month.
+      const key = -(2000 + card.id);
+      const stamp = statementDate.getMonth() + 1;
+      if (history[String(key)] === stamp) continue;
+
+      // What it would take to land just under the healthy threshold.
+      const payDown = Math.max(outstanding - limit * (HIGH_UTILIZATION_PCT / 100), 0);
+
+      await NotificationService.notifyHighUtilization(
+        card.name, pct, daysToStatement, payDown, preferences.currency,
+      );
+      updateBudgetNotificationHistory(key, stamp);
+    }
+  } catch (e) {
+    console.warn('[Utilization] Nudge pass failed:', e);
+  }
+};
+
+
 // ─── 2. Auto SMS Scan Task ───────────────────────────────────────────────────
 
 export const performBackgroundSmsScan = async (silent = false) => {
@@ -625,6 +827,8 @@ const _doSmsScan = async (silent = false): Promise<BackgroundFetch.BackgroundFet
 
     // AI determined this SMS is not a real transaction — mark and skip.
     if (!result.isTransaction) {
+      // Not a transaction — but it may still be a card bill worth recording.
+      await captureCardStatement(sms.body);
       await markSmsProcessed(hashSms(sms.body));
       continue;
     }
@@ -664,6 +868,7 @@ const _doSmsScan = async (silent = false): Promise<BackgroundFetch.BackgroundFet
 
       await addTransaction(txData);
       await handleSalaryCredit(txData);
+      await applyCardPaymentFromTx(txData);
       newTxCount++;
       totalAmount += txData.amount ?? 0;
       if (!topMerchant && txData.merchant) topMerchant = txData.merchant;
@@ -756,6 +961,8 @@ TaskManager.defineTask(BACKGROUND_ALERTS_TASK, async () => {
     // ── 2. Per-category budget alerts (shared with the foreground hook) ──────
     if (preferences.budgetAlerts) {
       await runCategoryBudgetAlerts();
+      await runCardDueReminders();
+      await runUtilizationNudges();
     }
 
     // ── 3. Weekly Digest (Sunday only, once per day) ─────────────────────────

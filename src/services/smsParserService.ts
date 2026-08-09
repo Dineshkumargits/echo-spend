@@ -229,6 +229,115 @@ const CATEGORY_KEYWORDS: Array<{ keys: string[]; category: string }> = [
 // Patterns are deliberately unambiguous — "paid/debited/credited" never appears here.
 const NON_TRANSACTION_RE = /\b(?:bill\s+(?:generated|due|amount|of\s+rs)|amount\s+(?:due|outstanding)|(?:amount|amt)\s+outstanding|outstanding\s+(?:amount|due|balance)|min(?:imum)?\s+(?:amount|amt|due|payment)|minimum\s+payment|total\s+(?:amount\s+)?due|payment\s+(?:due|reminder)|statement\s+(?:for|balance|generated)|pre-approved|limit\s+(?:increased|enhanced|update)|congratulations|eligible\s+for|apply\s+now|cashback\s+(?:of|earned|reward)|offer\s+(?:for|on|expires)|you\s+have\s+won|due\s+(?:by|on|date)|pay\s+by|payment\s+by|please\s+pay|avoid\s+(?:late\s+fee|interest|charges)|will\s+be\s+(?:debited|deducted|charged|credited|auto[\s-]?debited))\b/i;
 
+
+// ─── Credit card statement / reminder extraction ─────────────────────────────
+//
+// These SMS are correctly NOT transactions (nothing moved), so they are rejected
+// by NON_TRANSACTION_RE for transaction parsing. But they carry the richest card
+// data the bank ever sends — total due, minimum due, due date — so they are
+// mined here instead of being thrown away.
+//
+// Banks re-send these repeatedly until the due date, and often once more after
+// payment. Dedup is the storage layer's job (see upsertCardStatement); this
+// function only extracts.
+
+/** "Total amount due", "Total Due", "Amt Due", "Bill amount", "Outstanding". */
+const STMT_TOTAL_RE =
+  /(?:total\s+(?:amt|amount)?\s*due|total\s+due|bill\s+amount|amount\s+due|amt\s+due|outstanding\s+(?:amount|balance)?)\s*(?:is|of|:|-)?\s*(?:inr|rs\.?|₹)\s*([\d,]+(?:\.\d{1,2})?)/i;
+
+/** "Minimum amount due", "Min Due", "MAD". */
+const STMT_MIN_RE =
+  /(?:min(?:imum)?\s*(?:amt|amount)?\s*due|\bmad\b)\s*(?:is|of|:|-)?\s*(?:inr|rs\.?|₹)\s*([\d,]+(?:\.\d{1,2})?)/i;
+
+/** "due date 05-08-2026", "due on 05/08/26", "payable by 5 Aug 2026". */
+const STMT_DUE_DATE_RE =
+  /(?:due\s*(?:date|on|by)?|pay(?:able)?\s*(?:by|before|on))\s*(?::|-)?\s*(\d{1,2}[-/\s][A-Za-z]{3,9}[-/\s]\d{2,4}|\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\d{4}-\d{2}-\d{2})/i;
+
+/** Signals this is a bill/statement message rather than some other alert. */
+const STMT_CONTEXT_RE =
+  /\b(?:statement|total\s+(?:amt|amount)?\s*due|min(?:imum)?\s*(?:amt|amount)?\s*due|bill\s+(?:generated|amount|due)|payment\s+(?:due|reminder)|outstanding)\b/i;
+
+const MONTHS: Record<string, number> = {
+  jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+  jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
+};
+
+/** Parse the date forms Indian banks actually use. Returns null if unusable. */
+const parseStatementDate = (raw: string): Date | null => {
+  const txt = raw.trim();
+
+  // 2026-08-05
+  let m = txt.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+
+  // 5-Aug-2026 / 5 Aug 26
+  m = txt.match(/^(\d{1,2})[-/\s]([A-Za-z]{3,9})[-/\s](\d{2,4})$/);
+  if (m) {
+    const mon = MONTHS[m[2].slice(0, 3).toLowerCase()];
+    if (mon === undefined) return null;
+    let year = Number(m[3]);
+    if (year < 100) year += 2000;
+    return new Date(year, mon, Number(m[1]));
+  }
+
+  // 05/08/2026 — day-first, which is the Indian convention.
+  m = txt.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})$/);
+  if (m) {
+    let year = Number(m[3]);
+    if (year < 100) year += 2000;
+    const day = Number(m[1]);
+    const mon = Number(m[2]) - 1;
+    if (mon < 0 || mon > 11 || day < 1 || day > 31) return null;
+    return new Date(year, mon, day);
+  }
+
+  return null;
+};
+
+export interface ParsedCardStatement {
+  totalDue: number;
+  minimumDue: number | null;
+  /** Local midnight on the due date. */
+  dueDate: Date;
+  /** Last 4 digits found in the SMS, for matching to an account. */
+  last4: string | null;
+}
+
+/**
+ * Pull statement data out of a bill/reminder SMS. Returns null when the message
+ * is not a card bill or lacks the two fields that make it actionable — an amount
+ * and a due date.
+ */
+export const parseCardStatementSms = (smsBody: string): ParsedCardStatement | null => {
+  if (!STMT_CONTEXT_RE.test(smsBody)) return null;
+
+  const totalMatch = smsBody.match(STMT_TOTAL_RE);
+  const dueMatch = smsBody.match(STMT_DUE_DATE_RE);
+  if (!totalMatch || !dueMatch) return null;
+
+  const totalDue = parseFloat(totalMatch[1].replace(/,/g, ''));
+  if (!Number.isFinite(totalDue) || totalDue <= 0) return null;
+
+  const dueDate = parseStatementDate(dueMatch[1]);
+  if (!dueDate || Number.isNaN(dueDate.getTime())) return null;
+
+  const minMatch = smsBody.match(STMT_MIN_RE);
+  const minimumDue = minMatch ? parseFloat(minMatch[1].replace(/,/g, '')) : null;
+
+  const last4Match = smsBody.match(/(?:xx+|[*]{2,}|ending\s+(?:with\s+)?|card\s+no\.?\s*)(\d{4})\b/i);
+
+  return {
+    totalDue,
+    // A minimum larger than the total is a misparse; drop it rather than store nonsense.
+    minimumDue:
+      minimumDue !== null && Number.isFinite(minimumDue) && minimumDue > 0 && minimumDue <= totalDue
+        ? minimumDue
+        : null,
+    dueDate,
+    last4: last4Match ? last4Match[1] : null,
+  };
+};
+
 function parseWithRegex(
   smsBody: string,
   accounts: Account[],

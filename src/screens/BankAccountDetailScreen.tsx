@@ -41,12 +41,15 @@ import { useIsFocused } from '@react-navigation/native';
 import { useTheme } from '../theme/ThemeProvider';
 import { fonts } from '../theme/tokens';
 import { useStore } from '../store/useStore';
+import { PayBillSheet } from '../components/PayBillSheet';
 import {
   Account,
   Transaction,
   Category,
   SpendTrendPoint,
   getAccounts,
+  getCurrentStatement,
+  CardStatement,
   getTransactions,
   getCategories,
   getAccountInsights,
@@ -435,6 +438,10 @@ const BankAccountDetailScreen = ({ navigation, route }: any) => {
 
   // ── Page-level state (stable — doesn't change on tab switch) ─────────────
   const [account, setAccount] = useState<Account | null>(null);
+  // Credit cards only: the open statement and the Pay Bill sheet.
+  const [allAccounts, setAllAccounts] = useState<Account[]>([]);
+  const [statement, setStatement] = useState<CardStatement | null>(null);
+  const [showPayBill, setShowPayBill] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
   const [trend, setTrend] = useState<SpendTrendPoint[]>([]);
   const [insights, setInsights] = useState<{
@@ -474,13 +481,16 @@ const BankAccountDetailScreen = ({ navigation, route }: any) => {
   const loadPageData = async (range: DateRangePreset) => {
     const { startDate, endDate } = getDateBounds(range);
     const trendDays = range === 'all' ? 90 : range === '90d' ? 90 : range === '30d' ? 30 : 7;
-    const [accs, cats, tr, ins] = await Promise.all([
+    const [accs, cats, tr, ins, stmt] = await Promise.all([
       getAccounts(),
       getCategories(),
       getAccountSpendTrend(accountId, trendDays),
       getAccountInsights(accountId, startDate, endDate),
+      getCurrentStatement(accountId),
     ]);
     setAccount(accs.find(a => a.id === accountId) ?? null);
+    setAllAccounts(accs);
+    setStatement(stmt);
     setCategories(cats);
     setTrend(tr);
     setInsights(ins);
@@ -793,6 +803,32 @@ const BankAccountDetailScreen = ({ navigation, route }: any) => {
               </View>
             </View>
           ) : null}
+
+          {/* Pay Bill — quotes the STATEMENT remaining, not the running balance,
+              since post-statement spend is not due yet. */}
+          {account.accountType === 'credit_card' && (
+            <TouchableOpacity
+              onPress={() => setShowPayBill(true)}
+              style={{
+                marginTop: 14,
+                paddingVertical: 12,
+                borderRadius: 12,
+                alignItems: 'center',
+                backgroundColor: colors.accent,
+              }}
+            >
+              <ThemedText style={{ fontSize: 14, fontWeight: '700', color: colors.onAccent }}>
+                {statement
+                  ? `Pay ${fmt(Math.max(statement.totalDue - statement.paidAmount, 0))}`
+                  : 'Pay bill'}
+              </ThemedText>
+              {statement ? (
+                <ThemedText style={{ fontSize: 11, color: colors.onAccent, opacity: 0.85, marginTop: 2 }}>
+                  {`Due ${new Date(statement.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`}
+                </ThemedText>
+              ) : null}
+            </TouchableOpacity>
+          )}
           {account.last4Digits ? (
             <ThemedText style={{ fontSize: 12, color: colors.secondary, marginTop: 12 }}>···· {account.last4Digits}</ThemedText>
           ) : null}
@@ -1020,6 +1056,18 @@ const BankAccountDetailScreen = ({ navigation, route }: any) => {
           </KeyboardAvoidingView>
         </Pressable>
       </Modal>
+
+      {/* Pay a credit card bill — records the transfer and reduces the statement */}
+      <PayBillSheet
+        visible={showPayBill}
+        onClose={() => setShowPayBill(false)}
+        card={account}
+        statement={statement}
+        fundingAccounts={allAccounts.filter(a => a.accountType !== 'credit_card')}
+        currency={preferences.currency}
+        masked={preferences.hideAmounts}
+        onPaid={() => loadPageData(dateRange)}
+      />
     </ThemedSafeAreaView>
   );
 };

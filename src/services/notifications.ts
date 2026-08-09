@@ -190,6 +190,90 @@ export const NotificationService = {
     } catch { /* notification failure is non-fatal */ }
   },
 
+  /**
+   * Card payment reminder. Missing a card due date costs a late fee, interest on
+   * the whole statement and a credit-score hit, so this is the highest-value
+   * alert the app sends.
+   */
+  async notifyCardDue(
+    cardName: string,
+    amountDue: number,
+    daysLeft: number,
+    currency: string,
+    minimumDue?: number | null,
+  ) {
+    try {
+      const when =
+        daysLeft <= 0 ? 'due today' : daysLeft === 1 ? 'due tomorrow' : `due in ${daysLeft} days`;
+      const title = `${cardName} bill ${when}`;
+      const min = minimumDue
+        ? ` Minimum ${currency}${minimumDue.toLocaleString('en-IN')}.`
+        : '';
+      const body = `${currency}${amountDue.toLocaleString('en-IN')} to pay.${min}`;
+
+      if (AppState.currentState === 'active') {
+        notify.info(title, body);
+        return;
+      }
+
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title,
+          body,
+          data: { screen: 'Home' },
+          sound: 'default',
+          ...(Platform.OS === 'android' && {
+            channelId: 'alerts',
+            priority: Notifications.AndroidNotificationPriority.MAX,
+          }),
+        },
+        trigger: null,
+      });
+    } catch { /* notification failure is non-fatal */ }
+  },
+
+  /**
+   * Credit bureaus snapshot utilization on the STATEMENT date, not the due date.
+   * So the moment worth nudging is a few days before the statement closes —
+   * paying down then lowers the reported figure. Paying after the statement is
+   * generated has no effect on that month's reported utilization.
+   */
+  async notifyHighUtilization(
+    cardName: string,
+    utilizationPct: number,
+    daysToStatement: number,
+    payDown: number,
+    currency: string,
+  ) {
+    try {
+      const title = `${cardName} at ${Math.round(utilizationPct)}% utilization`;
+      const when =
+        daysToStatement <= 0 ? 'today' : daysToStatement === 1 ? 'tomorrow' : `in ${daysToStatement} days`;
+      const body = `Your statement generates ${when}. Paying ${currency}${Math.round(
+        payDown,
+      ).toLocaleString('en-IN')} before then keeps the reported figure under 30%.`;
+
+      if (AppState.currentState === 'active') {
+        notify.info(title, body);
+        return;
+      }
+
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title,
+          body,
+          data: { screen: 'Home' },
+          sound: 'default',
+          ...(Platform.OS === 'android' && {
+            channelId: 'alerts',
+            priority: Notifications.AndroidNotificationPriority.HIGH,
+          }),
+        },
+        trigger: null,
+      });
+    } catch { /* notification failure is non-fatal */ }
+  },
+
   async notifyWeeklyDigest(totalSpent: number, topCategory: string, currency: string) {
     try {
       await Notifications.scheduleNotificationAsync({

@@ -388,6 +388,34 @@ export const initDatabase = async () => {
         value TEXT
       );`);
 
+      // Credit card statements. A statement is a frozen fact: totalDue is what the
+      // bank billed at generation and never changes. Payments accumulate into
+      // paidAmount, so `remaining` is totalDue - paidAmount — the same way a bank
+      // shows a partially-paid bill.
+      //
+      // UNIQUE(accountId, dueDate) is the dedup key: banks re-send the same
+      // reminder repeatedly until the due date (and sometimes after payment), and
+      // every one of those must land on the SAME statement row.
+      await db.execAsync(`CREATE TABLE IF NOT EXISTS card_statements (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        accountId INTEGER NOT NULL,
+        statementDate TEXT,
+        dueDate TEXT NOT NULL,
+        totalDue REAL NOT NULL,
+        minimumDue REAL,
+        paidAmount REAL NOT NULL DEFAULT 0,
+        isPaid INTEGER NOT NULL DEFAULT 0,
+        source TEXT NOT NULL DEFAULT 'sms',
+        rawSms TEXT,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL,
+        UNIQUE(accountId, dueDate),
+        FOREIGN KEY(accountId) REFERENCES accounts(id) ON DELETE CASCADE
+      );`);
+      await db.execAsync(
+        'CREATE INDEX IF NOT EXISTS idx_card_statements_due ON card_statements(accountId, dueDate DESC);'
+      );
+
       // Actual salary arrivals the user has confirmed. The budget cycle is
       // anchored on these rather than a recurring day-of-month, because payroll
       // moves (30th, then 31st, then the 1st). UNIQUE on the instant so the same
@@ -589,6 +617,33 @@ const runMigrations = async () => {
       console.warn('[Database] Migration to v7 warning:', e);
     }
     await db.execAsync('PRAGMA user_version = 7');
+  }
+
+  if (dbVersion < 8) {
+    try {
+      await db.execAsync(`CREATE TABLE IF NOT EXISTS card_statements (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        accountId INTEGER NOT NULL,
+        statementDate TEXT,
+        dueDate TEXT NOT NULL,
+        totalDue REAL NOT NULL,
+        minimumDue REAL,
+        paidAmount REAL NOT NULL DEFAULT 0,
+        isPaid INTEGER NOT NULL DEFAULT 0,
+        source TEXT NOT NULL DEFAULT 'sms',
+        rawSms TEXT,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL,
+        UNIQUE(accountId, dueDate),
+        FOREIGN KEY(accountId) REFERENCES accounts(id) ON DELETE CASCADE
+      )`);
+      await db.execAsync(
+        'CREATE INDEX IF NOT EXISTS idx_card_statements_due ON card_statements(accountId, dueDate DESC)'
+      );
+    } catch (e) {
+      console.warn('[Database] Migration to v8 warning:', e);
+    }
+    await db.execAsync('PRAGMA user_version = 8');
   }
 };
 
@@ -2003,6 +2058,198 @@ export const deleteBudget = async (id: number) => {
  * `new Date(y, m, salaryDay)` here overflowed short months — day 31 in February
  * produced a Jan 31 → Mar 3 window and then drifted off month-end for good.
  */
+
+// ─── Credit card statements ──────────────────────────────────────────────────
+
+export interface CardStatement {
+  id: number;
+  accountId: number;
+  /** When the bank generated the statement. Null when only a reminder was seen. */
+  statementDate: string | null;
+  dueDate: string;
+  /** Frozen at generation — what the bank billed. Never raised by a reminder. */
+  totalDue: number;
+  minimumDue: number | null;
+  paidAmount: number;
+  isPaid: boolean;
+  source: 'sms' | 'manual';
+  rawSms: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const mapStatement = (row: any): CardStatement => ({
+  ...row,
+  isPaid: !!row.isPaid,
+  minimumDue: row.minimumDue ?? null,
+  statementDate: row.statementDate ?? null,
+  rawSms: row.rawSms ?? null,
+});
+
+/** What is still owed on a statement. Never negative. */
+export const statementRemaining = (st: CardStatement): number =>
+  Math.max(st.totalDue - st.paidAmount, 0);
+
+/**
+ * Record a statement or reminder parsed from SMS.
+ *
+ * Banks re-send the same reminder repeatedly until the due date — and often once
+ * more after payment — so this must be idempotent. Dedup is on
+ * (accountId, dueDate):
+ *
+ *  - First sighting creates the statement.
+ *  - A later message NEVER raises totalDue; a higher figure would mean a
+ *    different billing period, which needs its own row and its own due date.
+ *  - A later message showing LESS outstanding is treated as authoritative: the
+ *    bank knows about payments we may not have matched to a transaction, so
+ *    paidAmount is reconciled up to match. This is what makes repeated
+ *    post-payment reminders settle correctly instead of re-opening a paid bill.
+ */
+export const upsertCardStatement = async (input: {
+  accountId: number;
+  dueDate: string;
+  totalDue: number;
+  minimumDue?: number | null;
+  statementDate?: string | null;
+  source?: 'sms' | 'manual';
+  rawSms?: string | null;
+}): Promise<CardStatement | null> => {
+  const now = new Date().toISOString();
+  const existing = await db.getFirstAsync<any>(
+    'SELECT * FROM card_statements WHERE accountId = ? AND dueDate = ?',
+    input.accountId, input.dueDate,
+  );
+
+  if (!existing) {
+    await db.runAsync(
+      `INSERT INTO card_statements
+        (accountId, statementDate, dueDate, totalDue, minimumDue, paidAmount, isPaid, source, rawSms, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?)`,
+      input.accountId,
+      input.statementDate ?? null,
+      input.dueDate,
+      input.totalDue,
+      input.minimumDue ?? null,
+      input.source ?? 'sms',
+      input.rawSms ?? null,
+      now, now,
+    );
+    return await getStatementById(input.accountId, input.dueDate);
+  }
+
+  const st = mapStatement(existing);
+  const reported = input.totalDue;
+  let paidAmount = st.paidAmount;
+
+  // A reminder quoting less than the original bill implies payments we haven't
+  // matched. Trust the bank and reconcile — but only ever upward, so a stale
+  // duplicate can't un-pay a settled statement.
+  if (reported < st.totalDue) {
+    paidAmount = Math.max(paidAmount, st.totalDue - reported);
+  }
+
+  const isPaid = paidAmount >= st.totalDue - 0.01;
+  await db.runAsync(
+    `UPDATE card_statements
+        SET minimumDue = COALESCE(?, minimumDue),
+            statementDate = COALESCE(?, statementDate),
+            paidAmount = ?,
+            isPaid = ?,
+            updatedAt = ?
+      WHERE id = ?`,
+    input.minimumDue ?? null,
+    input.statementDate ?? null,
+    paidAmount,
+    isPaid ? 1 : 0,
+    now,
+    st.id,
+  );
+  return await getStatementById(input.accountId, input.dueDate);
+};
+
+export const getStatementById = async (
+  accountId: number,
+  dueDate: string,
+): Promise<CardStatement | null> => {
+  const row = await db.getFirstAsync<any>(
+    'SELECT * FROM card_statements WHERE accountId = ? AND dueDate = ?', accountId, dueDate,
+  );
+  return row ? mapStatement(row) : null;
+};
+
+/** Unpaid statements, oldest due first — the order payments are applied in. */
+export const getOpenStatements = async (accountId?: number): Promise<CardStatement[]> => {
+  const rows = accountId
+    ? await db.getAllAsync<any>(
+        'SELECT * FROM card_statements WHERE isPaid = 0 AND accountId = ? ORDER BY dueDate ASC', accountId)
+    : await db.getAllAsync<any>(
+        'SELECT * FROM card_statements WHERE isPaid = 0 ORDER BY dueDate ASC');
+  return rows.map(mapStatement);
+};
+
+/** The statement a card bill should quote: the oldest still-open one. */
+export const getCurrentStatement = async (accountId: number): Promise<CardStatement | null> => {
+  const open = await getOpenStatements(accountId);
+  return open[0] ?? null;
+};
+
+export const getStatementsForAccount = async (
+  accountId: number,
+  limit = 12,
+): Promise<CardStatement[]> => {
+  const rows = await db.getAllAsync<any>(
+    'SELECT * FROM card_statements WHERE accountId = ? ORDER BY dueDate DESC LIMIT ?',
+    accountId, limit,
+  );
+  return rows.map(mapStatement);
+};
+
+/**
+ * Apply a payment to a card, oldest open statement first — the same waterfall
+ * banks use. Handles partial payments (statement stays open with a smaller
+ * remaining) and overpayment (spills onto the next open statement).
+ *
+ * Returns how much of the payment was absorbed by statements; any excess is
+ * simply advance credit on the card and needs no statement row.
+ */
+export const applyCardPayment = async (
+  accountId: number,
+  amount: number,
+): Promise<number> => {
+  if (!(amount > 0)) return 0;
+  const open = await getOpenStatements(accountId);
+  let left = amount;
+  const now = new Date().toISOString();
+
+  for (const st of open) {
+    if (left <= 0) break;
+    const due = statementRemaining(st);
+    if (due <= 0) continue;
+
+    const applied = Math.min(due, left);
+    const paidAmount = st.paidAmount + applied;
+    const isPaid = paidAmount >= st.totalDue - 0.01;
+
+    await db.runAsync(
+      'UPDATE card_statements SET paidAmount = ?, isPaid = ?, updatedAt = ? WHERE id = ?',
+      paidAmount, isPaid ? 1 : 0, now, st.id,
+    );
+    left -= applied;
+  }
+
+  return amount - left;
+};
+
+/** Manual override for "I paid this outside the app". */
+export const markStatementPaid = async (id: number): Promise<void> => {
+  const row = await db.getFirstAsync<any>('SELECT * FROM card_statements WHERE id = ?', id);
+  if (!row) return;
+  await db.runAsync(
+    'UPDATE card_statements SET paidAmount = totalDue, isPaid = 1, updatedAt = ? WHERE id = ?',
+    new Date().toISOString(), id,
+  );
+};
+
 // ─── Salary dates ────────────────────────────────────────────────────────────
 
 export interface SalaryDate {

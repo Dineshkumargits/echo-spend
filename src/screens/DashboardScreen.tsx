@@ -51,7 +51,7 @@ import { fonts, formatINR } from "../theme/tokens";
 import { SignalRow, IconTile, Card } from "../components/Kit";
 import { useAIInsights } from "../hooks/useAIInsights";
 import { WidgetId, visibleWidgetIds } from "../components/dashboard/registry";
-import { cycleAnchorFrom, describeInstant, type CycleWindow } from "../services/salaryCycle";
+import { cycleAnchorFrom, type CycleWindow } from "../services/salaryCycle";
 import {
   toCycle,
   getUpcomingBills,
@@ -67,6 +67,7 @@ import {
   InsightCarousel,
 } from "../components/dashboard/Widgets";
 import { EditDashboardSheet } from "../components/dashboard/EditDashboardSheet";
+import { PayBillSheet } from "../components/PayBillSheet";
 
 import {
   getTransactions,
@@ -95,6 +96,8 @@ import {
   getActiveInsights,
   getLastInsightGenerationDate,
   getSalaryCycleWindowAsync,
+  getOpenStatements,
+  CardStatement,
   Insight,
   getLastScanTime,
 } from "../services/database";
@@ -171,6 +174,11 @@ const DashboardScreen = ({ navigation }: any) => {
   const [loans, setLoans] = useState<Loan[]>([]);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [showEditDashboard, setShowEditDashboard] = useState(false);
+  // Open card statements — card bills and due amounts come from these, never
+  // from the running balance.
+  const [statements, setStatements] = useState<CardStatement[]>([]);
+  // Card whose bill is being paid; null closes the sheet.
+  const [payBillFor, setPayBillFor] = useState<CardHealth | null>(null);
   // Cycle boundaries now live in the DB (recorded salary dates), so they load
   // with everything else. Null until the first load completes.
   const [cycleWindow, setCycleWindow] = useState<CycleWindow | null>(null);
@@ -233,9 +241,16 @@ const DashboardScreen = ({ navigation }: any) => {
     [cycleWindow],
   );
 
-  /** e.g. "31 Jul 2026, 18:30" — the moment the current cycle began. */
+  /**
+   * e.g. "5 Aug" — the date the current cycle ENDS, which is what a "till …"
+   * label means. Date only: the exact minute matters to the cycle maths but is
+   * noise on the dashboard.
+   */
   const cycleLabel = useMemo(
-    () => (cycleWindow ? describeInstant(cycleWindow.start) : "\u2014"),
+    () =>
+      cycleWindow
+        ? cycleWindow.end.toLocaleDateString("en-IN", { day: "numeric", month: "short" })
+        : "\u2014",
     [cycleWindow],
   );
 
@@ -244,8 +259,8 @@ const DashboardScreen = ({ navigation }: any) => {
   const daysLeftInCycle = useMemo(() => cycle.daysRemaining, [cycle]);
 
   const upcomingBills = useMemo(
-    () => getUpcomingBills(subscriptions, loans, accounts, 30),
-    [subscriptions, loans, accounts],
+    () => getUpcomingBills(subscriptions, loans, accounts, 30, new Date(), statements),
+    [subscriptions, loans, accounts, statements],
   );
 
   const safeToSpendData = useMemo(
@@ -253,7 +268,10 @@ const DashboardScreen = ({ navigation }: any) => {
     [preferences.monthlyBudget, monthlySpend, upcomingBills, cycle],
   );
 
-  const cardHealth = useMemo(() => getCardHealth(accounts), [accounts]);
+  const cardHealth = useMemo(
+    () => getCardHealth(accounts, new Date(), statements),
+    [accounts, statements],
+  );
 
   // The ordered, enabled widget ids the ScrollView actually walks.
   const orderedWidgetIds = useMemo(
@@ -297,6 +315,7 @@ const DashboardScreen = ({ navigation }: any) => {
       scanTime,
       lastInsightGen,
       resolvedCycle,
+      openStatements,
     ] = await Promise.all([
       getTransactions({ limit: 15, confirmedOnly: true }),
       getAccounts(),
@@ -314,6 +333,7 @@ const DashboardScreen = ({ navigation }: any) => {
       getLastScanTime(),
       getLastInsightGenerationDate(),
       getSalaryCycleWindowAsync(cycleAnchorFrom(preferences)),
+      getOpenStatements(),
     ]);
     setTransactions(txs);
     setAccounts(accs);
@@ -330,6 +350,7 @@ const DashboardScreen = ({ navigation }: any) => {
     setLoans(ls);
     setSubscriptions(ss);
     setCycleWindow(resolvedCycle);
+    setStatements(openStatements);
 
     const now = new Date();
     const tenDays = new Date(now.getTime() + 10 * 24 * 60 * 60 * 1000);
@@ -600,6 +621,10 @@ const DashboardScreen = ({ navigation }: any) => {
           triggerHaptic();
           navigation.navigate("AddAccount");
         }}
+        onPayBill={(card: CardHealth) => {
+          triggerHaptic();
+          setPayBillFor(card);
+        }}
       />
     ),
 
@@ -695,10 +720,11 @@ const DashboardScreen = ({ navigation }: any) => {
               >
                 <SectionLabel
                   color={safeToSpend < 0 ? colors.danger : colors.accent}
+                  style={{ flex: 1, marginRight: 12 }}
                 >
                   {safeToSpend < 0
-                    ? `Over budget · till the ${cycleLabel}`
-                    : `Safe to spend · till the ${cycleLabel}`}
+                    ? `Over budget · till ${cycleLabel}`
+                    : `Safe to spend · till ${cycleLabel}`}
                 </SectionLabel>
                 <ThemedText
                   font="signal"
@@ -707,6 +733,7 @@ const DashboardScreen = ({ navigation }: any) => {
                     fontSize: 15,
                     color: safeToSpend < 0 ? colors.danger : colors.primary,
                     fontVariant: ["tabular-nums"],
+                    flexShrink: 0,
                   }}
                 >
                   {safeToSpend < 0 ? "−" : ""}
@@ -720,9 +747,12 @@ const DashboardScreen = ({ navigation }: any) => {
                   marginTop: 6,
                 }}
               >
+                {/* Both halves pinned to one line so this row stays aligned with
+                    the amount row above it, whatever the numbers are. */}
                 <ThemedText
                   font="signal"
-                  style={{ fontSize: 10, color: colors.secondary }}
+                  numberOfLines={1}
+                  style={{ fontSize: 10, color: colors.secondary, flexShrink: 1, marginRight: 12 }}
                 >
                   spent{" "}
                   {preferences.hideAmounts
@@ -733,9 +763,11 @@ const DashboardScreen = ({ navigation }: any) => {
                 {daysLeftInCycle > 0 && (
                   <ThemedText
                     font="signal"
+                    numberOfLines={1}
                     style={{
                       fontSize: 10,
                       color: safeToSpend < 0 ? colors.danger : colors.secondary,
+                      flexShrink: 0,
                     }}
                   >
                     {safeToSpend < 0
@@ -1940,6 +1972,19 @@ const DashboardScreen = ({ navigation }: any) => {
       <EditDashboardSheet
         visible={showEditDashboard}
         onClose={() => setShowEditDashboard(false)}
+      />
+
+      {/* Pay a credit card bill — records a transfer and reduces the statement */}
+      <PayBillSheet
+        visible={payBillFor !== null}
+        onClose={() => setPayBillFor(null)}
+        card={payBillFor?.account ?? null}
+        statement={payBillFor?.statement ?? null}
+        // Cards can't fund other cards.
+        fundingAccounts={accounts.filter((a) => a.accountType !== "credit_card")}
+        currency={currency}
+        masked={preferences.hideAmounts}
+        onPaid={loadData}
       />
     </ThemedSafeAreaView>
   );

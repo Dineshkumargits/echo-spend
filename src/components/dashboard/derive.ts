@@ -6,7 +6,7 @@
  * queries. Keeping them pure also makes the money math testable in isolation
  * from the screen.
  */
-import type { Account, Subscription, Loan } from '../../services/database';
+import type { Account, Subscription, Loan, CardStatement } from '../../services/database';
 
 const DAY_MS = 86_400_000;
 
@@ -86,6 +86,8 @@ export const getUpcomingBills = (
   accounts: Account[],
   withinDays = 30,
   now = new Date(),
+  /** Open card statements. Without these, card bills are omitted rather than guessed. */
+  statements: CardStatement[] = [],
 ): UpcomingBill[] => {
   const bills: UpcomingBill[] = [];
 
@@ -118,21 +120,26 @@ export const getUpcomingBills = (
     });
   }
 
-  for (const a of accounts) {
-    if (a.accountType !== 'credit_card' || !a.billDueDay) continue;
-    // Outstanding is carried as a positive balance on a card account; nothing
-    // owed means there is no bill to show.
-    if (a.balance <= 0) continue;
-    const due = nextOccurrenceOfDay(a.billDueDay, now);
+  // Card bills come from the STATEMENT, never from the running balance.
+  // account.balance is current outstanding — it includes spend made after the
+  // statement was generated, which is not yet due. Quoting it overstates every
+  // bill for anyone who uses the card after their statement date.
+  for (const st of statements) {
+    if (st.isPaid) continue;
+    const remaining = Math.max(st.totalDue - st.paidAmount, 0);
+    if (remaining <= 0) continue;
+    const card = accounts.find((a) => a.id === st.accountId);
+    if (!card) continue;
+
     bills.push({
-      key: `card-${a.id}`,
-      label: `${a.name} bill`,
-      amount: a.balance,
-      dueDate: due.toISOString(),
-      daysLeft: daysUntil(due.toISOString(), now),
+      key: `card-${st.accountId}-${st.dueDate}`,
+      label: `${card.name} bill`,
+      amount: remaining,
+      dueDate: st.dueDate,
+      daysLeft: daysUntil(st.dueDate, now),
       kind: 'card',
       target: 'card',
-      refId: a.id,
+      refId: card.id,
     });
   }
 
@@ -211,7 +218,15 @@ export const getSafeToSpend = (
 
 export interface CardHealth {
   account: Account;
+  /** Current running balance — everything spent, billed or not. */
   outstanding: number;
+  /** The open statement, if one has been captured. */
+  statement: CardStatement | null;
+  /** What must actually be paid by the due date. Null when no statement is known. */
+  amountDue: number | null;
+  minimumDue: number | null;
+  /** Spend since the statement — not due yet, rolls into the next bill. */
+  unbilled: number | null;
   limit: number;
   /** 0–100, clamped. 0 when no limit is configured. */
   utilizationPct: number;
@@ -223,11 +238,23 @@ export interface CardHealth {
   severity: 'ok' | 'warn' | 'high';
 }
 
-export const getCardHealth = (accounts: Account[], now = new Date()): CardHealth[] =>
+export const getCardHealth = (
+  accounts: Account[],
+  now = new Date(),
+  statements: CardStatement[] = [],
+): CardHealth[] =>
   accounts
     .filter((a) => a.accountType === 'credit_card')
     .map((a): CardHealth => {
       const outstanding = Math.max(a.balance, 0);
+      // Oldest unpaid statement is the one being billed.
+      const statement =
+        statements
+          .filter((s) => s.accountId === a.id && !s.isPaid)
+          .sort((x, y) => new Date(x.dueDate).getTime() - new Date(y.dueDate).getTime())[0] ?? null;
+      const amountDue = statement
+        ? Math.max(statement.totalDue - statement.paidAmount, 0)
+        : null;
       const limit = a.creditLimit ?? 0;
       const hasLimit = limit > 0;
       const utilizationPct = hasLimit
@@ -237,13 +264,22 @@ export const getCardHealth = (accounts: Account[], now = new Date()): CardHealth
       return {
         account: a,
         outstanding,
+        statement,
+        amountDue,
+        minimumDue: statement?.minimumDue ?? null,
+        // Only meaningful once a statement exists; otherwise we cannot tell
+        // billed from unbilled spend.
+        unbilled: statement ? Math.max(outstanding - amountDue!, 0) : null,
         limit,
         hasLimit,
         utilizationPct,
         available: hasLimit ? Math.max(limit - outstanding, 0) : 0,
-        dueInDays: a.billDueDay
-          ? daysUntil(nextOccurrenceOfDay(a.billDueDay, now).toISOString(), now)
-          : null,
+        // Prefer the real due date from the statement over the configured day.
+        dueInDays: statement
+          ? daysUntil(statement.dueDate, now)
+          : a.billDueDay
+            ? daysUntil(nextOccurrenceOfDay(a.billDueDay, now).toISOString(), now)
+            : null,
         statementInDays: a.statementDay
           ? daysUntil(nextOccurrenceOfDay(a.statementDay, now).toISOString(), now)
           : null,
@@ -264,4 +300,47 @@ export const formatDueLabel = (daysLeft: number): string => {
   if (daysLeft === 0) return 'Today';
   if (daysLeft === 1) return 'Tomorrow';
   return `in ${daysLeft}d`;
+};
+
+/**
+ * How long a purchase made *today* stays interest-free.
+ *
+ * A purchase lands on the statement generated on `statementDay`, and that
+ * statement is payable by `billDueDay`. So buying just after a statement closes
+ * gives the longest free credit — the number people optimise around.
+ *
+ * Returns null unless both dates are configured; guessing here would be worse
+ * than staying quiet, since the whole value is in the exact date.
+ */
+export interface InterestFreeInfo {
+  /** The statement today's spend will appear on. */
+  nextStatementDate: Date;
+  /** When that statement must be paid. */
+  payBy: Date;
+  /** Total interest-free days from today. */
+  days: number;
+}
+
+export const getInterestFreeInfo = (
+  account: Account,
+  now = new Date(),
+): InterestFreeInfo | null => {
+  if (!account.statementDay || !account.billDueDay) return null;
+
+  const nextStatementDate = nextOccurrenceOfDay(account.statementDay, now);
+
+  // The due date is the first billDueDay strictly after that statement closes.
+  // Same month when the due day falls later, otherwise the following month.
+  let payBy = nextOccurrenceOfDay(account.billDueDay, nextStatementDate);
+  if (payBy <= nextStatementDate) {
+    const after = new Date(nextStatementDate);
+    after.setDate(after.getDate() + 1);
+    payBy = nextOccurrenceOfDay(account.billDueDay, after);
+  }
+
+  return {
+    nextStatementDate,
+    payBy,
+    days: Math.max(daysUntil(payBy.toISOString(), now), 0),
+  };
 };

@@ -29,7 +29,7 @@ import { fonts, formatINR } from '../../theme/tokens';
 import { AmountText, SectionLabel, CycleBar } from '../Signal';
 import { Card, IconTile } from '../Kit';
 import type { SafeToSpend, UpcomingBill, CardHealth } from './derive';
-import { formatDueLabel } from './derive';
+import { formatDueLabel, getInterestFreeInfo } from './derive';
 import type { Insight } from '../../services/database';
 
 // ─── Shared bits ─────────────────────────────────────────────────────────────
@@ -340,6 +340,8 @@ interface CreditCardsWidgetProps {
   masked: boolean;
   onPressCard: (card: CardHealth) => void;
   onAddCard: () => void;
+  /** Opens the Pay Bill sheet. Omitted, the button is hidden. */
+  onPayBill?: (card: CardHealth) => void;
 }
 
 export const CreditCardsWidget: React.FC<CreditCardsWidgetProps> = ({
@@ -348,6 +350,7 @@ export const CreditCardsWidget: React.FC<CreditCardsWidgetProps> = ({
   masked,
   onPressCard,
   onAddCard,
+  onPayBill,
 }) => {
   const { colors } = useTheme();
 
@@ -415,13 +418,22 @@ export const CreditCardsWidget: React.FC<CreditCardsWidgetProps> = ({
                     </View>
                   </View>
 
-                  <AmountText
-                    value={card.outstanding}
-                    size={17}
-                    currency={currency}
-                    masked={masked}
-                    kind="debit"
-                  />
+                  {/* Headline is what must be PAID (statement remaining), not the
+                      running balance — post-statement spend isn't due yet. */}
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <AmountText
+                      value={card.amountDue ?? card.outstanding}
+                      size={17}
+                      currency={currency}
+                      masked={masked}
+                      kind="debit"
+                    />
+                    <ThemedText
+                      style={{ fontFamily: fonts.signal, fontSize: 9, color: colors.secondary, marginTop: 2 }}
+                    >
+                      {card.amountDue !== null ? 'DUE NOW' : 'OUTSTANDING'}
+                    </ThemedText>
+                  </View>
                 </View>
 
                 {card.hasLimit ? (
@@ -451,6 +463,69 @@ export const CreditCardsWidget: React.FC<CreditCardsWidgetProps> = ({
                   // rather than rendering a misleading empty bar.
                   <MutedNote>Add a credit limit to track utilization.</MutedNote>
                 )}
+
+                {card.statement && (
+                  <View
+                    style={{
+                      flexDirection: 'row',
+                      justifyContent: 'space-between',
+                      marginTop: 10,
+                      paddingTop: 10,
+                      borderTopWidth: 1,
+                      borderTopColor: colors.border,
+                    }}
+                  >
+                    {card.minimumDue !== null && (
+                      <MutedNote>
+                        {masked
+                          ? `Min ${currency}••••`
+                          : `Min ${currency}${formatINR(card.minimumDue)}`}
+                      </MutedNote>
+                    )}
+                    {card.unbilled !== null && card.unbilled > 0 && (
+                      <MutedNote>
+                        {masked
+                          ? `${currency}•••• unbilled`
+                          : `${currency}${formatINR(card.unbilled)} unbilled`}
+                      </MutedNote>
+                    )}
+                  </View>
+                )}
+
+                {onPayBill && (card.amountDue ?? 0) > 0 && (
+                  <Pressable
+                    onPress={() => onPayBill(card)}
+                    style={{
+                      marginTop: 12,
+                      paddingVertical: 10,
+                      borderRadius: 12,
+                      alignItems: 'center',
+                      backgroundColor: colors.accent,
+                    }}
+                  >
+                    <ThemedText
+                      style={{ fontFamily: fonts.textSemibold, fontSize: 13, color: colors.onAccent }}
+                    >
+                      {masked
+                        ? 'Pay bill'
+                        : `Pay ${currency}${formatINR(card.amountDue as number)}`}
+                    </ThemedText>
+                  </Pressable>
+                )}
+
+                {/* Free-credit window for a purchase made today — the number
+                    people actually plan around. */}
+                {(() => {
+                  const free = getInterestFreeInfo(card.account);
+                  if (!free) return null;
+                  return (
+                    <MutedNote>
+                      {`Buy today → interest-free for ${free.days} days, until ${free.payBy.toLocaleDateString(
+                        'en-IN', { day: 'numeric', month: 'short' },
+                      )}`}
+                    </MutedNote>
+                  );
+                })()}
 
                 {(card.dueInDays !== null || card.statementInDays !== null) && (
                   <View
