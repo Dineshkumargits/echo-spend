@@ -5,6 +5,18 @@ import { useStore } from '../store/useStore';
 // Single authoritative handler — keeps badge, plays sound, shows alert.
 // Refactored to silence alerts when the app is active to prevent "notification bombing"
 // while the user is already looking at their data.
+/**
+ * True only when an in-app toast will actually be SEEN.
+ *
+ * `AppState.currentState` alone is not enough. Headless JS tasks (incoming SMS,
+ * background sync) run with no mounted UI, and `notify.*` there emits into an
+ * empty listener set — the message is silently discarded and the user gets no
+ * notification at all. Requiring a live listener means those contexts correctly
+ * fall through to a real system notification.
+ */
+const canShowInAppToast = (): boolean =>
+  AppState.currentState === 'active' && notify.hasListeners();
+
 Notifications.setNotificationHandler({
   handleNotification: async () => {
     const isActive = AppState.currentState === 'active';
@@ -20,7 +32,63 @@ Notifications.setNotificationHandler({
 
 import { notify } from '../utils/notify';
 
+let _channelsEnsured = false;
+
+/**
+ * Create the Android notification channels, at most once per JS context.
+ *
+ * These used to be created only inside requestPermissions(), which runs solely
+ * from the UI (App.tsx). A headless JS task therefore posted notifications with
+ * `channelId: 'transactions'` against a channel that need not exist — and
+ * Android drops a notification aimed at an unknown channel silently, with no
+ * error for the caller to catch. Every notify* path now ensures them first, so a
+ * transaction detected while the app has never been opened still reaches the
+ * user.
+ *
+ * setNotificationChannelAsync is idempotent (it updates in place), so re-running
+ * it is safe; the flag just avoids the native round-trip on every notification.
+ */
+const ensureAndroidChannels = async (): Promise<void> => {
+  if (Platform.OS !== 'android' || _channelsEnsured) return;
+  try {
+    // Default channel (fallback for any notification not specifying a channelId)
+    await Notifications.setNotificationChannelAsync('default', {
+      name: 'Echo Spend',
+      importance: Notifications.AndroidImportance.DEFAULT,
+    });
+    await Notifications.setNotificationChannelAsync('transactions', {
+      name: 'Transactions',
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: [0, 200, 100, 200],
+      lightColor: '#FFB454',
+    });
+    // 'alerts' channel is used for global budget and error notifications (MAX importance)
+    await Notifications.setNotificationChannelAsync('alerts', {
+      name: 'Budget & Alerts',
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: '#FFB454',
+    });
+    // 'budget' channel is used for per-category budget notifications (DEFAULT importance)
+    await Notifications.setNotificationChannelAsync('budget', {
+      name: 'Budget Alerts',
+      importance: Notifications.AndroidImportance.DEFAULT,
+      lightColor: '#FFB454',
+    });
+    await Notifications.setNotificationChannelAsync('digest', {
+      name: 'Weekly Digest',
+      importance: Notifications.AndroidImportance.DEFAULT,
+    });
+    _channelsEnsured = true;
+  } catch (e) {
+    console.warn('[Notifications] Failed to ensure Android channels:', e);
+  }
+};
+
 export const NotificationService = {
+  /** Exposed so headless entry points can prepare channels before notifying. */
+  ensureAndroidChannels,
+
   async requestPermissions() {
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
@@ -33,36 +101,7 @@ export const NotificationService = {
       return false;
     }
 
-    if (Platform.OS === 'android') {
-      // Default channel (fallback for any notification not specifying a channelId)
-      await Notifications.setNotificationChannelAsync('default', {
-        name: 'Echo Spend',
-        importance: Notifications.AndroidImportance.DEFAULT,
-      });
-      await Notifications.setNotificationChannelAsync('transactions', {
-        name: 'Transactions',
-        importance: Notifications.AndroidImportance.HIGH,
-        vibrationPattern: [0, 200, 100, 200],
-        lightColor: '#FFB454',
-      });
-      // 'alerts' channel is used for global budget and error notifications (MAX importance)
-      await Notifications.setNotificationChannelAsync('alerts', {
-        name: 'Budget & Alerts',
-        importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#FFB454',
-      });
-      // 'budget' channel is used for per-category budget notifications (DEFAULT importance)
-      await Notifications.setNotificationChannelAsync('budget', {
-        name: 'Budget Alerts',
-        importance: Notifications.AndroidImportance.DEFAULT,
-        lightColor: '#FFB454',
-      });
-      await Notifications.setNotificationChannelAsync('digest', {
-        name: 'Weekly Digest',
-        importance: Notifications.AndroidImportance.DEFAULT,
-      });
-    }
+    await ensureAndroidChannels();
 
     return true;
   },
@@ -75,11 +114,12 @@ export const NotificationService = {
       const categoryLabel = category ? ` · ${category}` : '';
       const text = `${currency}${amount.toLocaleString('en-IN')} at ${merchant}${categoryLabel}`;
       
-      if (AppState.currentState === 'active') {
+      if (canShowInAppToast()) {
         notify.info('New Transaction Found', text);
         return;
       }
 
+      await ensureAndroidChannels();
       await Notifications.scheduleNotificationAsync({
         content: {
           title: 'New Transaction Detected',
@@ -104,11 +144,12 @@ export const NotificationService = {
       const merchantLine = topMerchant ? ` Top: ${topMerchant}.` : '';
       const body = `${currency}${totalAmount.toLocaleString('en-IN')} total detected.${merchantLine} Tap to review.`;
 
-      if (AppState.currentState === 'active') {
+      if (canShowInAppToast()) {
         notify.info(`${count} New Transactions`, body);
         return;
       }
 
+      await ensureAndroidChannels();
       await Notifications.scheduleNotificationAsync({
         content: {
           title: `${count} New Transactions Found`,
@@ -134,11 +175,12 @@ export const NotificationService = {
         ? `You've spent ${currency}${spent.toLocaleString('en-IN')} — ${currency}${(spent - budget).toLocaleString('en-IN')} over your ${currency}${budget.toLocaleString('en-IN')} budget.`
         : `${pct}% of your monthly budget used (${currency}${spent.toLocaleString('en-IN')} / ${currency}${budget.toLocaleString('en-IN')}).`;
 
-      if (AppState.currentState === 'active') {
+      if (canShowInAppToast()) {
         notify.info(title, body);
         return;
       }
 
+      await ensureAndroidChannels();
       await Notifications.scheduleNotificationAsync({
         content: {
           title,
@@ -169,11 +211,12 @@ export const NotificationService = {
         hour: '2-digit', minute: '2-digit',
       })}. Your budget has reset — tap to review or correct the date.`;
 
-      if (AppState.currentState === 'active') {
+      if (canShowInAppToast()) {
         notify.info(title, body);
         return;
       }
 
+      await ensureAndroidChannels();
       await Notifications.scheduleNotificationAsync({
         content: {
           title,
@@ -211,11 +254,12 @@ export const NotificationService = {
         : '';
       const body = `${currency}${amountDue.toLocaleString('en-IN')} to pay.${min}`;
 
-      if (AppState.currentState === 'active') {
+      if (canShowInAppToast()) {
         notify.info(title, body);
         return;
       }
 
+      await ensureAndroidChannels();
       await Notifications.scheduleNotificationAsync({
         content: {
           title,
@@ -253,11 +297,12 @@ export const NotificationService = {
         payDown,
       ).toLocaleString('en-IN')} before then keeps the reported figure under 30%.`;
 
-      if (AppState.currentState === 'active') {
+      if (canShowInAppToast()) {
         notify.info(title, body);
         return;
       }
 
+      await ensureAndroidChannels();
       await Notifications.scheduleNotificationAsync({
         content: {
           title,
@@ -276,6 +321,7 @@ export const NotificationService = {
 
   async notifyWeeklyDigest(totalSpent: number, topCategory: string, currency: string) {
     try {
+      await ensureAndroidChannels();
       await Notifications.scheduleNotificationAsync({
         content: {
           title: 'Weekly Spend Digest',
@@ -300,6 +346,7 @@ export const NotificationService = {
 
       // Use a natively repeating DAILY trigger. This survives app termination and does not
       // require the JavaScript environment to wake up and manually schedule the next instance.
+      await ensureAndroidChannels();
       await Notifications.scheduleNotificationAsync({
         identifier: 'echo-daily-reminder',
         content: {
@@ -349,6 +396,7 @@ export const NotificationService = {
       }
 
       // Fallback/Non-Android path
+      await ensureAndroidChannels();
       await Notifications.scheduleNotificationAsync({
         identifier: 'echo-sync-ping',
         content: {
@@ -404,6 +452,7 @@ export const NotificationService = {
       try {
         await Notifications.cancelScheduledNotificationAsync('echo-scan-suggestion');
       } catch {}
+      await ensureAndroidChannels();
       await Notifications.scheduleNotificationAsync({
         identifier: 'echo-scan-suggestion',
         content: {
@@ -423,6 +472,7 @@ export const NotificationService = {
 
   async notifyError(title: string, body: string) {
     try {
+      await ensureAndroidChannels();
       await Notifications.scheduleNotificationAsync({
         content: {
           title: `⚠️ ${title}`,
@@ -440,7 +490,7 @@ export const NotificationService = {
 
   async scheduleLocalNotification(title: string, body: string, channelId = 'default', data?: any) {
     try {
-      if (AppState.currentState === 'active') {
+      if (canShowInAppToast()) {
         notify.info(title, body);
         return;
       }
@@ -451,6 +501,7 @@ export const NotificationService = {
           ? Notifications.AndroidNotificationPriority.HIGH
           : Notifications.AndroidNotificationPriority.DEFAULT);
 
+      await ensureAndroidChannels();
       await Notifications.scheduleNotificationAsync({
         content: {
           title,

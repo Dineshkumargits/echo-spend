@@ -16,9 +16,20 @@ registerRootComponent(App);
 // Register Headless JS task for incoming SMS on Android
 AppRegistry.registerHeadlessTask('SmsHeadlessTask', () => async (taskData: any) => {
   const { body, date } = taskData;
-  if (body && date) {
+  if (!body || !date) {
+    console.warn('[SmsHeadlessTask] Missing body/date in task data — nothing to process.');
+    return;
+  }
+  console.log('[SmsHeadlessTask] Woken by SmsReceiver.');
+  try {
     await initDatabase();
+    // Channels are otherwise only created by requestPermissions(), which runs
+    // from the UI. A notification posted to a channel Android does not know is
+    // dropped silently, so ensure them before any notify* call can happen.
+    await NotificationService.ensureAndroidChannels();
     await processIncomingSms(body, Number(date));
+  } catch (e) {
+    console.error('[SmsHeadlessTask] Failed:', e);
   }
 });
 

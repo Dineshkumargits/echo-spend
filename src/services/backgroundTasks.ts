@@ -52,11 +52,9 @@ const BACKGROUND_ALERTS_TASK = 'BACKGROUND_BUDGET_ALERTS';
 // Re-entrancy locks: prevent concurrent runs from duplicating work.
 let _scanRunning = false;
 let _syncRunning = false;
-// Real-time incoming-SMS handler gets its OWN lock, independent of the periodic
-// scan's _scanRunning. Sharing it meant a long-running 15-min background scan
-// (which loads the AI model) would make every SMS arriving during it drop
-// silently — a major cause of "auto-detect only works half the time".
-let _realtimeRunning = false;
+// Real-time incoming-SMS handling is serialised by _realtimeChain (below)
+// rather than a boolean lock, so a busy handler defers the next SMS instead of
+// discarding it.
 // Deferred AI enrichment has its own lock too — it is reachable from both the
 // periodic scan task and the Smart Inbox screen gaining focus.
 let _enrichRunning = false;
@@ -297,40 +295,72 @@ TaskManager.defineTask(BACKGROUND_NOTIFICATION_TASK, async ({ data, error }) => 
 });
 
 // ─── Real-time Incoming SMS processor ────────────────────────────────────────
-export const processIncomingSms = async (body: string, date: number) => {
-  if (_foregroundScanActive) return;
-  if (_realtimeRunning) return; // Prevent processing the same SMS twice concurrently
-  _realtimeRunning = true;
 
+// Serialises real-time SMS handling. This used to be a plain boolean lock that
+// returned early when busy — so two SMS arriving in the same second (a debit
+// alert plus its balance update, or two cards charged together) meant the second
+// was discarded outright: no transaction, no notification, and no hash written,
+// leaving it to be picked up minutes later by the periodic scan if at all.
+// Chaining instead keeps the "one at a time" guarantee without dropping work.
+let _realtimeChain: Promise<void> = Promise.resolve();
+
+export const processIncomingSms = (body: string, date: number): Promise<void> => {
+  const run = _realtimeChain.then(() => _doProcessIncomingSms(body, date));
+  // Keep the chain alive even if one SMS throws, or every later SMS is skipped.
+  _realtimeChain = run.catch(() => {});
+  return run;
+};
+
+const _doProcessIncomingSms = async (body: string, date: number) => {
+  if (_foregroundScanActive) {
+    console.log('[BackgroundSms] Skipped: foreground SmartScan is active.');
+    return;
+  }
   console.log('[BackgroundSms] Processing incoming SMS...');
   try {
     await waitForHydration();
     const { preferences } = useStore.getState();
-    if (!preferences.autoSmsScan) return;
+    if (!preferences.autoSmsScan) {
+      console.log('[BackgroundSms] Dropped: autoSmsScan preference is off.');
+      return;
+    }
 
     const ranges = await getAccountScanRanges();
     const trackableRanges = ranges.filter(
       r => r.account.accountType === 'bank' || r.account.accountType === 'credit_card'
     );
-    if (trackableRanges.length === 0) return;
+    if (trackableRanges.length === 0) {
+      console.log('[BackgroundSms] Dropped: no bank or credit-card accounts configured.');
+      return;
+    }
 
     const accountsForMatch = trackableRanges.map(r => r.account);
     const matched = matchSmsToAccount(body, accountsForMatch);
-    if (!matched) return;
+    if (!matched) {
+      console.log('[BackgroundSms] Dropped: SMS matched none of the configured accounts.');
+      return;
+    }
     // Strict-match guard: an account with registered last-4 normally only accepts
     // SMS that match those digits (prevents sibling-account leakage). But when the
     // SMS names NO account number at all (e.g. "Your A/c has been debited towards
     // Airtel … - Axis Bank"), an unambiguous bank-name match is the best signal —
     // accept it rather than drop a real transaction.
-    if (matched.last4Digits && matched.matchType !== 'last4' && smsReferencesAccountNumber(body)) return;
+    if (matched.last4Digits && matched.matchType !== 'last4' && smsReferencesAccountNumber(body)) {
+      console.log(`[BackgroundSms] Dropped: SMS names a different account than ${matched.last4Digits}.`);
+      return;
+    }
 
     // Check raw SMS hash or semantic duplicate first
     const hashed = hashSms(body);
     // Single indexed lookup (sms_hashes.hash is UNIQUE). This used to load the
     // entire table into a Set just to test one value.
-    if (await isSmsAlreadyProcessed(hashed)) return;
+    if (await isSmsAlreadyProcessed(hashed)) {
+      console.log('[BackgroundSms] Dropped: hash already processed (periodic scan likely won the race).');
+      return;
+    }
 
     if (await isRawSmsAlreadyExists(body)) {
+      console.log('[BackgroundSms] Dropped: identical rawSms already stored.');
       await markSmsProcessed(hashed);
       return;
     }
@@ -347,7 +377,18 @@ export const processIncomingSms = async (body: string, date: number) => {
     if (result.alreadySaved || !result.isTransaction) {
       // Not a transaction — but it may still be a card bill worth recording.
       await captureCardStatement(body);
-      await markSmsProcessed(hashed);
+      // Only retire the SMS permanently if the AI actually made this call.
+      // This path is regex-only by design, and regex has no real notion of
+      // "isTransaction" for unusual formats — marking the hash here meant a
+      // single regex miss silently retired the SMS forever, because both the
+      // periodic scan and enrichPendingSmsWithAI skip anything already hashed.
+      // Leaving it unmarked costs one re-parse per cycle and lets the model
+      // reach it later, which is the whole point of the deferred pass.
+      if (AIModelManager.isModelLoaded()) {
+        await markSmsProcessed(hashed);
+      } else {
+        console.log('[BackgroundSms] Regex found no transaction; leaving for AI enrichment.');
+      }
       return;
     }
 
@@ -359,6 +400,7 @@ export const processIncomingSms = async (body: string, date: number) => {
         result.transaction.date ?? new Date(date).toISOString(),
         accountId,
       )) {
+        console.log('[BackgroundSms] Dropped: semantic duplicate of a recent transaction.');
         await markSmsProcessed(hashed);
         return;
       }
@@ -378,18 +420,29 @@ export const processIncomingSms = async (body: string, date: number) => {
       await updateAccountLastScanned(accountId, nowStr);
 
       // Notify
+      console.log(`[BackgroundSms] Saved tx ${txData.amount} @ ${txData.merchant} — notifying.`);
       await NotificationService.notifyNewTransaction(
         txData.amount ?? 0,
         txData.merchant || 'Unknown Merchant',
         txData.category || undefined
       );
+      await markSmsProcessed(hashed);
+      return;
     }
 
-    await markSmsProcessed(hashed);
+    // Regex called it a transaction but produced no usable amount (or no account
+    // could be resolved). Retiring the hash here is the same trap as above: the
+    // SMS is real, we simply failed to read it, and marking it processed would
+    // hide it from the AI pass forever. Leave it queued unless the AI already had
+    // its say.
+    if (AIModelManager.isModelLoaded()) {
+      await markSmsProcessed(hashed);
+    } else {
+      console.log('[BackgroundSms] No amount parsed by regex; leaving for AI enrichment.');
+    }
   } catch (error) {
     console.error('[BackgroundSms] Failed to process incoming SMS:', error);
   } finally {
-    _realtimeRunning = false;
     // Free any model context we may have used, to keep the headless task's RAM low.
     // This path never acquires a hold (it is regex-only and merely borrows an
     // already-warm context), so releaseModel() is correct here — and it no-ops
