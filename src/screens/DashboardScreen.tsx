@@ -22,7 +22,6 @@ import {
   LucideRepeat,
   LucideBrain,
   LucideDownload,
-  LucideX,
   LucideRefreshCcw,
   LucideSparkles,
   LucideCreditCard,
@@ -30,6 +29,7 @@ import {
   LucideEye,
   LucideEyeOff,
   LucideChevronRight,
+  LucideLayoutGrid,
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { useStore } from "../store/useStore";
@@ -50,6 +50,22 @@ import {
 import { fonts, formatINR } from "../theme/tokens";
 import { SignalRow, IconTile, Card } from "../components/Kit";
 import { useAIInsights } from "../hooks/useAIInsights";
+import { WidgetId, visibleWidgetIds } from "../components/dashboard/registry";
+import {
+  getCycle,
+  getUpcomingBills,
+  getSafeToSpend,
+  getCardHealth,
+  UpcomingBill,
+  CardHealth,
+} from "../components/dashboard/derive";
+import {
+  SafeToSpendWidget,
+  UpcomingBillsWidget,
+  CreditCardsWidget,
+  InsightCarousel,
+} from "../components/dashboard/Widgets";
+import { EditDashboardSheet } from "../components/dashboard/EditDashboardSheet";
 
 import {
   getTransactions,
@@ -76,7 +92,7 @@ import {
   getPendingSplitMembers,
   PendingSplitMember,
   getActiveInsights,
-  dismissInsight,
+  getLastInsightGenerationDate,
   Insight,
   getLastScanTime,
 } from "../services/database";
@@ -146,6 +162,14 @@ const DashboardScreen = ({ navigation }: any) => {
   const [lastScanAt, setLastScanAt] = useState<string | null>(null);
   const [goals, setGoals] = useState<Goal[]>([]);
 
+  // ── Customizable dashboard ─────────────────────────────────────────────────
+  // Loans and subscriptions were already fetched for the commitments carousel;
+  // they are kept in state now because the bills and safe-to-spend widgets
+  // derive from them too.
+  const [loans, setLoans] = useState<Loan[]>([]);
+  const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
+  const [showEditDashboard, setShowEditDashboard] = useState(false);
+
   // ── Refs ─────────────────────────────────────────────────────────────────────
   const insightGenGuard = useRef(false);
   const celebratedGoals = useRef<Set<number>>(new Set());
@@ -196,6 +220,32 @@ const DashboardScreen = ({ navigation }: any) => {
     [preferences.hapticsEnabled],
   );
 
+  // ── Derived values for the day-to-day widgets ──────────────────────────────
+  // The user's payday cycle, not the calendar month — safe-to-spend and the
+  // "bills still due" window both have to agree on where the cycle ends.
+  const cycle = useMemo(
+    () => getCycle(preferences.salaryDay),
+    [preferences.salaryDay],
+  );
+
+  const upcomingBills = useMemo(
+    () => getUpcomingBills(subscriptions, loans, accounts, 30),
+    [subscriptions, loans, accounts],
+  );
+
+  const safeToSpendData = useMemo(
+    () => getSafeToSpend(preferences.monthlyBudget, monthlySpend, upcomingBills, cycle),
+    [preferences.monthlyBudget, monthlySpend, upcomingBills, cycle],
+  );
+
+  const cardHealth = useMemo(() => getCardHealth(accounts), [accounts]);
+
+  // The ordered, enabled widget ids the ScrollView actually walks.
+  const orderedWidgetIds = useMemo(
+    () => visibleWidgetIds(preferences.dashboardLayout),
+    [preferences.dashboardLayout],
+  );
+
   const formatAmount = useCallback(
     (val: number) => {
       if (preferences.hideAmounts) return "****";
@@ -230,6 +280,7 @@ const DashboardScreen = ({ navigation }: any) => {
       splits,
       activeInsights,
       scanTime,
+      lastInsightGen,
     ] = await Promise.all([
       getTransactions({ limit: 15, confirmedOnly: true }),
       getAccounts(),
@@ -245,6 +296,7 @@ const DashboardScreen = ({ navigation }: any) => {
       getPendingSplitMembers(),
       getActiveInsights(),
       getLastScanTime(),
+      getLastInsightGenerationDate(),
     ]);
     setTransactions(txs);
     setAccounts(accs);
@@ -258,6 +310,8 @@ const DashboardScreen = ({ navigation }: any) => {
     setInsights(activeInsights);
     setLastScanAt(scanTime);
     setGoals(gs);
+    setLoans(ls);
+    setSubscriptions(ss);
 
     const now = new Date();
     const tenDays = new Date(now.getTime() + 10 * 24 * 60 * 60 * 1000);
@@ -284,10 +338,13 @@ const DashboardScreen = ({ navigation }: any) => {
 
     setUpcoming(up);
 
-    // §3.6 Insight freshness: generate once per mount if stale
+    // §3.6 Insight freshness: generate once per mount if stale.
+    // Keyed on the last GENERATION date (dismissed rows included) rather than on
+    // the visible list — otherwise dismissing every card reads as "never
+    // generated" and immediately regenerates the same set.
     if (!insightGenGuard.current && txs.length > 0) {
       const todayStr = new Date().toISOString().split("T")[0];
-      const newestInsightDate = activeInsights[0]?.generatedAt?.split("T")[0];
+      const newestInsightDate = lastInsightGen?.split("T")[0];
       if (!newestInsightDate || newestInsightDate !== todayStr) {
         insightGenGuard.current = true;
         generateInsights()
@@ -443,12 +500,6 @@ const DashboardScreen = ({ navigation }: any) => {
         ? "transfer"
         : "debit";
 
-  // §3.6 Dismiss insight handler
-  const handleDismissInsight = useCallback(async (id: number) => {
-    await dismissInsight(id);
-    setInsights((prev) => prev.filter((i) => i.id !== id));
-  }, []);
-
   // ── Greeting ────────────────────────────────────────────────────────────────
   const greetingBase = useMemo(() => timeGreeting(), []);
   const firstName = useMemo(
@@ -473,112 +524,68 @@ const DashboardScreen = ({ navigation }: any) => {
 
   // ─── Main render ──────────────────────────────────────────────────────────
 
-  return (
-    <ThemedSafeAreaView>
-      <ScrollView
-        className="flex-1 px-6"
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={[colors.accent]}
-            tintColor={colors.accent}
-          />
-        }
-      >
-        {/* §3.1 Header — personal greeting */}
-        <View style={{ marginTop: 16, marginBottom: 20 }}>
-          {/* Top row: brand label + action icons (full width, no overflow) */}
-          <View
-            style={{
-              flexDirection: "row",
-              justifyContent: "space-between",
-              alignItems: "center",
-            }}
-          >
-            <SectionLabel>Echo Spend</SectionLabel>
-            <View style={{ flexDirection: "row", gap: 6 }}>
-              <TouchableOpacity
-                onPress={() => {
-                  triggerHaptic();
-                  setShowTour(true);
-                }}
-                style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: 18,
-                  alignItems: "center",
-                  justifyContent: "center",
-                  backgroundColor: colors.translucent,
-                }}
-              >
-                <LucideSparkles color={colors.ai} size={16} />
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => {
-                  triggerHaptic();
-                  navigation.navigate("Search");
-                }}
-                style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: 18,
-                  alignItems: "center",
-                  justifyContent: "center",
-                  backgroundColor: colors.translucent,
-                }}
-              >
-                <LucideSearch color={colors.secondary} size={17} />
-              </TouchableOpacity>
-            </View>
-          </View>
-          {/* Greeting + name below, spanning full width so long names never overflow */}
-          <MotiView
-            from={{ opacity: 0, translateY: -12 }}
-            animate={{ opacity: 1, translateY: 0 }}
-            transition={{ type: "timing", duration: 500 }}
-          >
-            {firstName ? (
-              <>
-                <ThemedText
-                  font="signal"
-                  type="secondary"
-                  style={{ fontSize: 13, marginTop: 10, letterSpacing: 0.3 }}
-                >
-                  {greetingBase}
-                </ThemedText>
-                <ThemedText
-                  font="display"
-                  style={{
-                    fontFamily: fonts.display,
-                    fontSize: 26,
-                    lineHeight: 32,
-                    marginTop: 2,
-                  }}
-                  numberOfLines={2}
-                >
-                  {firstName}
-                </ThemedText>
-              </>
-            ) : (
-              <ThemedText
-                font="display"
-                style={{
-                  fontFamily: fonts.display,
-                  fontSize: 24,
-                  lineHeight: 32,
-                  marginTop: 10,
-                }}
-                numberOfLines={2}
-              >
-                {greetingBase}
-              </ThemedText>
-            )}
-          </MotiView>
-        </View>
+  // ── Widget sections ───────────────────────────────────────────────────────
+  // Each entry is one dashboard widget. The screen never renders these in a
+  // fixed order — it walks the user's resolved layout and looks each id up
+  // here, so reordering and hiding are pure data changes.
+  const widgetSections: Partial<Record<WidgetId, React.ReactNode>> = {
+    // Safe to spend — budget minus spend minus bills still due this cycle,
+    // expressed as a daily allowance.
+    safeToSpend: (
+      <SafeToSpendWidget
+        data={safeToSpendData}
+        currency={currency}
+        masked={preferences.hideAmounts}
+        onSetBudget={() => {
+          triggerHaptic();
+          navigation.navigate("Budget");
+        }}
+      />
+    ),
 
-        {/* §3.2 Hero: Safe to Spend + daily pace line */}
+    // Upcoming bills — subscriptions, EMIs and card payments in the next 30d.
+    upcomingBills: (
+      <UpcomingBillsWidget
+        bills={upcomingBills}
+        currency={currency}
+        masked={preferences.hideAmounts}
+        onPressBill={(bill: UpcomingBill) => {
+          triggerHaptic();
+          if (bill.target === "card") {
+            navigation.navigate("BankAccountDetail", { accountId: bill.refId });
+          } else {
+            navigation.navigate("Finances", {
+              initialTab: bill.target,
+              highlightId: bill.refId,
+            });
+          }
+        }}
+        onSeeAll={() => {
+          triggerHaptic();
+          navigation.navigate("Finances", { initialTab: "subs" });
+        }}
+      />
+    ),
+
+    // Credit cards — utilization against limit, statement and payment dates.
+    creditCards: (
+      <CreditCardsWidget
+        cards={cardHealth}
+        currency={currency}
+        masked={preferences.hideAmounts}
+        onPressCard={(card: CardHealth) => {
+          triggerHaptic();
+          navigation.navigate("BankAccountDetail", { accountId: card.account.id });
+        }}
+        onAddCard={() => {
+          triggerHaptic();
+          navigation.navigate("AddAccount");
+        }}
+      />
+    ),
+
+    // §3.2 Hero: Safe to Spend + daily pace line
+    hero: (
         <MotiView
           from={{ opacity: 0, scale: 0.97 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -745,8 +752,9 @@ const DashboardScreen = ({ navigation }: any) => {
             </View>
           )}
         </MotiView>
-
-        {/* §3.10 Accounts — restyled on kit */}
+    ),
+    // §3.10 Accounts — restyled on kit
+    accounts: (
         <View style={{ marginBottom: 24 }}>
           <View
             style={{
@@ -881,9 +889,10 @@ const DashboardScreen = ({ navigation }: any) => {
             </TouchableOpacity>
           </ScrollView>
         </View>
-
-        {/* §3.4 Smart Inbox pulse chip — unchanged */}
-        {unconfirmedCount > 0 && (
+    ),
+    // §3.4 Smart Inbox pulse chip — unchanged
+    inboxPulse: (
+         unconfirmedCount > 0 && (
           <MotiView
             from={{ opacity: 0, translateY: 8 }}
             animate={{ opacity: 1, translateY: 0 }}
@@ -922,10 +931,11 @@ const DashboardScreen = ({ navigation }: any) => {
               </ThemedText>
             </TouchableOpacity>
           </MotiView>
-        )}
-
-        {/* §3.7 Budget watch mini */}
-        {budgetWatchFiltered.length > 0 && (
+        )
+    ),
+    // §3.7 Budget watch mini
+    budgetWatch: (
+         budgetWatchFiltered.length > 0 && (
           <View style={{ marginBottom: 24 }}>
             <View
               style={{
@@ -1020,10 +1030,11 @@ const DashboardScreen = ({ navigation }: any) => {
               );
             })}
           </View>
-        )}
-
-        {/* §3.8 Owed to you */}
-        {pendingSplits.length > 0 && owedTotal > 0 && (
+        )
+    ),
+    // §3.8 Owed to you
+    owed: (
+         pendingSplits.length > 0 && owedTotal > 0 && (
           <Card
             onPress={() => {
               triggerHaptic();
@@ -1058,10 +1069,11 @@ const DashboardScreen = ({ navigation }: any) => {
               </ThemedText>
             </View>
           </Card>
-        )}
-
-        {/* §3.11 Upcoming Section — restyled */}
-        {upcoming.length > 0 && (
+        )
+    ),
+    // §3.11 Upcoming Section — restyled
+    upcomingCarousel: (
+         upcoming.length > 0 && (
           <View style={{ marginBottom: 24 }}>
             <SectionLabel style={{ marginBottom: 14 }}>
               Upcoming commitments
@@ -1225,9 +1237,10 @@ const DashboardScreen = ({ navigation }: any) => {
               />
             )}
           </View>
-        )}
-
-        {/* §3.5 Pulse strip — 3 stat tiles */}
+        )
+    ),
+    // §3.5 Pulse strip — 3 stat tiles
+    pulseStrip: (
         <View style={{ flexDirection: "row", gap: 10, marginBottom: 24 }}>
           <Card style={{ flex: 1, padding: 12 }}>
             <SectionLabel>Today</SectionLabel>
@@ -1329,9 +1342,10 @@ const DashboardScreen = ({ navigation }: any) => {
             )}
           </Card>
         </View>
-
-        {/* §3.3 Cycle waveform — the signature moment */}
-        {trend14.length > 0 && (
+    ),
+    // §3.3 Cycle waveform — the signature moment
+    waveform: (
+         trend14.length > 0 && (
           <Pressable
             onPress={() => {
               triggerHaptic();
@@ -1377,63 +1391,12 @@ const DashboardScreen = ({ navigation }: any) => {
               )}
             </MotiView>
           </Pressable>
-        )}
-
-        {/* §3.6 Insight of the day */}
-        {insights.length > 0 &&
-          (() => {
-            const newest = insights[0];
-            return (
-              <MotiView
-                from={{ opacity: 0, translateY: 8 }}
-                animate={{ opacity: 1, translateY: 0 }}
-                style={{ marginBottom: 24 }}
-              >
-                <Card style={{ padding: 16 }}>
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "flex-start",
-                      gap: 12,
-                    }}
-                  >
-                    <IconTile emoji="💡" color={colors.ai} size={36} />
-                    <View style={{ flex: 1, minWidth: 0 }}>
-                      <ThemedText
-                        style={{ fontFamily: fonts.textSemibold, fontSize: 14 }}
-                        numberOfLines={1}
-                      >
-                        {newest.title}
-                      </ThemedText>
-                      <ThemedText
-                        type="secondary"
-                        style={{ fontSize: 12, marginTop: 4, lineHeight: 18 }}
-                        numberOfLines={2}
-                      >
-                        {newest.body}
-                      </ThemedText>
-                    </View>
-                    <TouchableOpacity
-                      onPress={() => handleDismissInsight(newest.id)}
-                      hitSlop={8}
-                      style={{
-                        width: 28,
-                        height: 28,
-                        borderRadius: 8,
-                        alignItems: "center",
-                        justifyContent: "center",
-                        backgroundColor: colors.translucent,
-                      }}
-                    >
-                      <LucideX color={colors.muted} size={14} />
-                    </TouchableOpacity>
-                  </View>
-                </Card>
-              </MotiView>
-            );
-          })()}
-
-        {/* §3.9 Activity feed — migrated to SignalRow */}
+        )
+    ),
+    // §3.6 Insights — swipeable deck (see InsightCarousel for why not dismissible)
+    insight: <InsightCarousel insights={insights} />,
+    // §3.9 Activity feed — migrated to SignalRow
+    activity: (
         <View style={{ marginBottom: 24 }}>
           {groupedTransactions.map((group) => (
             <View key={group.label}>
@@ -1515,6 +1478,134 @@ const DashboardScreen = ({ navigation }: any) => {
             </TouchableOpacity>
           )}
         </View>
+    ),
+  };
+
+  return (
+    <ThemedSafeAreaView>
+      <ScrollView
+        className="flex-1 px-6"
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[colors.accent]}
+            tintColor={colors.accent}
+          />
+        }
+      >
+        {/* §3.1 Header — personal greeting */}
+        <View style={{ marginTop: 16, marginBottom: 20 }}>
+          {/* Top row: brand label + action icons (full width, no overflow) */}
+          <View
+            style={{
+              flexDirection: "row",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <SectionLabel>Echo Spend</SectionLabel>
+            <View style={{ flexDirection: "row", gap: 6 }}>
+              <TouchableOpacity
+                onPress={() => {
+                  triggerHaptic();
+                  setShowTour(true);
+                }}
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 18,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: colors.translucent,
+                }}
+              >
+                <LucideSparkles color={colors.ai} size={16} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => {
+                  triggerHaptic();
+                  navigation.navigate("Search");
+                }}
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 18,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: colors.translucent,
+                }}
+              >
+                <LucideSearch color={colors.secondary} size={17} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => {
+                  triggerHaptic();
+                  setShowEditDashboard(true);
+                }}
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 18,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: colors.translucent,
+                }}
+              >
+                <LucideLayoutGrid color={colors.secondary} size={17} />
+              </TouchableOpacity>
+            </View>
+          </View>
+          {/* Greeting + name below, spanning full width so long names never overflow */}
+          <MotiView
+            from={{ opacity: 0, translateY: -12 }}
+            animate={{ opacity: 1, translateY: 0 }}
+            transition={{ type: "timing", duration: 500 }}
+          >
+            {firstName ? (
+              <>
+                <ThemedText
+                  font="signal"
+                  type="secondary"
+                  style={{ fontSize: 13, marginTop: 10, letterSpacing: 0.3 }}
+                >
+                  {greetingBase}
+                </ThemedText>
+                <ThemedText
+                  font="display"
+                  style={{
+                    fontFamily: fonts.display,
+                    fontSize: 26,
+                    lineHeight: 32,
+                    marginTop: 2,
+                  }}
+                  numberOfLines={2}
+                >
+                  {firstName}
+                </ThemedText>
+              </>
+            ) : (
+              <ThemedText
+                font="display"
+                style={{
+                  fontFamily: fonts.display,
+                  fontSize: 24,
+                  lineHeight: 32,
+                  marginTop: 10,
+                }}
+                numberOfLines={2}
+              >
+                {greetingBase}
+              </ThemedText>
+            )}
+          </MotiView>
+        </View>
+
+        {/* Widgets — order and visibility come from the user's saved layout. */}
+        {orderedWidgetIds.map((id) => (
+          <React.Fragment key={id}>{widgetSections[id]}</React.Fragment>
+        ))}
 
         {/* AI Setup Nudge Card */}
         {((!aiModelNudgeDismissed && aiModelStatus === "not_downloaded") ||
@@ -1825,6 +1916,12 @@ const DashboardScreen = ({ navigation }: any) => {
 
       {/* Tour Guide Modal */}
       <TourGuideModal visible={showTour} onClose={() => setShowTour(false)} />
+
+      {/* Edit dashboard — show/hide and reorder widgets */}
+      <EditDashboardSheet
+        visible={showEditDashboard}
+        onClose={() => setShowEditDashboard(false)}
+      />
     </ThemedSafeAreaView>
   );
 };

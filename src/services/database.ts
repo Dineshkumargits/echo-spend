@@ -2147,6 +2147,22 @@ export const getActiveInsights = async (): Promise<Insight[]> => {
   );
 };
 
+/**
+ * When insights were last generated, dismissed rows included.
+ *
+ * Deliberately NOT filtered by dismissedAt: the daily-freshness check must ask
+ * "did we already generate today?", not "are any still on screen?". Using
+ * getActiveInsights() for this meant dismissing every card made the dashboard
+ * think none had ever been generated, so it immediately regenerated the same
+ * set — the user's dismissals appeared to undo themselves on every revisit.
+ */
+export const getLastInsightGenerationDate = async (): Promise<string | null> => {
+  const row = await db.getFirstAsync<{ latest: string | null }>(
+    'SELECT MAX(generatedAt) as latest FROM insights'
+  );
+  return row?.latest ?? null;
+};
+
 export const saveInsight = async (insight: Omit<Insight, 'id'>) => {
   await db.runAsync(
     'INSERT INTO insights (type, title, body, generatedAt) VALUES (?, ?, ?, ?)',

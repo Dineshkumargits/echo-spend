@@ -26,6 +26,20 @@ interface UserPreferences {
   lastWeeklyDigestDate: string | null;
   budgetNotificationHistory: Record<number, number>; // itemId -> percentage
   lastBudgetCycleReset: string | null; // ISO date of billing-cycle start when history was last cleared
+  /**
+   * User's dashboard composition: which widgets are shown and in what order.
+   * Stored as a flat list so order is just array order. Never read this raw —
+   * pass it through resolveDashboardLayout() (see components/dashboard/registry),
+   * which reconciles it against the widget registry so widgets added in a later
+   * app version appear and removed ones disappear. Existing installs persisted
+   * `preferences` before this field existed, so it is legitimately undefined.
+   */
+  dashboardLayout?: DashboardLayoutEntry[];
+}
+
+export interface DashboardLayoutEntry {
+  id: string;
+  enabled: boolean;
 }
 
 type AiModelStatus = 'not_downloaded' | 'downloading' | 'downloaded' | 'loading' | 'ready' | 'error' | 'paused';
@@ -77,6 +91,9 @@ interface AppState {
   updateBudgetNotificationHistory: (itemId: number, percentage: number) => void;
   resetBudgetNotificationHistory: (cycleStartDate: string) => void;
   importPreferences: (prefs: Partial<UserPreferences>) => void;
+  setDashboardLayout: (layout: DashboardLayoutEntry[]) => void;
+  toggleDashboardWidget: (id: string) => void;
+  resetDashboardLayout: () => void;
   setSyncing: (isSyncing: boolean, text?: string) => void;
   setGoogleUser: (user: AppState['googleUser']) => void;
   updateLastSynced: () => void;
@@ -269,6 +286,28 @@ export const useStore = create<AppState>()(
             ...prefs,
           }
         })),
+
+      setDashboardLayout: (dashboardLayout) =>
+        set((s) => ({ preferences: { ...s.preferences, dashboardLayout } })),
+
+      // Toggling a widget the stored layout doesn't list yet (one added in a
+      // newer app version) must still work, so fall back to appending it.
+      toggleDashboardWidget: (id) =>
+        set((s) => {
+          // Array.isArray, not `?? []` — a restored backup can hand us a
+          // malformed value, and .some() on a non-array throws.
+          const stored = s.preferences.dashboardLayout;
+          const current = Array.isArray(stored) ? stored : [];
+          const next = current.some((w) => w.id === id)
+            ? current.map((w) => (w.id === id ? { ...w, enabled: !w.enabled } : w))
+            : [...current, { id, enabled: true }];
+          return { preferences: { ...s.preferences, dashboardLayout: next } };
+        }),
+
+      // Clearing the field (rather than writing defaults) lets resolveDashboardLayout
+      // rebuild from the registry, so "reset" always means today's defaults.
+      resetDashboardLayout: () =>
+        set((s) => ({ preferences: { ...s.preferences, dashboardLayout: undefined } })),
 
       setSyncing: (isSyncing, syncProgressText = '') =>
         set({ isSyncing, syncProgressText }),
