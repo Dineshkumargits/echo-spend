@@ -42,14 +42,14 @@ import {
 import { fonts } from "../theme/tokens";
 import {
   getSpendTrend,
-  getCategoryBreakdown,
+  getCategoryBreakdownForRange,
   getSpendingByTag,
   getMonthlyTotals,
   getCategories,
   getBudgetUtilization,
   getHighSpendTransactions,
   getWeekdaySpending,
-  getTopMerchants,
+  getTopMerchantsForRange,
   getTransactions,
   dismissInsight,
   SpendTrendPoint,
@@ -129,10 +129,19 @@ const AnalyticsScreen = () => {
         .toISOString()
         .slice(0, 10) + " 00:00:00";
     const dEnd = new Date().toISOString().slice(0, 10) + " 23:59:59";
+    // "Where it went" and "Top merchants" follow the 7/30/90 selector like every
+    // other section on this screen. They used to be pinned to the calendar month,
+    // so changing the range left them unchanged — and their month key was derived
+    // in UTC while the rows were filtered in local time.
+    const rangeEnd = new Date();
+    const rangeStart = new Date();
+    rangeStart.setDate(rangeStart.getDate() - (trendDays - 1));
+    rangeStart.setHours(0, 0, 0, 0);
+
     const [t, r30, b, m, i, cats, tb, bu, hs, wd, tm] = await Promise.all([
       getSpendTrend(trendDays),
       getSpendTrend(30),
-      getCategoryBreakdown(),
+      getCategoryBreakdownForRange(rangeStart, rangeEnd),
       getMonthlyTotals(),
       getInsights(),
       getCategories(),
@@ -140,7 +149,7 @@ const AnalyticsScreen = () => {
       getBudgetUtilization(cycleAnchorFrom(preferences)),
       getHighSpendTransactions(),
       getWeekdaySpending(84),
-      getTopMerchants(undefined, 6),
+      getTopMerchantsForRange(rangeStart, rangeEnd, 6),
     ]);
     setTrend(t);
     setRhythm(r30);
@@ -186,18 +195,29 @@ const AnalyticsScreen = () => {
 
   // Drill-downs into the (sibling tab) Transactions timeline. Category cards are
   // parent groups, so drill parent-inclusive (parent + its subcategories).
-  // Both the breakdown and top-merchants data here are scoped to the current
-  // calendar month, so carry that window along — otherwise the filtered list
-  // silently shows all-time totals instead of matching what was tapped.
+  // The exact selected window is carried across — a "month" preset would have
+  // shown a different set of transactions than the card the user tapped.
+  const rangeParams = () => {
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const start = new Date();
+    start.setDate(start.getDate() - (trendDays - 1));
+    return {
+      presetDatePreset: "custom" as const,
+      presetCustomStart: fmt(start),
+      presetCustomEnd: fmt(new Date()),
+    };
+  };
+
   const drillCategory = (name: string) =>
     navigation.navigate("Txns", {
       presetCategoryGroup: name,
-      presetDatePreset: "month",
+      ...rangeParams(),
     });
   const drillMerchant = (name: string) =>
     navigation.navigate("Txns", {
       presetSearch: name,
-      presetDatePreset: "month",
+      ...rangeParams(),
     });
 
   // Tap a calendar day → fetch that day's spending to preview inline.
@@ -611,12 +631,12 @@ const AnalyticsScreen = () => {
             className="text-lg mb-3"
             style={{ fontFamily: fonts.displayBold }}
           >
-            Where it went
+            Where it went · {trendDays}d
           </ThemedText>
           {breakdown.length === 0 ? (
             <View className="py-10 items-center">
               <ThemedText type="secondary">
-                No confirmed transactions this month.
+                No confirmed spending in the last {trendDays} days.
               </ThemedText>
             </View>
           ) : (
@@ -630,7 +650,7 @@ const AnalyticsScreen = () => {
                   segments={donutSegments}
                   selectedLabel={selectedCat}
                   onSelect={setSelectedCat}
-                  centerTitle={selectedSeg ? selectedSeg.label : "This month"}
+                  centerTitle={selectedSeg ? selectedSeg.label : `Last ${trendDays}d`}
                   centerValue={fmtShort(
                     selectedSeg ? selectedSeg.value : monthTotalSpend,
                   )}
@@ -682,7 +702,7 @@ const AnalyticsScreen = () => {
                 // Group breakdown by parent category
                 const parentGroups = new Map<
                   string,
-                  { total: number; count: number; subs: any[] }
+                  { total: number; count: number; subs: any[]; direct: number }
                 >();
 
                 breakdown.forEach((item) => {
@@ -698,11 +718,17 @@ const AnalyticsScreen = () => {
                     total: 0,
                     count: 0,
                     subs: [],
+                    direct: 0,
                   };
                   existing.total += item.total;
                   existing.count += item.count;
                   if (parent) {
                     existing.subs.push(item);
+                  } else {
+                    // Spend booked straight to the parent. Tracked separately so
+                    // the sub-rows below add up to the card total — otherwise a
+                    // group showing ₹1,500 could itemise only ₹500.
+                    existing.direct += item.total;
                   }
                   parentGroups.set(parentName, existing);
                 });
@@ -717,9 +743,11 @@ const AnalyticsScreen = () => {
                     return selectedCat === name;
                   })
                   .map(([parentName, data], index) => {
-                    const parentDef = categories.find(
-                      (c) => c.name === parentName,
-                    );
+                    // Prefer the top-level definition — the same lookup the donut
+                    // uses — so a slice and its card never disagree on colour.
+                    const parentDef =
+                      categories.find((c) => c.name === parentName && !c.parentId) ??
+                      categories.find((c) => c.name === parentName);
                     const catIcon = parentDef?.icon || "HelpCircle";
                     const catColor = parentDef?.color || colors.secondary;
                     // A budget covers this card if it targets the parent OR any
@@ -783,7 +811,7 @@ const AnalyticsScreen = () => {
                                   }}
                                 >
                                   {budgetRow.percentage}% of{" "}
-                                  {fmtShort(budgetRow.effectiveLimit)} budget
+                                  {fmtShort(budgetRow.effectiveLimit)} · cycle
                                 </ThemedText>
                               )}
                             </View>
@@ -813,24 +841,57 @@ const AnalyticsScreen = () => {
                           </View>
                         </TouchableOpacity>
 
+                        {/* When a budget covers this group the bar tracks BUDGET
+                            usage in the budget's colour — it sits right under the
+                            "% of budget" line and was previously showing share of
+                            total spend in the category colour, so an over-budget
+                            group could still render a calm, short bar. */}
                         <View
-                          className="h-1.5 rounded-full overflow-hidden mb-3"
+                          className="h-1.5 rounded-full overflow-hidden mb-1"
                           style={{ backgroundColor: colors.surfaceElevated }}
                         >
                           <View
                             className="h-full"
                             style={{
-                              backgroundColor: catColor,
-                              width: `${totalPct}%`,
+                              backgroundColor: budgetRow ? budgetColor : catColor,
+                              width: `${Math.min(
+                                budgetRow ? budgetRow.percentage : totalPct,
+                                100,
+                              )}%`,
                             }}
                           />
                         </View>
+                        <ThemedText
+                          type="secondary"
+                          style={{ fontSize: 9, marginBottom: 8 }}
+                        >
+                          {budgetRow
+                            ? "budget used · this cycle"
+                            : `${totalPct}% of spend in this range`}
+                        </ThemedText>
 
-                        {data.subs.length > 0 && (
+                        {(data.subs.length > 0 || data.direct > 0) && (
                           <View
                             className="border-t pt-2"
                             style={{ borderTopColor: colors.border }}
                           >
+                            {data.direct > 0 && data.subs.length > 0 && (
+                              <View className="flex-row justify-between items-center py-1.5">
+                                <ThemedText type="secondary" className="text-xs">
+                                  • {parentName} (direct)
+                                </ThemedText>
+                                <ThemedText
+                                  font="signal"
+                                  style={{
+                                    fontSize: 11,
+                                    color: colors.secondary,
+                                    fontVariant: ["tabular-nums"],
+                                  }}
+                                >
+                                  {fmt(data.direct)}
+                                </ThemedText>
+                              </View>
+                            )}
                             {data.subs
                               .sort((a, b) => b.total - a.total)
                               .map((sub) => (
@@ -894,7 +955,7 @@ const AnalyticsScreen = () => {
               className="text-lg mb-3"
               style={{ fontFamily: fonts.displayBold }}
             >
-              Top merchants · this month
+              Top merchants · {trendDays}d
             </ThemedText>
             <PremiumGate
               premium={isPremium}

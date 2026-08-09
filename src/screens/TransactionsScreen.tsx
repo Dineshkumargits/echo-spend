@@ -214,6 +214,10 @@ const TransactionsScreen = () => {
   // Date window to pair with a preset (e.g. Analytics drill-downs are scoped
   // to "this month" data, so the filter should land on the same window).
   const presetDatePreset: DatePreset | undefined = route.params?.presetDatePreset;
+  // Explicit window for a 'custom' preset. Analytics drill-downs pass the exact
+  // range the user had selected, so the filtered list matches the card tapped.
+  const presetCustomStart: string | undefined = route.params?.presetCustomStart;
+  const presetCustomEnd: string | undefined = route.params?.presetCustomEnd;
 
   // ── State ────────────────────────────────────────────────────────────────
   const [search, setSearch] = useState(presetSearch ?? "");
@@ -226,6 +230,8 @@ const TransactionsScreen = () => {
       ? { categoryGroups: presetCategoryGroups }
       : null),
     ...(presetDatePreset ? { datePreset: presetDatePreset } : null),
+    ...(presetCustomStart ? { customStart: presetCustomStart } : null),
+    ...(presetCustomEnd ? { customEnd: presetCustomEnd } : null),
   }));
   const [showFilters, setShowFilters] = useState(false);
   // One sheet-local search that narrows the account / category / tag pill
@@ -276,7 +282,14 @@ const TransactionsScreen = () => {
       setFilters((f) => ({ ...f, categoryGroups: presetCategoryGroups, categoryNames: [] }));
     }
     if (presetDatePreset) {
-      setFilters((f) => ({ ...f, datePreset: presetDatePreset }));
+      setFilters((f) => ({
+        ...f,
+        datePreset: presetDatePreset,
+        // Apply the window with the preset, or a 'custom' preset would fall back
+        // to whatever range the sheet happened to be holding.
+        ...(presetCustomStart ? { customStart: presetCustomStart } : null),
+        ...(presetCustomEnd ? { customEnd: presetCustomEnd } : null),
+      }));
     }
     if (presetSearch !== undefined) {
       setSearch(presetSearch);
@@ -287,6 +300,8 @@ const TransactionsScreen = () => {
       presetCategoryGroup: undefined,
       presetCategoryGroups: undefined,
       presetDatePreset: undefined,
+      presetCustomStart: undefined,
+      presetCustomEnd: undefined,
       presetSearch: undefined,
     });
   }, [
@@ -295,6 +310,8 @@ const TransactionsScreen = () => {
     presetCategoryGroup,
     presetCategoryGroups,
     presetDatePreset,
+    presetCustomStart,
+    presetCustomEnd,
     presetSearch,
     navigation,
   ]);

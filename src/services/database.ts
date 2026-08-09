@@ -708,6 +708,47 @@ const runMigrations = async () => {
 
     await db.execAsync('PRAGMA user_version = 9');
   }
+
+  if (dbVersion < 10) {
+    // Transactions reference categories by NAME, so two categories sharing a name
+    // under different parents are indistinguishable: analytics collapsed them and
+    // attributed all the spend to whichever parent was found first (Shopping >
+    // Groceries silently counted under Food & Dining, Housing > Maintenance under
+    // Transport).
+    //
+    // The lowest-id duplicate KEEPS its name, so existing transactions keep
+    // resolving exactly where they resolve today — this renames only the ones that
+    // were already unreachable. Suffixed with the parent so it stays recognizable
+    // and the user can rename it to taste.
+    try {
+      const dupes = await db.getAllAsync<{ name: string }>(
+        `SELECT name FROM categories GROUP BY name HAVING COUNT(*) > 1`
+      );
+      for (const { name } of dupes) {
+        const rows = await db.getAllAsync<{ id: number; parentId: number | null }>(
+          'SELECT id, parentId FROM categories WHERE name = ? ORDER BY id ASC', name
+        );
+        // Skip the first (the one transactions currently resolve to).
+        for (const row of rows.slice(1)) {
+          const parent = row.parentId
+            ? await db.getFirstAsync<{ name: string }>(
+                'SELECT name FROM categories WHERE id = ?', row.parentId
+              )
+            : null;
+          const newName = parent ? `${name} (${parent.name})` : `${name} (2)`;
+          const clash = await db.getFirstAsync<{ id: number }>(
+            'SELECT id FROM categories WHERE name = ?', newName
+          );
+          if (clash) continue;
+          await db.runAsync('UPDATE categories SET name = ? WHERE id = ?', newName, row.id);
+          console.log(`[Database] Disambiguated duplicate category "${name}" → "${newName}"`);
+        }
+      }
+    } catch (e) {
+      console.warn('[Database] Migration to v10 warning:', e);
+    }
+    await db.execAsync('PRAGMA user_version = 10');
+  }
 };
 
 // ─── Default-category tombstones ─────────────────────────────────────────────
@@ -1391,10 +1432,59 @@ export const getSpendTrend = async (days = 7): Promise<SpendTrendPoint[]> => {
   return result;
 };
 
+/** 'YYYY-MM' for the current LOCAL month. */
+const localMonthKey = (d = new Date()): string =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+
+/**
+ * Category spend over an explicit window.
+ *
+ * The month-string variants below exist for callers that genuinely mean "this
+ * calendar month". Anything driven by a range selector should use this instead,
+ * so what is charted matches what the user asked for.
+ */
+export const getCategoryBreakdownForRange = async (
+  start: Date,
+  end: Date,
+): Promise<CategoryBreakdown[]> => {
+  const rows = await db.getAllAsync<{ category: string; total: number; count: number }>(
+    `SELECT t.category, SUM(${EFFECTIVE_DEBIT_AMOUNT}) as total, COUNT(*) as count
+     FROM transactions t
+     WHERE t.type = 'debit' AND t.isConfirmed = 1
+       AND (t.isTransfer = 0 OR t.isTransfer IS NULL)
+       AND t.date >= ? AND t.date < ?
+     GROUP BY t.category
+     ORDER BY total DESC`,
+    start.toISOString(), end.toISOString(),
+  );
+  const grandTotal = rows.reduce((s, r) => s + r.total, 0) || 1;
+  return rows.map(r => ({ ...r, percentage: Math.round((r.total / grandTotal) * 100) }));
+};
+
+/** Top merchants over an explicit window. */
+export const getTopMerchantsForRange = async (
+  start: Date,
+  end: Date,
+  limit = 6,
+): Promise<{ merchant: string; total: number; count: number }[]> =>
+  await db.getAllAsync<{ merchant: string; total: number; count: number }>(
+    `SELECT t.merchant, SUM(${EFFECTIVE_DEBIT_AMOUNT}) as total, COUNT(*) as count
+     FROM transactions t
+     WHERE t.type = 'debit' AND t.isConfirmed = 1
+       AND (t.isTransfer = 0 OR t.isTransfer IS NULL)
+       AND t.merchant IS NOT NULL AND t.merchant != ''
+       AND t.date >= ? AND t.date < ?
+     GROUP BY t.merchant ORDER BY total DESC LIMIT ?`,
+    start.toISOString(), end.toISOString(), limit,
+  );
+
 export const getCategoryBreakdown = async (
   month?: string // 'YYYY-MM', defaults to current month
 ): Promise<CategoryBreakdown[]> => {
-  const target = month ?? new Date().toISOString().slice(0, 7);
+  // Local month. toISOString() is UTC, so in any zone ahead of UTC (IST included)
+  // the first hours of a month resolved to the PREVIOUS month while the WHERE
+  // clause below filtered by localtime — an empty or stale breakdown until ~05:30.
+  const target = month ?? localMonthKey();
   const rows = await db.getAllAsync<{ category: string; total: number; count: number }>(
     `SELECT t.category, SUM(${EFFECTIVE_DEBIT_AMOUNT}) as total, COUNT(*) as count
      FROM transactions t
@@ -1611,7 +1701,7 @@ export const getTopMerchants = async (
   month?: string,
   limit = 6,
 ): Promise<{ merchant: string; total: number; count: number }[]> => {
-  const target = month ?? new Date().toISOString().slice(0, 7);
+  const target = month ?? localMonthKey();
   return await db.getAllAsync<{ merchant: string; total: number; count: number }>(
     `SELECT t.merchant, SUM(${EFFECTIVE_DEBIT_AMOUNT}) as total, COUNT(*) as count
      FROM transactions t
