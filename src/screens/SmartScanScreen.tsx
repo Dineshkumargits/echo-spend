@@ -37,7 +37,7 @@ import {
   getCategories,
   getTopMerchantMappings,
   markSmsProcessed,
-  getAllSmsHashes,
+  getProcessedHashesFor,
   getSubscriptions,
   getGoals,
   getLoans,
@@ -248,10 +248,9 @@ const SmartScanScreen = ({ navigation }: any) => {
         setOldPendingCount(existingUnconfirmed.length);
         const existingIds = new Set(existingUnconfirmed.map((t) => t.id));
 
-        const [merchantHints, savedHashes, subs, goals, loans, budgets] =
+        const [merchantHints, subs, goals, loans, budgets] =
           await Promise.all([
             getTopMerchantMappings(20),
-            getAllSmsHashes(),
             getSubscriptions(true),
             getGoals(true),
             getLoans(true),
@@ -407,14 +406,19 @@ const SmartScanScreen = ({ navigation }: any) => {
         // require at least one financial keyword so we don't send unrelated SMS to AI.
         // Due reminders, promos, and balance alerts are intentionally kept here —
         // the AI's isTransaction gate handles them in the parse loop below.
-        const keywordFiltered = smsInbox.filter((sms) => {
+        // Cheap sync filters first, so the hash lookup only covers SMS that
+        // survived them — this used to load every hash ever recorded.
+        const preFiltered = smsInbox.filter((sms) => {
           const lower = sms.body.toLowerCase();
           if (OTP_KEYWORDS.some((k: string) => lower.includes(k))) return false;
-          if (!BANK_KEYWORDS.some((k: string) => lower.includes(k)))
-            return false;
-          if (savedHashes.has(hashSms(sms.body))) return false;
-          return true;
+          return BANK_KEYWORDS.some((k: string) => lower.includes(k));
         });
+        const savedHashes = await getProcessedHashesFor(
+          preFiltered.map((sms) => hashSms(sms.body)),
+        );
+        const keywordFiltered = preFiltered.filter(
+          (sms) => !savedHashes.has(hashSms(sms.body)),
+        );
         setSkippedCount(smsInbox.length - keywordFiltered.length);
 
         // Step 2 — match each SMS to a registered account (best-effort; unmatched

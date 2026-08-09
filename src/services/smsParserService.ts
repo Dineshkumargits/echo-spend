@@ -20,38 +20,10 @@ import { extractJSONObject } from '../utils/extractJSON';
 import { notify } from '../utils/notify';
 import { AIModelManager } from './aiModelManager';
 
-/**
- * Normalize an SMS body for deduplication.
- * Strips leading/trailing whitespace, collapses internal whitespace runs to
- * a single space, and lowercases. This ensures that trivially different
- * versions of the same bank SMS (extra newline, trailing space, unicode
- * non-breaking space) hash to the same value.
- */
-export function normalizeSmsBody(str: string): string {
-  return str.replace(/\s+/g, ' ').trim().toLowerCase();
-}
+// Re-exported so existing importers keep working unchanged.
+import { normalizeSmsBody, hashSms } from './smsHash';
+export { normalizeSmsBody, hashSms };
 
-/**
- * FNV-1a 64-bit hash (emulated with two 32-bit halves) for SMS deduplication.
- * Input is normalized before hashing to prevent trivial whitespace differences
- * from producing different hashes.
- */
-export function hashSms(str: string): string {
-  const normalized = normalizeSmsBody(str);
-  const FNV_PRIME = 0x01000193;
-  let hHi = 0x811c9dc5 ^ 0xdeadbeef;
-  let hLo = 0x811c9dc5;
-
-  for (let i = 0; i < normalized.length; i++) {
-    const c = normalized.charCodeAt(i);
-    hLo ^= c;
-    hLo = Math.imul(hLo, FNV_PRIME) >>> 0;
-    hHi ^= (c << 4) ^ (c >> 4);
-    hHi = Math.imul(hHi, FNV_PRIME) >>> 0;
-  }
-
-  return hLo.toString(16).padStart(8, '0') + hHi.toString(16).padStart(8, '0');
-}
 
 /** Normalize a merchant name */
 function normalizeMerchant(raw: string): string {

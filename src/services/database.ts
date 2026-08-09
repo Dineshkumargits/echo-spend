@@ -1,4 +1,5 @@
 import * as SQLite from 'expo-sqlite';
+import { hashSms } from './smsHash';
 import { resolveCycle, cycleAnchorFrom, CycleAnchor, CycleWindow } from './salaryCycle';
 
 export interface Category {
@@ -36,6 +37,8 @@ export interface Transaction {
    * enrichment pass (see enrichPendingSmsWithAI) while still unconfirmed.
    */
   aiEnriched?: boolean;
+  /** Indexed hash of rawSms — see isRawSmsAlreadyExists. Set automatically. */
+  rawSmsHash?: string | null;
   isTransfer?: boolean;
   tags?: string[];
   balanceAfter?: number;
@@ -469,7 +472,6 @@ const runMigrations = async () => {
   await db.execAsync('CREATE INDEX IF NOT EXISTS idx_subscriptions_next ON subscriptions(nextDueDate);');
   await db.execAsync('CREATE INDEX IF NOT EXISTS idx_goals_category ON goals(category);');
   await db.execAsync('CREATE INDEX IF NOT EXISTS idx_transactions_dedup ON transactions(amount, type, accountId, date);');
-  await db.execAsync('CREATE INDEX IF NOT EXISTS idx_transactions_rawsms ON transactions(rawSms);');
 
   // Legacy migrations (catch failures if columns already exist)
   const migrations = [
@@ -644,6 +646,67 @@ const runMigrations = async () => {
       console.warn('[Database] Migration to v8 warning:', e);
     }
     await db.execAsync('PRAGMA user_version = 8');
+  }
+
+  if (dbVersion < 9) {
+    // ── Query performance ──────────────────────────────────────────────────
+    // EFFECTIVE_DEBIT_AMOUNT is a correlated subquery over splits/split_members
+    // embedded in 11 aggregate queries. Without these two indexes SQLite
+    // rescanned both tables for EVERY transaction row — measured at ~682ms for a
+    // single dashboard+budgets load over 8k transactions, vs ~19ms with them.
+    try {
+      await db.execAsync(
+        'CREATE INDEX IF NOT EXISTS idx_splits_transaction ON splits(transactionId)'
+      );
+      await db.execAsync(
+        'CREATE INDEX IF NOT EXISTS idx_split_members_split ON split_members(splitId)'
+      );
+      // 21 queries filter on accountId. idx_transactions_dedup could not serve
+      // them: `amount` is its leading column, so those lookups fell back to a scan.
+      await db.execAsync(
+        'CREATE INDEX IF NOT EXISTS idx_transactions_account ON transactions(accountId)'
+      );
+      await db.execAsync(
+        'CREATE INDEX IF NOT EXISTS idx_transactions_to_account ON transactions(toAccountId)'
+      );
+      // Statement lookups and the salary-cycle resolver.
+      await db.execAsync(
+        'CREATE INDEX IF NOT EXISTS idx_sms_hashes_processed ON sms_hashes(processedAt)'
+      );
+    } catch (e) {
+      console.warn('[Database] Migration to v9 index warning:', e);
+    }
+
+    // ── Storage ────────────────────────────────────────────────────────────
+    // idx_transactions_rawsms indexed the FULL SMS body to serve one exact-match
+    // query, duplicating every message into the index B-tree. A short hash gives
+    // the same lookup for a fraction of the space.
+    try {
+      await db.execAsync('DROP INDEX IF EXISTS idx_transactions_rawsms');
+      await db.execAsync('ALTER TABLE transactions ADD COLUMN rawSmsHash TEXT');
+      await db.execAsync(
+        'CREATE INDEX IF NOT EXISTS idx_transactions_rawsms_hash ON transactions(rawSmsHash)'
+      );
+    } catch (e) {
+      console.warn('[Database] Migration to v9 rawSmsHash warning:', e);
+    }
+
+    // Backfill existing rows so the hashed lookup is correct from day one.
+    try {
+      const rows = await db.getAllAsync<{ id: number; rawSms: string }>(
+        "SELECT id, rawSms FROM transactions WHERE rawSms IS NOT NULL AND rawSms != '' AND rawSmsHash IS NULL"
+      );
+      for (const r of rows) {
+        await db.runAsync(
+          'UPDATE transactions SET rawSmsHash = ? WHERE id = ?', hashSms(r.rawSms), r.id
+        );
+      }
+      if (rows.length > 0) console.log(`[Database] Backfilled ${rows.length} rawSmsHash values.`);
+    } catch (e) {
+      console.warn('[Database] Migration to v9 backfill warning:', e);
+    }
+
+    await db.execAsync('PRAGMA user_version = 9');
   }
 };
 
@@ -961,8 +1024,8 @@ export const getTransactions = async (opts?: {
 export const addTransaction = async (transaction: Omit<Transaction, 'id'>) => {
   const result = await db.runAsync(
     `INSERT INTO transactions
-      (amount, category, merchant, type, date, accountId, toAccountId, isConfirmed, rawSms, isRecurring, recurrenceRule, notes, subscriptionId, goalId, loanId, confidence, source, isTransfer, tags, balanceAfter, splitMemberId, aiEnriched)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (amount, category, merchant, type, date, accountId, toAccountId, isConfirmed, rawSms, isRecurring, recurrenceRule, notes, subscriptionId, goalId, loanId, confidence, source, isTransfer, tags, balanceAfter, splitMemberId, aiEnriched, rawSmsHash)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     transaction.amount,
     transaction.category,
     transaction.merchant,
@@ -985,6 +1048,7 @@ export const addTransaction = async (transaction: Omit<Transaction, 'id'>) => {
     transaction.balanceAfter ?? null,
     (transaction as any).splitMemberId ?? null,
     transaction.aiEnriched ? 1 : 0,
+    transaction.rawSms ? hashSms(transaction.rawSms) : null,
   );
 
   const insertId = result.lastInsertRowId;
@@ -2281,15 +2345,18 @@ export const addSalaryDate = async (
     `INSERT OR REPLACE INTO salary_dates (occurredAt, source, createdAt) VALUES (?, ?, ?)`,
     occurredAt, source, new Date().toISOString(),
   );
+  invalidateCycleCache();
 };
 
 /** Move an existing record — the "salary actually came on the 30th, not the 31st" fix. */
 export const updateSalaryDate = async (id: number, occurredAt: string): Promise<void> => {
   await db.runAsync('UPDATE salary_dates SET occurredAt = ? WHERE id = ?', occurredAt, id);
+  invalidateCycleCache();
 };
 
 export const deleteSalaryDate = async (id: number): Promise<void> => {
   await db.runAsync('DELETE FROM salary_dates WHERE id = ?', id);
+  invalidateCycleCache();
 };
 
 /**
@@ -2322,17 +2389,41 @@ export const clearPendingSalaryDate = async (): Promise<void> => {
  * Async because the boundaries now live in the database. Callers that already
  * hold the recorded list should use resolveCycle directly to avoid re-querying.
  */
+/**
+ * Short-lived memo for the resolved cycle.
+ *
+ * getSalaryCycleWindowAsync re-read salary_dates on every call, and a single
+ * dashboard load calls it four times (getCurrentMonthSpend, twice inside
+ * getBudgetUtilization, and once directly) for identical data. A 5s TTL collapses
+ * those into one query while staying far too short to serve stale boundaries
+ * after the user edits their salary date.
+ */
+let _cycleCache: { key: string; at: number; window: CycleWindow } | null = null;
+const CYCLE_CACHE_MS = 5000;
+
+/** Called whenever recorded salary dates change, so the next read is fresh. */
+export const invalidateCycleCache = () => { _cycleCache = null; };
+
 export const getSalaryCycleWindowAsync = async (
   anchorLike: CycleAnchor | number,
   shift = 0,
 ): Promise<CycleWindow> => {
+  const anchor = toAnchor(anchorLike);
+  const key = `${anchor.day}|${anchor.time}|${shift}`;
+  const now = Date.now();
+  if (_cycleCache && _cycleCache.key === key && now - _cycleCache.at < CYCLE_CACHE_MS) {
+    return _cycleCache.window;
+  }
+
   const recorded = await getSalaryDates();
-  return resolveCycle(
+  const window = resolveCycle(
     recorded.map((r) => r.occurredAt),
-    toAnchor(anchorLike),
+    anchor,
     new Date(),
     shift,
   );
+  _cycleCache = { key, at: now, window };
+  return window;
 };
 
 const toAnchor = (anchorLike: CycleAnchor | number | undefined): CycleAnchor =>
@@ -2560,14 +2651,19 @@ export const getSuggestedBudgetAmount = async (
   if (selections.length === 0) return null;
   const categories = await getCategories();
   const names = coveredCategoryNames(selections, categories);
-  const sums: number[] = [];
-  for (const shift of [-1, -2, -3]) {
-    const win = period === 'weekly'
-      ? getWeekWindow(shift)
-      : await getSalaryCycleWindowAsync(anchorLike, shift);
-    const map = await getSpendByCategory(win.start, win.end);
-    sums.push(sumCovered(names, map));
-  }
+  // Three independent windows — resolve and query them in parallel rather than
+  // six sequential round-trips.
+  const windows = await Promise.all(
+    [-1, -2, -3].map((shift) =>
+      period === 'weekly'
+        ? Promise.resolve(getWeekWindow(shift))
+        : getSalaryCycleWindowAsync(anchorLike, shift),
+    ),
+  );
+  const maps = await Promise.all(
+    windows.map((win) => getSpendByCategory(win.start, win.end)),
+  );
+  const sums = maps.map((map) => sumCovered(names, map));
   const active = sums.filter((s) => s > 0);
   if (active.length === 0) return null;
   return Math.round(active.reduce((a, v) => a + v, 0) / active.length);
@@ -2712,6 +2808,66 @@ export const markSmsBatchProcessed = async (hashes: string[]) => {
   }
 };
 
+/**
+ * Only the hashes among `candidates` that have already been processed.
+ *
+ * Replaces loading the entire sms_hashes table into memory: that grew without
+ * bound (one row per SMS ever seen) and was re-read on every scan. Chunked
+ * because SQLite caps host parameters per statement.
+ */
+export const getProcessedHashesFor = async (candidates: string[]): Promise<Set<string>> => {
+  const found = new Set<string>();
+  if (candidates.length === 0) return found;
+
+  const CHUNK = 400;
+  for (let i = 0; i < candidates.length; i += CHUNK) {
+    const chunk = candidates.slice(i, i + CHUNK);
+    const rows = await db.getAllAsync<{ hash: string }>(
+      `SELECT hash FROM sms_hashes WHERE hash IN (${chunk.map(() => '?').join(',')})`,
+      ...chunk,
+    );
+    for (const r of rows) found.add(r.hash);
+  }
+  return found;
+};
+
+/**
+ * Drop SMS hashes older than `days`.
+ *
+ * Safe because scans never re-read that far back — account scan ranges are
+ * bounded by lastScannedDate — and anything that did become a transaction is
+ * still caught by the rawSmsHash dedup. Without this the table grows forever.
+ */
+/**
+ * Drop stored SMS bodies once they can no longer be useful.
+ *
+ * rawSms exists so the deferred AI pass can re-parse a regex-only transaction,
+ * and so the user can audit what a row came from. Once a transaction is both
+ * confirmed and AI-enriched neither applies, and the text is dead weight — it is
+ * the largest per-row column in the database. The indexed rawSmsHash is kept, so
+ * duplicate detection still works after the body is gone.
+ */
+export const pruneStoredSmsBodies = async (olderThanDays = 60): Promise<number> => {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - olderThanDays);
+  const res = await db.runAsync(
+    `UPDATE transactions SET rawSms = NULL
+      WHERE rawSms IS NOT NULL
+        AND isConfirmed = 1
+        AND aiEnriched = 1
+        AND date < ?`,
+    cutoff.toISOString(),
+  );
+  return res.changes ?? 0;
+};
+
+export const pruneOldSmsHashes = async (days = 90): Promise<void> => {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days);
+  await db.runAsync('DELETE FROM sms_hashes WHERE processedAt < ?', cutoff.toISOString());
+};
+
+/** @deprecated Loads the whole table. Use getProcessedHashesFor or isSmsAlreadyProcessed. */
 export const getAllSmsHashes = async (): Promise<Set<string>> => {
   const rows = await db.getAllAsync<{ hash: string }>('SELECT hash FROM sms_hashes');
   return new Set(rows.map(r => r.hash));
@@ -2723,9 +2879,13 @@ export const getAllSmsHashes = async (): Promise<Set<string>> => {
  * already sitting in the review queue or was previously confirmed.
  */
 export const isRawSmsAlreadyExists = async (rawSms: string): Promise<boolean> => {
+  // Matches on the indexed hash, not the full text. hashSms normalizes
+  // whitespace and case, so this is also slightly more tolerant than the old
+  // exact-string compare — two copies of the same SMS that differ only in
+  // spacing now correctly dedupe.
   const row = await db.getFirstAsync<{ id: number }>(
-    'SELECT id FROM transactions WHERE rawSms = ? LIMIT 1',
-    rawSms,
+    'SELECT id FROM transactions WHERE rawSmsHash = ? LIMIT 1',
+    hashSms(rawSms),
   );
   return !!row;
 };

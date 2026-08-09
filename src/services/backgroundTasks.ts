@@ -10,7 +10,10 @@ import {
   updateAccountLastScanned,
   addTransaction,
   markSmsProcessed,
-  getAllSmsHashes,
+  getProcessedHashesFor,
+  isSmsAlreadyProcessed,
+  pruneOldSmsHashes,
+  pruneStoredSmsBodies,
   getLastSyncTimeFromDb,
   setLastSyncTimeInDb,
   logSyncAttempt,
@@ -283,8 +286,9 @@ export const processIncomingSms = async (body: string, date: number) => {
 
     // Check raw SMS hash or semantic duplicate first
     const hashed = hashSms(body);
-    const savedHashes = await getAllSmsHashes();
-    if (savedHashes.has(hashed)) return;
+    // Single indexed lookup (sms_hashes.hash is UNIQUE). This used to load the
+    // entire table into a Set just to test one value.
+    if (await isSmsAlreadyProcessed(hashed)) return;
 
     if (await isRawSmsAlreadyExists(body)) {
       await markSmsProcessed(hashed);
@@ -782,8 +786,9 @@ const _doSmsScan = async (silent = false): Promise<BackgroundFetch.BackgroundFet
   // Check every filtered SMS body against the hash dedup table BEFORE loading
   // AI context, merchant hints, or doing any parsing. If every SMS is already
   // processed, exit immediately — no context load, no notifications, no work.
-  const savedHashes = await getAllSmsHashes();
-  const hasNewSms = filtered.some(sms => !savedHashes.has(hashSms(sms.body)));
+  const batchHashes = filtered.map((sms) => hashSms(sms.body));
+  const savedHashes = await getProcessedHashesFor(batchHashes);
+  const hasNewSms = batchHashes.some((h) => !savedHashes.has(h));
   if (!hasNewSms) return BackgroundFetch.BackgroundFetchResult.NoData;
 
   const { context, merchantHints } = await SmsParserService.getContext();
@@ -905,6 +910,9 @@ const _doSmsScan = async (silent = false): Promise<BackgroundFetch.BackgroundFet
 TaskManager.defineTask(BACKGROUND_SMS_SCAN_TASK, async () => {
   try {
     await initDatabase();
+    // Housekeeping: bounded, cheap, and only in the periodic task.
+    await pruneOldSmsHashes().catch(() => {});
+    await pruneStoredSmsBodies().catch(() => {});
     const result = await performBackgroundSmsScan();
     // Upgrade any regex-only real-time transactions with the on-device AI now
     // that we're in the (heavier-budget) periodic task where the model can load.
