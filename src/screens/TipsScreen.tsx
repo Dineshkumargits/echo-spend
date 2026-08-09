@@ -29,6 +29,7 @@ import Constants from 'expo-constants';
 import { useNavigation } from '@react-navigation/native';
 import { notify } from '../utils/notify';
 import { useStore } from '../store/useStore';
+
 import { useTheme } from '../theme/ThemeProvider';
 import { registerBackgroundTasks } from '../services/backgroundTasks';
 import { AIModelManager } from '../services/aiModelManager';
@@ -488,9 +489,7 @@ export const TipsScreen = () => {
             <Row
               icon={preferences?.salaryDay !== 1 ? <LucideCheckCircle2 color={colors.success} size={20} /> : <LucideLightbulb color={colors.primary} size={18} />}
               label="Smart Pay Cycle Reset"
-              sub={preferences?.salaryDay !== 1 
-                ? `Monthly budget and limits calculation resets on day ${preferences?.salaryDay}.` 
-                : "Reset spends on your actual payday (e.g. the 25th or 30th) rather than the 1st of the month."}
+              sub="Record the exact date and time your salary lands each month — your budget cycle resets from that moment, however much the date moves."
               right={
                 <View style={[styles.badge, { backgroundColor: preferences?.salaryDay !== 1 ? `${colors.success}20` : `${colors.primary}20` }]}>
                   <ThemedText style={[styles.badgeText, { color: preferences?.salaryDay !== 1 ? colors.success : colors.primary }]}>

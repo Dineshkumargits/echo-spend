@@ -155,6 +155,41 @@ export const NotificationService = {
     } catch { /* notification failure is non-fatal */ }
   },
 
+  /**
+   * Auto-applied cycle resets change the budget gauge on their own, so the user
+   * must be told what moved and when — silent money-number changes are alarming.
+   */
+  async notifySalaryCycleReset(occurredAt: string) {
+    try {
+      const when = new Date(occurredAt);
+      const title = 'New budget cycle started';
+      const body = `Salary detected on ${when.toLocaleDateString('en-IN', {
+        day: 'numeric', month: 'short',
+      })} at ${when.toLocaleTimeString('en-IN', {
+        hour: '2-digit', minute: '2-digit',
+      })}. Your budget has reset — tap to review or correct the date.`;
+
+      if (AppState.currentState === 'active') {
+        notify.info(title, body);
+        return;
+      }
+
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title,
+          body,
+          data: { screen: 'Budget' },
+          sound: 'default',
+          ...(Platform.OS === 'android' && {
+            channelId: 'alerts',
+            priority: Notifications.AndroidNotificationPriority.HIGH,
+          }),
+        },
+        trigger: null,
+      });
+    } catch { /* notification failure is non-fatal */ }
+  },
+
   async notifyWeeklyDigest(totalSpent: number, topCategory: string, currency: string) {
     try {
       await Notifications.scheduleNotificationAsync({

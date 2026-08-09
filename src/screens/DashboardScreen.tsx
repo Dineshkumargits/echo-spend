@@ -51,8 +51,9 @@ import { fonts, formatINR } from "../theme/tokens";
 import { SignalRow, IconTile, Card } from "../components/Kit";
 import { useAIInsights } from "../hooks/useAIInsights";
 import { WidgetId, visibleWidgetIds } from "../components/dashboard/registry";
+import { cycleAnchorFrom, describeInstant, type CycleWindow } from "../services/salaryCycle";
 import {
-  getCycle,
+  toCycle,
   getUpcomingBills,
   getSafeToSpend,
   getCardHealth,
@@ -93,6 +94,7 @@ import {
   PendingSplitMember,
   getActiveInsights,
   getLastInsightGenerationDate,
+  getSalaryCycleWindowAsync,
   Insight,
   getLastScanTime,
 } from "../services/database";
@@ -169,6 +171,9 @@ const DashboardScreen = ({ navigation }: any) => {
   const [loans, setLoans] = useState<Loan[]>([]);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [showEditDashboard, setShowEditDashboard] = useState(false);
+  // Cycle boundaries now live in the DB (recorded salary dates), so they load
+  // with everything else. Null until the first load completes.
+  const [cycleWindow, setCycleWindow] = useState<CycleWindow | null>(null);
 
   // ── Refs ─────────────────────────────────────────────────────────────────────
   const insightGenGuard = useRef(false);
@@ -204,15 +209,6 @@ const DashboardScreen = ({ navigation }: any) => {
     [preferences.monthlyBudget, monthlySpend],
   );
 
-  const daysLeftInCycle = useMemo(() => {
-    const now = new Date();
-    const next =
-      now.getDate() >= preferences.salaryDay
-        ? new Date(now.getFullYear(), now.getMonth() + 1, preferences.salaryDay)
-        : new Date(now.getFullYear(), now.getMonth(), preferences.salaryDay);
-    return Math.max(0, Math.ceil((next.getTime() - now.getTime()) / 86400000));
-  }, [preferences.salaryDay]);
-
   const triggerHaptic = useCallback(
     (style = Haptics.ImpactFeedbackStyle.Light) => {
       if (preferences.hapticsEnabled) Haptics.impactAsync(style);
@@ -223,10 +219,29 @@ const DashboardScreen = ({ navigation }: any) => {
   // ── Derived values for the day-to-day widgets ──────────────────────────────
   // The user's payday cycle, not the calendar month — safe-to-spend and the
   // "bills still due" window both have to agree on where the cycle ends.
+  // Purely derived from the anchor — no query, no async, no flash of stale data.
+  // Falls back to a calendar-month-ish window only until the real one loads,
+  // so the widgets render immediately instead of flashing empty.
   const cycle = useMemo(
-    () => getCycle(preferences.salaryDay),
-    [preferences.salaryDay],
+    () =>
+      toCycle(
+        cycleWindow ?? {
+          start: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+          end: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1),
+        },
+      ),
+    [cycleWindow],
   );
+
+  /** e.g. "31 Jul 2026, 18:30" — the moment the current cycle began. */
+  const cycleLabel = useMemo(
+    () => (cycleWindow ? describeInstant(cycleWindow.start) : "\u2014"),
+    [cycleWindow],
+  );
+
+  // Taken from the resolved cycle rather than recomputed — the old inline
+  // `new Date(y, m, salaryDay)` overflowed short months for day 29–31.
+  const daysLeftInCycle = useMemo(() => cycle.daysRemaining, [cycle]);
 
   const upcomingBills = useMemo(
     () => getUpcomingBills(subscriptions, loans, accounts, 30),
@@ -281,22 +296,24 @@ const DashboardScreen = ({ navigation }: any) => {
       activeInsights,
       scanTime,
       lastInsightGen,
+      resolvedCycle,
     ] = await Promise.all([
       getTransactions({ limit: 15, confirmedOnly: true }),
       getAccounts(),
       getCategories(),
-      getCurrentMonthSpend(preferences.salaryDay),
+      getCurrentMonthSpend(cycleAnchorFrom(preferences)),
       getGoals(true),
       getLoans(true),
       getSubscriptions(true),
       getUnconfirmedTransactions(),
       getSpendTrend(14),
       getCategoryBreakdown(),
-      getBudgetUtilization(preferences.salaryDay),
+      getBudgetUtilization(cycleAnchorFrom(preferences)),
       getPendingSplitMembers(),
       getActiveInsights(),
       getLastScanTime(),
       getLastInsightGenerationDate(),
+      getSalaryCycleWindowAsync(cycleAnchorFrom(preferences)),
     ]);
     setTransactions(txs);
     setAccounts(accs);
@@ -312,6 +329,7 @@ const DashboardScreen = ({ navigation }: any) => {
     setGoals(gs);
     setLoans(ls);
     setSubscriptions(ss);
+    setCycleWindow(resolvedCycle);
 
     const now = new Date();
     const tenDays = new Date(now.getTime() + 10 * 24 * 60 * 60 * 1000);
@@ -368,6 +386,7 @@ const DashboardScreen = ({ navigation }: any) => {
     }
   }, [
     preferences.salaryDay,
+    preferences.salaryTime,
     preferences.currency,
     preferences.hideAmounts,
     generateInsights,
@@ -678,8 +697,8 @@ const DashboardScreen = ({ navigation }: any) => {
                   color={safeToSpend < 0 ? colors.danger : colors.accent}
                 >
                   {safeToSpend < 0
-                    ? "Over budget · till day " + preferences.salaryDay
-                    : "Safe to spend · till day " + preferences.salaryDay}
+                    ? `Over budget · till the ${cycleLabel}`
+                    : `Safe to spend · till the ${cycleLabel}`}
                 </SectionLabel>
                 <ThemedText
                   font="signal"
@@ -736,7 +755,7 @@ const DashboardScreen = ({ navigation }: any) => {
               }}
             >
               <SectionLabel color={colors.accent}>
-                Cycle spending · from day {preferences.salaryDay}
+                Cycle spending · from the {cycleLabel}
               </SectionLabel>
               <ThemedText
                 font="signal"

@@ -7,6 +7,7 @@ import {
   View,
   TouchableOpacity,
   TextInput,
+  Platform,
   Alert,
   ActivityIndicator,
   ScrollView,
@@ -23,12 +24,20 @@ import {
   LucideSearch,
   LucideX,
   LucideTag,
+  LucideCalendar,
 } from "lucide-react-native";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import { useNavigation, useIsFocused } from "@react-navigation/native";
 import { notify } from "../utils/notify";
 import {
   getBudgetUtilization,
   getBudgetSummary,
+  getSalaryDates,
+  addSalaryDate,
+  updateSalaryDate,
+  getPendingSalaryDate,
+  clearPendingSalaryDate,
+  SalaryDate,
   getSuggestedBudgetAmount,
   upsertBudget,
   deleteBudget,
@@ -55,6 +64,8 @@ import {
   TextField,
 } from "../components/Kit";
 import { SectionLabel } from "../components/Signal";
+import { CategoryPicker } from "../components/CategoryPicker";
+import { cycleAnchorFrom } from "../services/salaryCycle";
 import { fonts } from "../theme/tokens";
 
 // ─── Pace gauge — usage fill + "where you should be" tick ────────────────────
@@ -102,15 +113,27 @@ const PaceGauge: React.FC<{
 const BudgetScreen = () => {
   const navigation = useNavigation<any>();
   const isFocused = useIsFocused();
-  const { colors } = useTheme();
-  const { preferences, setMonthlyBudget, setSalaryDay } = useStore();
+  const { colors, isDark } = useTheme();
+  const {
+    preferences,
+    setMonthlyBudget,
+    setSalaryCategory,
+  } = useStore();
   const currency = preferences?.currency ?? "₹";
   const salaryDay = preferences?.salaryDay ?? 1;
+  // Salary date + time: the exact instant the budget cycle resets.
+  // Memoized because cycleAnchorFrom returns a fresh object each call, which
+  // would otherwise invalidate every useCallback depending on it every render.
+  const anchor = useMemo(
+    () => cycleAnchorFrom({ salaryDay, salaryTime: preferences?.salaryTime }),
+    [salaryDay, preferences?.salaryTime],
+  );
   const { checkBudgetAlerts } = useNotifications();
 
   const [rows, setRows] = useState<BudgetUtilization[]>([]);
   const [summary, setSummary] = useState<BudgetSummary | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [incomeCategories, setIncomeCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Budget editor sheet: null = closed, 'new' = create, otherwise the row edited
@@ -131,7 +154,14 @@ const BudgetScreen = () => {
   // Plan sheet (overall monthly budget + salary day)
   const [showPlan, setShowPlan] = useState(false);
   const [monthlyBudgetInput, setMonthlyBudgetInput] = useState("");
-  const [salaryDayInput, setSalaryDayInput] = useState("");
+  // The salary instant being edited, plus the record it came from (null when
+  // nothing has been recorded yet, so saving creates the first one).
+  const [salaryAt, setSalaryAt] = useState<Date>(new Date());
+  const [latestSalary, setLatestSalary] = useState<SalaryDate | null>(null);
+  const [showSalaryPicker, setShowSalaryPicker] = useState(false);
+  const [pickerMode, setPickerMode] = useState<"date" | "time">("date");
+  // A salary credit Echo detected from SMS, awaiting the user's confirmation.
+  const [pendingSalary, setPendingSalary] = useState<string | null>(null);
 
   const fmt = (n: number) =>
     preferences.hideAmounts
@@ -139,16 +169,21 @@ const BudgetScreen = () => {
       : `${currency}${Math.round(n).toLocaleString("en-IN")}`;
 
   const load = useCallback(async () => {
-    const [util, sum, cats] = await Promise.all([
-      getBudgetUtilization(salaryDay),
-      getBudgetSummary(salaryDay),
+    const [util, sum, cats, salaries, pending] = await Promise.all([
+      getBudgetUtilization(anchor),
+      getBudgetSummary(anchor),
       getCategories(),
+      getSalaryDates(1),
+      getPendingSalaryDate(),
     ]);
     setRows(util);
     setSummary(sum);
+    setLatestSalary(salaries[0] ?? null);
+    setPendingSalary(pending);
     setCategories(cats.filter((c) => c.type === "expense"));
+    setIncomeCategories(cats.filter((c) => c.type === "income"));
     setLoading(false);
-  }, [salaryDay]);
+  }, [anchor]);
 
   useEffect(() => {
     if (isFocused) load();
@@ -226,14 +261,14 @@ const BudgetScreen = () => {
       return;
     }
     let alive = true;
-    getSuggestedBudgetAmount(formSelections, formPeriod, salaryDay).then((v) => {
+    getSuggestedBudgetAmount(formSelections, formPeriod, anchor).then((v) => {
       if (alive) setSuggested(v);
     });
     return () => {
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editing, selectionsKey, formPeriod, salaryDay]);
+  }, [editing, selectionsKey, formPeriod, anchor]);
 
   // ── Sheet openers ─────────────────────────────────────────────────────────
   const openCreate = () => {
@@ -309,14 +344,72 @@ const BudgetScreen = () => {
     });
   };
 
-  const savePlan = () => {
+  const savePlan = async () => {
     const budgetVal = parseFloat(monthlyBudgetInput);
-    const dayVal = parseInt(salaryDayInput, 10);
     if (!isNaN(budgetVal) && budgetVal >= 0) setMonthlyBudget(budgetVal);
-    if (!isNaN(dayVal) && dayVal >= 1 && dayVal <= 31) setSalaryDay(dayVal);
+
+    const iso = salaryAt.toISOString();
+    if (latestSalary) {
+      // Editing the existing record is the "salary actually came on the 30th,
+      // not the 31st" correction — it must move the boundary, not add a cycle.
+      if (latestSalary.occurredAt !== iso) await updateSalaryDate(latestSalary.id, iso);
+    } else {
+      await addSalaryDate(iso, "manual");
+    }
+
+    setShowSalaryPicker(false);
     setShowPlan(false);
     notify.success("Plan updated");
     load();
+  };
+
+  const acceptPendingSalary = async () => {
+    if (!pendingSalary) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    await addSalaryDate(pendingSalary, "detected");
+    await clearPendingSalaryDate();
+    setPendingSalary(null);
+    notify.success("Salary date updated");
+    load();
+  };
+
+  const dismissPendingSalary = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    await clearPendingSalaryDate();
+    setPendingSalary(null);
+  };
+
+  /**
+   * Android fires the picker in two stages (date, then time); iOS returns the
+   * full datetime from one spinner. Mirrors the transaction entry screen.
+   */
+  const handleSalaryPickerChange = (event: any, selected?: Date) => {
+    if (event?.type === "dismissed") {
+      setShowSalaryPicker(false);
+      setPickerMode("date");
+      return;
+    }
+    if (!selected) return;
+
+    if (Platform.OS === "ios") {
+      setSalaryAt(selected);
+      return;
+    }
+
+    if (pickerMode === "date") {
+      // Keep the time already chosen while the date changes.
+      const next = new Date(selected);
+      next.setHours(salaryAt.getHours(), salaryAt.getMinutes(), 0, 0);
+      setSalaryAt(next);
+      setPickerMode("time");
+      return;
+    }
+
+    const next = new Date(salaryAt);
+    next.setHours(selected.getHours(), selected.getMinutes(), 0, 0);
+    setSalaryAt(next);
+    setShowSalaryPicker(false);
+    setPickerMode("date");
   };
 
   // ── Row visuals ───────────────────────────────────────────────────────────
@@ -367,7 +460,11 @@ const BudgetScreen = () => {
           <HeaderIconButton
             onPress={() => {
               setMonthlyBudgetInput(String(preferences?.monthlyBudget ?? 0));
-              setSalaryDayInput(String(salaryDay));
+              setSalaryAt(
+                latestSalary ? new Date(latestSalary.occurredAt) : new Date(),
+              );
+              setShowSalaryPicker(false);
+              setPickerMode("date");
               setShowPlan(true);
             }}
           >
@@ -908,16 +1005,159 @@ const BudgetScreen = () => {
             style={{ fontFamily: fonts.signal, fontSize: 14 }}
           />
 
-          <FieldLabel style={{ marginTop: 18 }}>Salary day (1–31)</FieldLabel>
-          <TextField
-            keyboardType="numeric"
-            value={salaryDayInput}
-            onChangeText={setSalaryDayInput}
-            placeholder="1"
-            style={{ fontFamily: fonts.signal, fontSize: 14 }}
+          {pendingSalary && (
+            <View
+              style={{
+                marginTop: 18,
+                padding: 14,
+                borderRadius: 14,
+                borderWidth: 1,
+                borderColor: colors.accent,
+                backgroundColor: `${colors.accent}14`,
+              }}
+            >
+              <ThemedText style={{ fontFamily: fonts.textMedium, fontSize: 13 }}>
+                Salary detected
+              </ThemedText>
+              <ThemedText style={{ fontSize: 12, color: colors.secondary, marginTop: 4, lineHeight: 17 }}>
+                {new Date(pendingSalary).toLocaleDateString("en-IN", {
+                  day: "numeric",
+                  month: "short",
+                  year: "numeric",
+                })}
+                {" · "}
+                {new Date(pendingSalary).toLocaleTimeString("en-IN", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+                {"  — start your new cycle from here?"}
+              </ThemedText>
+              <View style={{ flexDirection: "row", gap: 10, marginTop: 12 }}>
+                <TouchableOpacity
+                  onPress={acceptPendingSalary}
+                  style={{
+                    paddingHorizontal: 16,
+                    paddingVertical: 8,
+                    borderRadius: 10,
+                    backgroundColor: colors.accent,
+                  }}
+                >
+                  <ThemedText style={{ fontSize: 12, color: colors.onAccent, fontWeight: "700" }}>
+                    Use this
+                  </ThemedText>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={dismissPendingSalary}
+                  style={{
+                    paddingHorizontal: 16,
+                    paddingVertical: 8,
+                    borderRadius: 10,
+                    borderWidth: 1,
+                    borderColor: colors.border,
+                  }}
+                >
+                  <ThemedText style={{ fontSize: 12, color: colors.secondary }}>
+                    Ignore
+                  </ThemedText>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
+          <FieldLabel style={{ marginTop: 18 }}>Last salary received</FieldLabel>
+          <TouchableOpacity
+            onPress={() => {
+              setPickerMode("date");
+              setShowSalaryPicker(true);
+            }}
+            activeOpacity={0.7}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 10,
+              paddingHorizontal: 14,
+              paddingVertical: 14,
+              borderRadius: 14,
+              borderWidth: 1,
+              borderColor: colors.border,
+              backgroundColor: colors.surfaceElevated,
+            }}
+          >
+            <LucideCalendar color={colors.secondary} size={16} />
+            <ThemedText style={{ flex: 1, fontSize: 15 }}>
+              {salaryAt.toLocaleDateString("en-IN", {
+                day: "numeric",
+                month: "short",
+                year: "numeric",
+              })}{" "}
+              · {salaryAt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+            </ThemedText>
+            <ThemedText style={{ fontSize: 11, color: colors.accent }}>CHANGE</ThemedText>
+          </TouchableOpacity>
+
+          {showSalaryPicker && (
+            <View
+              style={
+                Platform.OS === "ios"
+                  ? {
+                      backgroundColor: colors.surfaceElevated,
+                      borderRadius: 14,
+                      overflow: "hidden",
+                      marginTop: 12,
+                      borderWidth: 1,
+                      borderColor: colors.border,
+                    }
+                  : undefined
+              }
+            >
+              <DateTimePicker
+                value={salaryAt}
+                // iOS shows date+time in one spinner; Android needs the two
+                // stages chained, same as the transaction entry screen.
+                mode={Platform.OS === "ios" ? "datetime" : pickerMode}
+                display={Platform.OS === "ios" ? "spinner" : "default"}
+                // Salary can only have arrived already — never in the future.
+                maximumDate={new Date()}
+                themeVariant={isDark ? "dark" : "light"}
+                onChange={handleSalaryPickerChange}
+              />
+              {Platform.OS === "ios" && (
+                <TouchableOpacity
+                  onPress={() => setShowSalaryPicker(false)}
+                  style={{
+                    borderTopWidth: 1,
+                    borderTopColor: colors.border,
+                    padding: 12,
+                    alignItems: "center",
+                  }}
+                >
+                  <ThemedText style={{ color: colors.accent, fontWeight: "bold" }}>
+                    Done
+                  </ThemedText>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+
+          <ThemedText style={{ fontSize: 11, color: colors.muted, marginTop: 10, lineHeight: 16 }}>
+            Your budget cycle runs from this exact moment for one month. Update it
+            whenever your salary lands on a different date — past cycles keep the
+            dates you recorded for them.
+          </ThemedText>
+
+          <FieldLabel style={{ marginTop: 20 }}>Salary category</FieldLabel>
+          <CategoryPicker
+            selectedCategory={preferences?.salaryCategory ?? "Salary"}
+            onSelect={setSalaryCategory}
+            categories={incomeCategories}
+            type="income"
+            variant="row"
+            refreshCategories={load}
           />
-          <ThemedText style={{ fontSize: 11, color: colors.muted, marginTop: 6 }}>
-            Your spending cycle and all monthly budgets reset on this day.
+          <ThemedText style={{ fontSize: 11, color: colors.muted, marginTop: 8, lineHeight: 16 }}>
+            Credits in this category start a new cycle automatically when they
+            arrive 25+ days after your last salary. Anything sooner is offered as a
+            suggestion instead, so a bonus never resets your budget silently.
           </ThemedText>
 
           <PrimaryButton label="Save plan" onPress={savePlan} style={{ marginTop: 22 }} />

@@ -63,6 +63,7 @@ import {
 import { useAIInsights } from "../hooks/useAIInsights";
 import { useTheme } from "../theme/ThemeProvider";
 import { useStore } from "../store/useStore";
+import { cycleAnchorFrom } from "../services/salaryCycle";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -136,7 +137,7 @@ const AnalyticsScreen = () => {
       getInsights(),
       getCategories(),
       getSpendingByTag(dStart, dEnd),
-      getBudgetUtilization(preferences.salaryDay),
+      getBudgetUtilization(cycleAnchorFrom(preferences)),
       getHighSpendTransactions(),
       getWeekdaySpending(84),
       getTopMerchants(undefined, 6),
@@ -154,7 +155,7 @@ const AnalyticsScreen = () => {
     setMerchants(tm);
     setLoading(false);
     setRefreshing(false);
-  }, [trendDays, getInsights, preferences.salaryDay]);
+  }, [trendDays, getInsights, preferences.salaryDay, preferences.salaryTime]);
 
   useEffect(() => {
     setLoading(true);

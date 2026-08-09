@@ -8,8 +8,11 @@ import {
   Insight,
   getBudgetUtilization,
   getTransactionCount,
+  getSalaryCycleWindowAsync,
 } from '../services/database';
+import { cycleAnchorFrom } from '../services/salaryCycle';
 import { useStore } from '../store/useStore';
+
 
 export const useAIInsights = () => {
   /** Load already-cached active insights from DB */
@@ -28,12 +31,14 @@ export const useAIInsights = () => {
     const { preferences } = useStore.getState();
     const currency = preferences.currency ?? '₹';
 
-    const [trend14, trend7, breakdown, budgetUtil] = await Promise.all([
+    const [trend14, trend7, breakdown, budgetUtil, cycle] = await Promise.all([
       getSpendTrend(14),
       getSpendTrend(7),
       getCategoryBreakdown(),
-      getBudgetUtilization(preferences.salaryDay),
+      getBudgetUtilization(cycleAnchorFrom(preferences)),
+      getSalaryCycleWindowAsync(cycleAnchorFrom(preferences)),
     ]);
+    const cycleEnd = cycle.end;
 
     if (breakdown.length === 0 && trend14.length === 0) return [];
 
@@ -114,15 +119,11 @@ export const useAIInsights = () => {
     // ── 6. Budget Proximity Warnings ────────────────────────────────────────
     for (const u of budgetUtil) {
       if (u.percentage >= 75 && u.percentage < 100) {
-        // Calculate remaining days in the cycle
+        // Remaining days in the cycle, from the shared resolver — the inline
+        // `new Date(y, m, salaryDay)` this replaces overflowed short months for
+        // day 29–31 and reported a wrong "days left" in the insight text.
         const today = new Date();
-        const salaryDay = preferences.salaryDay ?? 1;
-        let nextCycleStart: Date;
-        if (today.getDate() >= salaryDay) {
-          nextCycleStart = new Date(today.getFullYear(), today.getMonth() + 1, salaryDay);
-        } else {
-          nextCycleStart = new Date(today.getFullYear(), today.getMonth(), salaryDay);
-        }
+        const nextCycleStart = cycleEnd;
         const daysLeft = Math.max(1, Math.ceil((nextCycleStart.getTime() - today.getTime()) / 86400000));
 
         insights.push({

@@ -35,21 +35,16 @@ export interface Cycle {
 }
 
 /**
- * The user's spending cycle, anchored on payday rather than the calendar month.
- * `salaryDay` is clamped per-month, so 31 behaves correctly in February.
+ * Turn a cycle window into the day counts the widgets need.
+ *
+ * The window itself comes from services/salaryCycle — the one place that knows
+ * the salary date and time. Widgets must never re-derive it, or they drift out
+ * of agreement with the budget gauges.
  */
-export const getCycle = (salaryDay: number, now = new Date()): Cycle => {
-  const day = Math.min(Math.max(Math.round(salaryDay) || 1, 1), 31);
-  const clampToMonth = (year: number, month: number): Date => {
-    const lastDay = new Date(year, month + 1, 0).getDate();
-    return startOfDay(new Date(year, month, Math.min(day, lastDay)));
-  };
-
+export const toCycle = (window: { start: Date; end: Date }, now = new Date()): Cycle => {
   const today = startOfDay(now);
-  let start = clampToMonth(today.getFullYear(), today.getMonth());
-  // Before this month's payday, we're still inside the previous cycle.
-  if (start > today) start = clampToMonth(today.getFullYear(), today.getMonth() - 1);
-  const end = clampToMonth(start.getFullYear(), start.getMonth() + 1);
+  const start = startOfDay(window.start);
+  const end = startOfDay(window.end);
 
   const totalDays = Math.max(Math.round((end.getTime() - start.getTime()) / DAY_MS), 1);
   const elapsed = Math.round((today.getTime() - start.getTime()) / DAY_MS);

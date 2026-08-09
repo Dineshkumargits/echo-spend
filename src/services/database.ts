@@ -1,4 +1,5 @@
 import * as SQLite from 'expo-sqlite';
+import { resolveCycle, cycleAnchorFrom, CycleAnchor, CycleWindow } from './salaryCycle';
 
 export interface Category {
   id: number;
@@ -387,6 +388,20 @@ export const initDatabase = async () => {
         value TEXT
       );`);
 
+      // Actual salary arrivals the user has confirmed. The budget cycle is
+      // anchored on these rather than a recurring day-of-month, because payroll
+      // moves (30th, then 31st, then the 1st). UNIQUE on the instant so the same
+      // salary can't be recorded twice by a manual entry and a detection.
+      await db.execAsync(`CREATE TABLE IF NOT EXISTS salary_dates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        occurredAt TEXT NOT NULL UNIQUE,
+        source TEXT NOT NULL DEFAULT 'manual',
+        createdAt TEXT NOT NULL
+      );`);
+      await db.execAsync(
+        'CREATE INDEX IF NOT EXISTS idx_salary_dates_occurred ON salary_dates(occurredAt DESC);'
+      );
+
       // Tombstones for default categories the user deliberately deleted.
       // seedDatabase() runs on EVERY initDatabase() — including in the fresh JS
       // context of each headless background task — and decides what to insert by
@@ -557,6 +572,23 @@ const runMigrations = async () => {
       console.warn('[Database] Migration to v6 warning:', e);
     }
     await db.execAsync('PRAGMA user_version = 6');
+  }
+
+  if (dbVersion < 7) {
+    try {
+      await db.execAsync(`CREATE TABLE IF NOT EXISTS salary_dates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        occurredAt TEXT NOT NULL UNIQUE,
+        source TEXT NOT NULL DEFAULT 'manual',
+        createdAt TEXT NOT NULL
+      )`);
+      await db.execAsync(
+        'CREATE INDEX IF NOT EXISTS idx_salary_dates_occurred ON salary_dates(occurredAt DESC)'
+      );
+    } catch (e) {
+      console.warn('[Database] Migration to v7 warning:', e);
+    }
+    await db.execAsync('PRAGMA user_version = 7');
   }
 };
 
@@ -1474,24 +1506,17 @@ export const getTopMerchants = async (
   );
 };
 
-export const getCurrentMonthSpend = async (salaryDay = 1): Promise<number> => {
-  const now = new Date();
-  const currentYear = now.getFullYear();
-  const currentMonth = now.getMonth();
-  const currentDay = now.getDate();
-
-  let startDate: Date;
-  let endDate: Date;
-
-  if (currentDay >= salaryDay) {
-    // Cycle started this month on salaryDay; ends exclusively at salaryDay next month.
-    startDate = new Date(currentYear, currentMonth, salaryDay);
-    endDate = new Date(currentYear, currentMonth + 1, salaryDay); // midnight, exclusive
-  } else {
-    // Cycle started last month on salaryDay; ends exclusively at salaryDay this month.
-    startDate = new Date(currentYear, currentMonth - 1, salaryDay);
-    endDate = new Date(currentYear, currentMonth, salaryDay); // midnight, exclusive
-  }
+/**
+ * Spend inside the current budget cycle.
+ *
+ * Accepts the anchor spec or a legacy numeric salaryDay. Window comes from the
+ * shared helper, so this agrees with the budget gauges and the dashboard, and no
+ * longer overflows for day 29/30/31.
+ */
+export const getCurrentMonthSpend = async (
+  anchorLike: CycleAnchor | number = 1,
+): Promise<number> => {
+  const { start: startDate, end: endDate } = await getSalaryCycleWindowAsync(anchorLike);
 
   const row = await db.getFirstAsync<{ total: number }>(
     `SELECT SUM(${EFFECTIVE_DEBIT_AMOUNT}) as total FROM transactions t
@@ -1971,17 +1996,103 @@ export const deleteBudget = async (id: number) => {
 
 // ── Budget windows ───────────────────────────────────────────────────────────
 
-/** Salary-day billing cycle, shifted by `shift` cycles (0 = current, -1 = previous). */
-const getSalaryCycleWindow = (salaryDay: number, shift = 0) => {
-  const now = new Date();
-  const base =
-    now.getDate() >= salaryDay
-      ? new Date(now.getFullYear(), now.getMonth(), salaryDay)
-      : new Date(now.getFullYear(), now.getMonth() - 1, salaryDay);
-  const start = new Date(base.getFullYear(), base.getMonth() + shift, salaryDay);
-  const end = new Date(base.getFullYear(), base.getMonth() + shift + 1, salaryDay);
-  return { start, end };
+/**
+ * Salary billing cycle, shifted by `shift` cycles (0 = current, -1 = previous).
+ *
+ * Delegates to services/salaryCycle so every consumer agrees. The old inline
+ * `new Date(y, m, salaryDay)` here overflowed short months — day 31 in February
+ * produced a Jan 31 → Mar 3 window and then drifted off month-end for good.
+ */
+// ─── Salary dates ────────────────────────────────────────────────────────────
+
+export interface SalaryDate {
+  id: number;
+  /** ISO timestamp of the actual salary arrival. */
+  occurredAt: string;
+  source: 'manual' | 'detected';
+  createdAt: string;
+}
+
+const PENDING_SALARY_KEY = 'pending_salary_date';
+
+/** Recorded salary arrivals, newest first. */
+export const getSalaryDates = async (limit = 24): Promise<SalaryDate[]> =>
+  await db.getAllAsync<SalaryDate>(
+    'SELECT * FROM salary_dates ORDER BY occurredAt DESC LIMIT ?', limit,
+  );
+
+/**
+ * Record a salary arrival. `INSERT OR REPLACE` on the UNIQUE instant so
+ * confirming a detected salary that the user already entered by hand is a no-op
+ * rather than a duplicate cycle boundary.
+ */
+export const addSalaryDate = async (
+  occurredAt: string,
+  source: SalaryDate['source'] = 'manual',
+): Promise<void> => {
+  await db.runAsync(
+    `INSERT OR REPLACE INTO salary_dates (occurredAt, source, createdAt) VALUES (?, ?, ?)`,
+    occurredAt, source, new Date().toISOString(),
+  );
 };
+
+/** Move an existing record — the "salary actually came on the 30th, not the 31st" fix. */
+export const updateSalaryDate = async (id: number, occurredAt: string): Promise<void> => {
+  await db.runAsync('UPDATE salary_dates SET occurredAt = ? WHERE id = ?', occurredAt, id);
+};
+
+export const deleteSalaryDate = async (id: number): Promise<void> => {
+  await db.runAsync('DELETE FROM salary_dates WHERE id = ?', id);
+};
+
+/**
+ * A detected salary credit awaiting the user's confirmation. Held in
+ * app_settings rather than salary_dates so it can never move the budget cycle
+ * until the user accepts it.
+ */
+export const setPendingSalaryDate = async (occurredAt: string): Promise<void> => {
+  await db.runAsync(
+    'INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)',
+    PENDING_SALARY_KEY, occurredAt,
+  );
+};
+
+export const getPendingSalaryDate = async (): Promise<string | null> => {
+  const row = await db.getFirstAsync<{ value: string }>(
+    'SELECT value FROM app_settings WHERE key = ?', PENDING_SALARY_KEY,
+  );
+  return row?.value ?? null;
+};
+
+export const clearPendingSalaryDate = async (): Promise<void> => {
+  await db.runAsync('DELETE FROM app_settings WHERE key = ?', PENDING_SALARY_KEY);
+};
+
+/**
+ * The budget cycle window, resolved from recorded salary dates (falling back to
+ * the recurring anchor until the first one is recorded).
+ *
+ * Async because the boundaries now live in the database. Callers that already
+ * hold the recorded list should use resolveCycle directly to avoid re-querying.
+ */
+export const getSalaryCycleWindowAsync = async (
+  anchorLike: CycleAnchor | number,
+  shift = 0,
+): Promise<CycleWindow> => {
+  const recorded = await getSalaryDates();
+  return resolveCycle(
+    recorded.map((r) => r.occurredAt),
+    toAnchor(anchorLike),
+    new Date(),
+    shift,
+  );
+};
+
+const toAnchor = (anchorLike: CycleAnchor | number | undefined): CycleAnchor =>
+  typeof anchorLike === 'number'
+    ? cycleAnchorFrom({ salaryDay: anchorLike })
+    : anchorLike ?? cycleAnchorFrom({});
+
 
 /** Monday-start local calendar week, shifted by `shift` weeks. */
 const getWeekWindow = (shift = 0) => {
@@ -2060,17 +2171,21 @@ export interface BudgetUtilization {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-export const getBudgetUtilization = async (salaryDay = 1): Promise<BudgetUtilization[]> => {
-  // Salary-day cycle mirrors getCurrentMonthSpend so gauges and month totals
-  // agree; weekly budgets get a real Monday-start week instead.
+export const getBudgetUtilization = async (
+  anchorLike: CycleAnchor | number = 1,
+): Promise<BudgetUtilization[]> => {
+  // Budget cycle mirrors getCurrentMonthSpend so gauges and month totals agree.
+  // Weekly budgets get a real Monday-start week instead.
   const [budgets, categories] = await Promise.all([getBudgets(), getCategories()]);
   if (budgets.length === 0) return [];
 
   const now = new Date();
   const hasWeekly = budgets.some((b) => b.period === 'weekly');
 
-  const monthWin = getSalaryCycleWindow(salaryDay);
-  const prevMonthWin = getSalaryCycleWindow(salaryDay, -1);
+  const [monthWin, prevMonthWin] = await Promise.all([
+    getSalaryCycleWindowAsync(anchorLike),
+    getSalaryCycleWindowAsync(anchorLike, -1),
+  ]);
   const weekWin = getWeekWindow();
   const prevWeekWin = getWeekWindow(-1);
 
@@ -2156,12 +2271,14 @@ export interface BudgetSummary {
 }
 
 /** Reconciles category budgets against the overall cycle spend. */
-export const getBudgetSummary = async (salaryDay = 1): Promise<BudgetSummary> => {
+export const getBudgetSummary = async (
+  anchorLike: CycleAnchor | number = 1,
+): Promise<BudgetSummary> => {
   const [util, categories] = await Promise.all([
-    getBudgetUtilization(salaryDay),
+    getBudgetUtilization(anchorLike),
     getCategories(),
   ]);
-  const monthWin = getSalaryCycleWindow(salaryDay);
+  const monthWin = await getSalaryCycleWindowAsync(anchorLike);
   const spendMap = await getSpendByCategory(monthWin.start, monthWin.end);
   const cycleSpend = [...spendMap.values()].reduce((a, v) => a + v, 0);
 
@@ -2189,14 +2306,18 @@ export const getBudgetSummary = async (salaryDay = 1): Promise<BudgetSummary> =>
 export const getSuggestedBudgetAmount = async (
   selections: string[],
   period: 'monthly' | 'weekly',
-  salaryDay = 1,
+  // Historical windows only (shift -1/-2/-3), so the rule is used without any
+  // detection snap — past cycles must stay stable.
+  anchorLike: CycleAnchor | number = 1,
 ): Promise<number | null> => {
   if (selections.length === 0) return null;
   const categories = await getCategories();
   const names = coveredCategoryNames(selections, categories);
   const sums: number[] = [];
   for (const shift of [-1, -2, -3]) {
-    const win = period === 'weekly' ? getWeekWindow(shift) : getSalaryCycleWindow(salaryDay, shift);
+    const win = period === 'weekly'
+      ? getWeekWindow(shift)
+      : await getSalaryCycleWindowAsync(anchorLike, shift);
     const map = await getSpendByCategory(win.start, win.end);
     sums.push(sumCovered(names, map));
   }
@@ -2212,10 +2333,10 @@ export const getSuggestedBudgetAmount = async (
  */
 export const getBudgetImpactForCategory = async (
   categoryName: string,
-  salaryDay = 1,
+  anchorLike: CycleAnchor | number = 1,
 ): Promise<BudgetUtilization | null> => {
   const [util, categories] = await Promise.all([
-    getBudgetUtilization(salaryDay),
+    getBudgetUtilization(anchorLike),
     getCategories(),
   ]);
   // A budget explicitly selecting this category wins; otherwise any budget

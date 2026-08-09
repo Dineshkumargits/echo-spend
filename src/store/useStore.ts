@@ -3,6 +3,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import * as SecureStore from 'expo-secure-store';
 import { DEFAULT_THEME_ID } from '../theme/tokens';
 
+
 interface UserPreferences {
   theme: 'dark' | 'light' | 'system';  // light/dark mode (not the color pack)
   themeId: string;                      // curated theme pack id (see THEMES in tokens.ts)
@@ -21,6 +22,17 @@ interface UserPreferences {
   hapticsEnabled: boolean;            // NEW: Interaction
   defaultLaunchScreen: 'Dashboard' | 'SmartInbox'; // NEW: Navigation
   salaryDay: number;                  // NEW: Financial Cycle (1-31)
+  /**
+   * Local time of day, "HH:mm", for the FALLBACK cycle anchor only — used until
+   * the first real salary date is recorded in the salary_dates table. Real
+   * cycles are anchored on recorded arrivals; see services/salaryCycle.
+   */
+  salaryTime?: string;
+  /**
+   * Category name that identifies a salary credit, so cycle detection works for
+   * renamed or custom categories instead of guessing the literal "Salary".
+   */
+  salaryCategory?: string;
   autoSmsScan: boolean;               // NEW: Background Automation
   dailyReminder: boolean;             // NEW: Daily 9PM Reminder
   lastWeeklyDigestDate: string | null;
@@ -85,6 +97,8 @@ interface AppState {
   toggleHaptics: () => void;          // NEW
   setLaunchScreen: (screen: 'Dashboard' | 'SmartInbox') => void; // NEW
   setSalaryDay: (day: number) => void; // NEW
+  setSalaryTime: (time: string) => void;
+  setSalaryCategory: (category: string) => void;
   toggleAutoSmsScan: () => void;      // NEW
   toggleDailyReminder: () => void;    // NEW
   setLastWeeklyDigestDate: (date: string) => void;
@@ -138,6 +152,8 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   hapticsEnabled: true,
   defaultLaunchScreen: 'Dashboard',
   salaryDay: 1,
+  salaryTime: '00:00',
+  salaryCategory: 'Salary',
   autoSmsScan: false,
   dailyReminder: true,
   lastWeeklyDigestDate: null,
@@ -243,6 +259,12 @@ export const useStore = create<AppState>()(
         set((s) => ({
           preferences: { ...s.preferences, salaryDay: day }
         })),
+
+      setSalaryTime: (salaryTime) =>
+        set((s) => ({ preferences: { ...s.preferences, salaryTime } })),
+
+      setSalaryCategory: (salaryCategory) =>
+        set((s) => ({ preferences: { ...s.preferences, salaryCategory } })),
 
       toggleAutoSmsScan: () =>
         set((s) => ({

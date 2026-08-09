@@ -3,15 +3,17 @@ import {
   View, TextInput, TouchableOpacity, ScrollView,
   KeyboardAvoidingView, Platform,
 } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { ThemedSafeAreaView, ThemedText } from '../components/ThemedSafeAreaView';
 import { MotiView } from 'moti';
 import * as Haptics from 'expo-haptics';
 import {
-  LucideArrowRight, LucideCheck, LucideWallet, LucideCalendar,
+  LucideArrowRight, LucideCheck, LucideWallet, LucideCalendar, LucideClock,
   LucideSun, LucideMoon, LucideMonitor, LucideTag, LucideZap,
   LucideCloud, LucideTarget, LucideSmartphone, LucideSparkles,
 } from 'lucide-react-native';
 import { useStore } from '../store/useStore';
+import { addSalaryDate } from '../services/database';
 import { useTheme } from '../theme/ThemeProvider';
 import AIModelSetupStep from './AIModelSetupStep';
 
@@ -54,16 +56,18 @@ const WelcomeStep = ({ onNext }: { onNext: () => void }) => {
 
 const PreferencesStep = ({
   budget, setBudget,
-  salaryDay, setSalaryDay,
+  salaryAt, setSalaryAt,
   theme, setTheme,
   onFinish,
 }: {
   budget: string; setBudget: (b: string) => void;
-  salaryDay: string; setSalaryDay: (d: string) => void;
+  salaryAt: Date; setSalaryAt: (d: Date) => void;
   theme: 'dark' | 'light' | 'system'; setTheme: (t: 'dark' | 'light' | 'system') => void;
   onFinish: () => void;
 }) => {
   const { colors } = useTheme();
+  const [showPicker, setShowPicker] = useState(false);
+  const [pickerMode, setPickerMode] = useState<'date' | 'time'>('date');
 
   const THEMES: { key: 'dark' | 'light' | 'system'; label: string; icon: React.ReactNode }[] = [
     { key: 'dark', label: 'Dark', icon: <LucideMoon size={16} color={theme === 'dark' ? '#fff' : colors.secondary} /> },
@@ -103,34 +107,57 @@ const PreferencesStep = ({
             }}
           />
 
-          {/* Salary day */}
+          {/* Last salary — a real date+time, matching how transactions are entered. */}
           <ThemedText type="secondary" className="text-xs font-bold uppercase tracking-widest mb-1">
-            Salary / Pay Cycle Starts On
+            When did your last salary arrive?
           </ThemedText>
           <ThemedText type="secondary" className="text-xs mb-3">
-            Day of month your salary arrives — used to calculate monthly spend cycles.
+            Your spending cycle runs from that exact moment. You can update it each
+            month when the date moves.
           </ThemedText>
-          <View className="flex-row items-center gap-3 mb-8">
+          <TouchableOpacity
+            onPress={() => { setPickerMode('date'); setShowPicker(true); }}
+            activeOpacity={0.7}
+            className="flex-row items-center gap-3 mb-8"
+            style={{
+              padding: 14, borderRadius: 12, borderWidth: 1,
+              borderColor: colors.border, backgroundColor: colors.translucent,
+            }}
+          >
             <LucideCalendar color={colors.secondary} size={18} />
-            <TextInput
-              value={salaryDay}
-              onChangeText={v => {
-                const n = parseInt(v);
-                if (!v) { setSalaryDay(''); return; }
-                if (!isNaN(n) && n >= 1 && n <= 31) setSalaryDay(v);
+            <ThemedText style={{ flex: 1, fontSize: 16 }}>
+              {salaryAt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+              {' · '}
+              {salaryAt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+            </ThemedText>
+            <ThemedText type="secondary" className="text-xs">CHANGE</ThemedText>
+          </TouchableOpacity>
+
+          {showPicker && (
+            <DateTimePicker
+              value={salaryAt}
+              mode={Platform.OS === 'ios' ? 'datetime' : pickerMode}
+              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+              maximumDate={new Date()}
+              onChange={(event: any, selected?: Date) => {
+                if (event?.type === 'dismissed') { setShowPicker(false); setPickerMode('date'); return; }
+                if (!selected) return;
+                if (Platform.OS === 'ios') { setSalaryAt(selected); return; }
+                if (pickerMode === 'date') {
+                  const next = new Date(selected);
+                  next.setHours(salaryAt.getHours(), salaryAt.getMinutes(), 0, 0);
+                  setSalaryAt(next);
+                  setPickerMode('time');
+                  return;
+                }
+                const next = new Date(salaryAt);
+                next.setHours(selected.getHours(), selected.getMinutes(), 0, 0);
+                setSalaryAt(next);
+                setShowPicker(false);
+                setPickerMode('date');
               }}
-              keyboardType="number-pad"
-              placeholder="1"
-              placeholderTextColor={colors.muted}
-              style={{
-                flex: 1, padding: 14, borderRadius: 12, borderWidth: 1,
-                borderColor: colors.border, color: colors.primary,
-                backgroundColor: colors.translucent, fontSize: 16,
-              }}
-              maxLength={2}
             />
-            <ThemedText type="secondary" className="text-sm">of each month</ThemedText>
-          </View>
+          )}
 
           {/* Theme */}
           <ThemedText type="secondary" className="text-xs font-bold uppercase tracking-widest mb-3">
@@ -374,7 +401,7 @@ const OnboardingScreen = () => {
   const { preferences, completeOnboarding, setCurrency, setSalaryDay, setMonthlyBudget, setTheme } = useStore();
 
   const [step, setStep] = useState(0);
-  const [salaryDay, setSalaryDayLocal] = useState(String(preferences.salaryDay ?? 1));
+  const [salaryAt, setSalaryAtLocal] = useState<Date>(new Date());
   const [budget, setBudgetLocal] = useState(String(preferences.monthlyBudget ?? 50000));
   const [theme, setThemeLocal] = useState<'dark' | 'light' | 'system'>(preferences.theme ?? 'dark');
 
@@ -382,7 +409,10 @@ const OnboardingScreen = () => {
 
   const savePreferences = () => {
     setCurrency('₹');
-    setSalaryDay(parseInt(salaryDay) || 1);
+    // Record the real salary instant as the first cycle boundary. salaryDay is
+    // still mirrored so the fallback anchor stays sensible if the row is ever lost.
+    setSalaryDay(salaryAt.getDate());
+    addSalaryDate(salaryAt.toISOString(), 'manual').catch(() => {});
     setMonthlyBudget(parseFloat(budget) || 50000);
     setTheme(theme);
   };
@@ -395,7 +425,7 @@ const OnboardingScreen = () => {
       {step === 1 && (
         <PreferencesStep
           budget={budget} setBudget={setBudgetLocal}
-          salaryDay={salaryDay} setSalaryDay={setSalaryDayLocal}
+          salaryAt={salaryAt} setSalaryAt={setSalaryAtLocal}
           theme={theme} setTheme={setThemeLocal}
           onFinish={() => { savePreferences(); setStep(2); }}
         />

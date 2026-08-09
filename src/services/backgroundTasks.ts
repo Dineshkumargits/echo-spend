@@ -23,7 +23,13 @@ import {
   getSmsTransactionsPendingEnrichment,
   getTransactionById,
   updateTransaction,
+  getSalaryCycleWindowAsync,
+  getSalaryDates,
+  addSalaryDate,
+  setPendingSalaryDate,
+  clearPendingSalaryDate,
 } from './database';
+import { toLocalDateKey, cycleAnchorFrom } from './salaryCycle';
 import { runCategoryBudgetAlerts } from './budgetAlerts';
 import { SmsParserService, hashSms, matchSmsToAccount, smsReferencesAccountNumber } from './smsParserService';
 import { NotificationService } from './notifications';
@@ -315,6 +321,7 @@ export const processIncomingSms = async (body: string, date: number) => {
       } as Omit<Transaction, 'id'>;
 
       await addTransaction(txData);
+      await handleSalaryCredit(txData);
       const nowStr = new Date().toISOString();
       await updateAccountLastScanned(accountId, nowStr);
 
@@ -422,6 +429,62 @@ const _doEnrichPendingSms = async (): Promise<number> => {
 
   console.log(`[Enrich] AI-enriched ${enriched}/${pending.length} pending SMS transactions.`);
   return enriched;
+};
+
+
+/**
+ * Days since the last recorded salary below which a matching credit is treated
+ * as a bonus/arrear rather than the next payday. Real monthly gaps run 28–31,
+ * so 25 leaves room for an early payment without letting mid-month credits in.
+ */
+const AUTO_SALARY_MIN_GAP_DAYS = 25;
+
+/**
+ * React to a newly-saved credit that matches the user's salary category.
+ *
+ *  - Clear-cut (>= 25 days since the last recorded salary): record it and let the
+ *    budget cycle reset automatically, then notify — a gauge that moves on its
+ *    own with no explanation is alarming.
+ *  - Ambiguous (sooner than that): store it as a suggestion for the user to
+ *    confirm in Budget settings. Deliberately not discarded, so a genuinely
+ *    early salary is never lost, it just needs a tap.
+ */
+export const handleSalaryCredit = async (tx: {
+  type?: string;
+  category?: string;
+  date?: string;
+  isTransfer?: boolean;
+}) => {
+  try {
+    if (tx.type !== 'credit' || tx.isTransfer || !tx.date) return;
+
+    const { preferences } = useStore.getState();
+    const target = (preferences.salaryCategory ?? 'Salary').trim().toLowerCase();
+    if (!target) return;
+    if ((tx.category ?? '').trim().toLowerCase() !== target) return;
+
+    const when = new Date(tx.date);
+    if (Number.isNaN(when.getTime())) return;
+
+    const recorded = await getSalaryDates(1);
+    const last = recorded[0] ? new Date(recorded[0].occurredAt) : null;
+    const gapDays = last
+      ? Math.abs(when.getTime() - last.getTime()) / 86_400_000
+      : Number.POSITIVE_INFINITY;
+
+    if (gapDays >= AUTO_SALARY_MIN_GAP_DAYS) {
+      await addSalaryDate(when.toISOString(), 'detected');
+      await clearPendingSalaryDate();
+      await NotificationService.notifySalaryCycleReset(when.toISOString());
+      console.log('[SalaryDate] Auto-started new cycle at', when.toISOString());
+      return;
+    }
+
+    await setPendingSalaryDate(when.toISOString());
+    console.log('[SalaryDate] Suggested (ambiguous, gap', Math.round(gapDays), 'days)');
+  } catch (e) {
+    console.warn('[SalaryDate] Failed to handle salary credit:', e);
+  }
 };
 
 // ─── 2. Auto SMS Scan Task ───────────────────────────────────────────────────
@@ -600,6 +663,7 @@ const _doSmsScan = async (silent = false): Promise<BackgroundFetch.BackgroundFet
       } as Omit<Transaction, 'id'>;
 
       await addTransaction(txData);
+      await handleSalaryCredit(txData);
       newTxCount++;
       totalAmount += txData.amount ?? 0;
       if (!topMerchant && txData.merchant) topMerchant = txData.merchant;
@@ -664,11 +728,11 @@ TaskManager.defineTask(BACKGROUND_ALERTS_TASK, async () => {
     // Without this, alerts at 80/90/100% only ever fire once — in the first month
     // they're triggered — and never again as the history record persists indefinitely.
     {
-      const now = new Date();
-      const salaryDay = preferences.salaryDay ?? 1;
-      const cycleYear = now.getDate() >= salaryDay ? now.getFullYear() : (now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear());
-      const cycleMonth = now.getDate() >= salaryDay ? now.getMonth() : (now.getMonth() === 0 ? 11 : now.getMonth() - 1);
-      const cycleStart = new Date(cycleYear, cycleMonth, salaryDay).toISOString().split('T')[0];
+      // Uses the shared resolver so the reset boundary matches the gauges the
+      // alerts are about. The old inline math here overflowed short months for
+      // salaryDay 29–31, producing a cycle key that drifted off month-end.
+      const cycle = await getSalaryCycleWindowAsync(cycleAnchorFrom(preferences));
+      const cycleStart = toLocalDateKey(cycle.start);
       if (preferences.lastBudgetCycleReset !== cycleStart) {
         resetBudgetNotificationHistory(cycleStart);
       }
@@ -676,7 +740,7 @@ TaskManager.defineTask(BACKGROUND_ALERTS_TASK, async () => {
 
     // ── 1. Global monthly budget alert ───────────────────────────────────────
     if (preferences.budgetAlerts && preferences.monthlyBudget > 0) {
-      const spent = await getCurrentMonthSpend(preferences.salaryDay);
+      const spent = await getCurrentMonthSpend(cycleAnchorFrom(preferences));
       const pctValue = spent / preferences.monthlyBudget;
       const pct = Math.floor(pctValue * 10) * 10; // floor to 80 / 90 / 100
 

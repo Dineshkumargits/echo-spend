@@ -2,6 +2,7 @@ import { getBudgetImpactForCategory, getBudgetUtilization } from './database';
 import { NotificationService } from './notifications';
 import { notify } from '../utils/notify';
 import { useStore } from '../store/useStore';
+import { cycleAnchorFrom } from './salaryCycle';
 
 /**
  * In-app toast right after a debit is saved: which budget the spend landed in
@@ -9,8 +10,9 @@ import { useStore } from '../store/useStore';
  */
 export const showBudgetImpactToast = async (categoryName: string) => {
   try {
-    const { salaryDay, currency } = useStore.getState().preferences;
-    const u = await getBudgetImpactForCategory(categoryName, salaryDay);
+    const prefs = useStore.getState().preferences;
+    const { currency } = prefs;
+    const u = await getBudgetImpactForCategory(categoryName, cycleAnchorFrom(prefs));
     if (!u) return;
     const fmt = (n: number) => `${currency}${Math.round(n).toLocaleString('en-IN')}`;
     const name = u.displayName;
@@ -44,13 +46,13 @@ export const showBudgetImpactToast = async (categoryName: string) => {
  *   100 → exceeded
  */
 export const runCategoryBudgetAlerts = async () => {
-  const { budgetAlerts, budgetNotificationHistory, salaryDay, currency } =
-    useStore.getState().preferences;
+  const prefs = useStore.getState().preferences;
+  const { budgetAlerts, budgetNotificationHistory, currency } = prefs;
   const { updateBudgetNotificationHistory } = useStore.getState();
   if (!budgetAlerts) return;
 
   const fmt = (n: number) => `${currency}${Math.round(n).toLocaleString('en-IN')}`;
-  const utilizations = await getBudgetUtilization(salaryDay);
+  const utilizations = await getBudgetUtilization(cycleAnchorFrom(prefs));
 
   for (const u of utilizations) {
     if (u.orphaned) continue;
