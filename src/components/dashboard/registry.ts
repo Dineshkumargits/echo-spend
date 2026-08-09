@@ -23,7 +23,6 @@ export type WidgetId =
   | 'insight'
   | 'activity'
   // Added in the customizable-dashboard release.
-  | 'safeToSpend'
   | 'upcomingBills'
   | 'creditCards';
 
@@ -49,17 +48,10 @@ export const WIDGET_REGISTRY: WidgetMeta[] = [
   {
     id: 'hero',
     title: 'Net worth',
-    description: 'Total across accounts, minus credit card debt, with cycle progress.',
+    description: 'Net worth, cycle progress and what is safe to spend after bills.',
     emoji: '◈',
     defaultEnabled: true,
     core: true,
-  },
-  {
-    id: 'safeToSpend',
-    title: 'Safe to spend',
-    description: 'What is left after bills and commitments, and your daily allowance.',
-    emoji: '🧭',
-    defaultEnabled: true,
   },
   {
     id: 'inboxPulse',
@@ -85,7 +77,7 @@ export const WIDGET_REGISTRY: WidgetMeta[] = [
   {
     id: 'upcomingBills',
     title: 'Upcoming bills',
-    description: 'Subscriptions, EMIs and card payments due in the next 30 days.',
+    description: 'Subscriptions, EMIs and card payments still due this cycle.',
     emoji: '📅',
     defaultEnabled: true,
   },

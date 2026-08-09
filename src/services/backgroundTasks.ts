@@ -37,7 +37,8 @@ import {
   getAccounts,
 } from './database';
 import { toLocalDateKey, cycleAnchorFrom } from './salaryCycle';
-import { nextOccurrenceOfDay } from '../components/dashboard/derive';
+// Shared date helpers — a service must not reach into a components folder.
+import { nextOccurrenceOfDay, daysUntil, daysBetween } from '../utils/dateUtils';
 import { runCategoryBudgetAlerts } from './budgetAlerts';
 import { SmsParserService, hashSms, matchSmsToAccount, smsReferencesAccountNumber, parseCardStatementSms } from './smsParserService';
 import { NotificationService } from './notifications';
@@ -604,9 +605,9 @@ export const runCardDueReminders = async () => {
       const remaining = Math.max(st.totalDue - st.paidAmount, 0);
       if (remaining <= 0) continue;
 
-      const daysLeft = Math.ceil(
-        (new Date(st.dueDate).getTime() - now.getTime()) / 86_400_000,
-      );
+      // Calendar days on both sides — a statement due later today must read as
+      // 0 (due today), not 1, or the "due today" reminder never fires.
+      const daysLeft = daysUntil(st.dueDate, now);
       if (daysLeft < 0 || daysLeft > 7) continue;
 
       // Fire at the tightest threshold reached, once each.
@@ -669,9 +670,7 @@ export const runUtilizationNudges = async () => {
       if (pct < HIGH_UTILIZATION_PCT) continue;
 
       const statementDate = nextOccurrenceOfDay(card.statementDay as number, now);
-      const daysToStatement = Math.ceil(
-        (statementDate.getTime() - now.getTime()) / 86_400_000,
-      );
+      const daysToStatement = daysBetween(statementDate, now);
       if (daysToStatement < 0 || daysToStatement > UTILIZATION_NUDGE_DAYS) continue;
 
       // Once per card per statement month.

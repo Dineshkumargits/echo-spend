@@ -51,6 +51,7 @@ import { fonts, formatINR } from "../theme/tokens";
 import { SignalRow, IconTile, Card } from "../components/Kit";
 import { useAIInsights } from "../hooks/useAIInsights";
 import { WidgetId, visibleWidgetIds } from "../components/dashboard/registry";
+import { daysUntil, formatDueLabelLong } from "../utils/dateUtils";
 import { cycleAnchorFrom, type CycleWindow } from "../services/salaryCycle";
 import {
   toCycle,
@@ -61,7 +62,6 @@ import {
   CardHealth,
 } from "../components/dashboard/derive";
 import {
-  SafeToSpendWidget,
   UpcomingBillsWidget,
   CreditCardsWidget,
   InsightCarousel,
@@ -212,11 +212,6 @@ const DashboardScreen = ({ navigation }: any) => {
     [monthlySpend, preferences.monthlyBudget],
   );
 
-  const safeToSpend = useMemo(
-    () => preferences.monthlyBudget - monthlySpend,
-    [preferences.monthlyBudget, monthlySpend],
-  );
-
   const triggerHaptic = useCallback(
     (style = Haptics.ImpactFeedbackStyle.Light) => {
       if (preferences.hapticsEnabled) Haptics.impactAsync(style);
@@ -259,13 +254,26 @@ const DashboardScreen = ({ navigation }: any) => {
   const daysLeftInCycle = useMemo(() => cycle.daysRemaining, [cycle]);
 
   const upcomingBills = useMemo(
-    () => getUpcomingBills(subscriptions, loans, accounts, 30, new Date(), statements),
-    [subscriptions, loans, accounts, statements],
+    () => getUpcomingBills(subscriptions, loans, accounts, cycle.end, new Date(), statements),
+    [subscriptions, loans, accounts, statements, cycle],
   );
 
   const safeToSpendData = useMemo(
     () => getSafeToSpend(preferences.monthlyBudget, monthlySpend, upcomingBills, cycle),
     [preferences.monthlyBudget, monthlySpend, upcomingBills, cycle],
+  );
+
+  /**
+   * Budget minus spend minus bills still due before the cycle ends.
+   *
+   * Subtracting committed bills is the point: budget-minus-spend alone reads as
+   * a healthy surplus on the 28th even when rent clears on the 30th, which is
+   * exactly when people overspend. This used to live in a separate widget that
+   * duplicated the hero — one number now, and it is this one.
+   */
+  const safeToSpend = useMemo(
+    () => safeToSpendData.amount,
+    [safeToSpendData],
   );
 
   const cardHealth = useMemo(
@@ -287,13 +295,18 @@ const DashboardScreen = ({ navigation }: any) => {
     [preferences.hideAmounts, currency],
   );
 
+  /**
+   * Calendar days, not a raw millisecond diff.
+   *
+   * The old version did Math.ceil((due - now) / DAY) against the current time.
+   * Stored due dates carry a time-of-day (a subscription keeps whatever time it
+   * was created or last paid), so a bill due at 12:30 today read as "Tomorrow"
+   * all morning and only flipped to "Today" after 12:30.
+   */
   const getDaysLeft = (date: string) => {
-    const diff = new Date(date).getTime() - new Date().getTime();
-    const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
-    if (days === 0) return "Today";
-    if (days === 1) return "Tomorrow";
+    const days = daysUntil(date);
     if (days < 0) return "Overdue";
-    return `${days} days left`;
+    return formatDueLabelLong(days);
   };
 
   // ── Data loading (§4) ───────────────────────────────────────────────────────
@@ -569,20 +582,6 @@ const DashboardScreen = ({ navigation }: any) => {
   // fixed order — it walks the user's resolved layout and looks each id up
   // here, so reordering and hiding are pure data changes.
   const widgetSections: Partial<Record<WidgetId, React.ReactNode>> = {
-    // Safe to spend — budget minus spend minus bills still due this cycle,
-    // expressed as a daily allowance.
-    safeToSpend: (
-      <SafeToSpendWidget
-        data={safeToSpendData}
-        currency={currency}
-        masked={preferences.hideAmounts}
-        onSetBudget={() => {
-          triggerHaptic();
-          navigation.navigate("Budget");
-        }}
-      />
-    ),
-
     // Upcoming bills — subscriptions, EMIs and card payments in the next 30d.
     upcomingBills: (
       <UpcomingBillsWidget
@@ -624,6 +623,10 @@ const DashboardScreen = ({ navigation }: any) => {
         onPayBill={(card: CardHealth) => {
           triggerHaptic();
           setPayBillFor(card);
+        }}
+        onSeeAll={() => {
+          triggerHaptic();
+          navigation.navigate("Finances", { initialTab: "cards" });
         }}
       />
     ),

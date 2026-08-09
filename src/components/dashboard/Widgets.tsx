@@ -28,7 +28,7 @@ import { useTheme } from '../../theme/ThemeProvider';
 import { fonts, formatINR } from '../../theme/tokens';
 import { AmountText, SectionLabel, CycleBar } from '../Signal';
 import { Card, IconTile } from '../Kit';
-import type { SafeToSpend, UpcomingBill, CardHealth } from './derive';
+import type { UpcomingBill, CardHealth } from './derive';
 import { formatDueLabel, getInterestFreeInfo } from './derive';
 import type { Insight } from '../../services/database';
 
@@ -78,130 +78,6 @@ const MutedNote: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   );
 };
 
-// ─── Safe to spend ───────────────────────────────────────────────────────────
-
-interface SafeToSpendWidgetProps {
-  data: SafeToSpend;
-  currency: string;
-  masked: boolean;
-  onSetBudget: () => void;
-}
-
-export const SafeToSpendWidget: React.FC<SafeToSpendWidgetProps> = ({
-  data,
-  currency,
-  masked,
-  onSetBudget,
-}) => {
-  const { colors } = useTheme();
-
-  if (data.needsBudget) {
-    return (
-      <WidgetSection label="Safe to spend">
-        <Card onPress={onSetBudget}>
-          <ThemedText
-            style={{ fontFamily: fonts.display, fontSize: 17, color: colors.primary, marginBottom: 6 }}
-          >
-            Set a monthly budget
-          </ThemedText>
-          <MutedNote>
-            Safe-to-spend needs a budget to work out what is genuinely yours to
-            spend after bills. Tap to set one.
-          </MutedNote>
-        </Card>
-      </WidgetSection>
-    );
-  }
-
-  const overspent = data.amount < 0;
-  const tone = overspent ? colors.danger : data.onTrack ? colors.credit : colors.debit;
-
-  return (
-    <WidgetSection label="Safe to spend">
-      <Card>
-        <View style={{ flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' }}>
-          <View style={{ flex: 1 }}>
-            <AmountText
-              value={data.amount}
-              size={30}
-              currency={currency}
-              masked={masked}
-              kind={overspent ? 'debit' : 'credit'}
-            />
-            <ThemedText
-              style={{ fontFamily: fonts.text, fontSize: 12, color: colors.secondary, marginTop: 4 }}
-            >
-              {overspent
-                ? `over budget with ${data.daysRemaining}d to go`
-                : `left for the next ${data.daysRemaining}d`}
-            </ThemedText>
-          </View>
-
-          {/* The daily allowance is the number people actually act on. */}
-          <View style={{ alignItems: 'flex-end' }}>
-            <SectionLabel>Per day</SectionLabel>
-            <AmountText
-              value={data.perDay}
-              size={18}
-              currency={currency}
-              masked={masked}
-              kind="neutral"
-              style={{ marginTop: 4 }}
-            />
-          </View>
-        </View>
-
-        {/* Pace: actual daily burn against the pace the budget implies. */}
-        <View style={{ marginTop: 16 }}>
-          <CycleBar
-            pct={
-              data.idealPerDay > 0
-                ? Math.min((data.actualPerDay / data.idealPerDay) * 100, 100)
-                : 0
-            }
-            color={tone}
-          />
-          <View
-            style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}
-          >
-            <MutedNote>
-              {`Spending ${currency}${formatINR(data.actualPerDay)}/day`}
-            </MutedNote>
-            <ThemedText
-              style={{ fontFamily: fonts.textMedium, fontSize: 12, color: tone }}
-            >
-              {data.onTrack ? 'On track' : 'Above pace'}
-            </ThemedText>
-          </View>
-        </View>
-
-        {data.committed > 0 && (
-          <View
-            style={{
-              marginTop: 14,
-              paddingTop: 14,
-              borderTopWidth: 1,
-              borderTopColor: colors.border,
-              flexDirection: 'row',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-            }}
-          >
-            <MutedNote>Bills still due this cycle</MutedNote>
-            <AmountText
-              value={data.committed}
-              size={13}
-              currency={currency}
-              masked={masked}
-              kind="debit"
-            />
-          </View>
-        )}
-      </Card>
-    </WidgetSection>
-  );
-};
-
 // ─── Upcoming bills ──────────────────────────────────────────────────────────
 
 const BILL_ICON = {
@@ -237,8 +113,8 @@ export const UpcomingBillsWidget: React.FC<UpcomingBillsWidgetProps> = ({
       <WidgetSection label="Upcoming bills">
         <Card>
           <MutedNote>
-            Nothing due in the next 30 days. Subscriptions, EMIs and card
-            payments will appear here as they approach.
+            Nothing left to pay this cycle. Subscriptions, EMIs and card
+            payments appear here as they come due.
           </MutedNote>
         </Card>
       </WidgetSection>
@@ -318,7 +194,7 @@ export const UpcomingBillsWidget: React.FC<UpcomingBillsWidgetProps> = ({
             backgroundColor: colors.surfaceElevated,
           }}
         >
-          <SectionLabel>Due in 30d</SectionLabel>
+          <SectionLabel>Due this cycle</SectionLabel>
           <AmountText
             value={total}
             size={14}
@@ -342,6 +218,13 @@ interface CreditCardsWidgetProps {
   onAddCard: () => void;
   /** Opens the Pay Bill sheet. Omitted, the button is hidden. */
   onPayBill?: (card: CardHealth) => void;
+  /** Jump to the full Cards tab in Money. */
+  onSeeAll?: () => void;
+  /**
+   * How many cards get the full detail treatment. The rest collapse to one-line
+   * rows so a wallet with 5+ cards doesn't take over the dashboard.
+   */
+  detailLimit?: number;
 }
 
 export const CreditCardsWidget: React.FC<CreditCardsWidgetProps> = ({
@@ -351,8 +234,11 @@ export const CreditCardsWidget: React.FC<CreditCardsWidgetProps> = ({
   onPressCard,
   onAddCard,
   onPayBill,
+  onSeeAll,
+  detailLimit = 2,
 }) => {
   const { colors } = useTheme();
+  const [expanded, setExpanded] = useState(false);
 
   if (cards.length === 0) {
     return (
@@ -370,10 +256,56 @@ export const CreditCardsWidget: React.FC<CreditCardsWidgetProps> = ({
   const toneFor = (severity: CardHealth['severity']) =>
     severity === 'high' ? colors.danger : severity === 'warn' ? colors.debit : colors.credit;
 
+  // Cards needing attention lead: a bill to pay, or utilization worth acting on.
+  // Everything else collapses, so 5 quiet cards cost 5 lines instead of 5 cards.
+  const ranked = [...cards].sort((a, b) => {
+    const score = (c: CardHealth) =>
+      ((c.amountDue ?? 0) > 0 ? 2 : 0) + (c.severity === 'high' ? 1 : 0);
+    return score(b) - score(a);
+  });
+  const detailed = expanded ? ranked : ranked.slice(0, detailLimit);
+  const collapsed = expanded ? [] : ranked.slice(detailLimit);
+
+  const totalDue = cards.reduce((sum, c) => sum + (c.amountDue ?? 0), 0);
+  const totalOutstanding = cards.reduce((sum, c) => sum + c.outstanding, 0);
+
   return (
-    <WidgetSection label="Credit cards">
+    <WidgetSection
+      label="Credit cards"
+      action={onSeeAll ? { label: `All ${cards.length}`, onPress: onSeeAll } : undefined}
+    >
+      {/* One-line portfolio summary, so the headline numbers survive collapsing. */}
+      {cards.length > 1 && (
+        <Card style={{ padding: 14, marginBottom: 12 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+            <View>
+              <SectionLabel>Due now</SectionLabel>
+              <AmountText
+                value={totalDue}
+                size={17}
+                currency={currency}
+                masked={masked}
+                kind={totalDue > 0 ? 'debit' : 'neutral'}
+                style={{ marginTop: 3 }}
+              />
+            </View>
+            <View style={{ alignItems: 'flex-end' }}>
+              <SectionLabel>Outstanding</SectionLabel>
+              <AmountText
+                value={totalOutstanding}
+                size={17}
+                currency={currency}
+                masked={masked}
+                kind="neutral"
+                style={{ marginTop: 3 }}
+              />
+            </View>
+          </View>
+        </Card>
+      )}
+
       <View style={{ gap: 12 }}>
-        {cards.map((card, idx) => {
+        {detailed.map((card, idx) => {
           const tone = toneFor(card.severity);
           return (
             <MotiView
@@ -563,6 +495,63 @@ export const CreditCardsWidget: React.FC<CreditCardsWidgetProps> = ({
             </MotiView>
           );
         })}
+
+        {/* Quiet cards as one-line rows — still visible and tappable, but they
+            cost a line each instead of a full card. */}
+        {collapsed.map((card) => {
+          const tone = toneFor(card.severity);
+          return (
+            <Pressable
+              key={card.account.id}
+              onPress={() => onPressCard(card)}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 12,
+                paddingVertical: 10,
+                paddingHorizontal: 12,
+                borderRadius: 12,
+                borderWidth: 1,
+                borderColor: colors.border,
+              }}
+            >
+              <IconTile color={tone} size={28}>
+                <LucideCreditCard size={13} color={tone} />
+              </IconTile>
+              <ThemedText
+                numberOfLines={1}
+                style={{ flex: 1, fontFamily: fonts.textMedium, fontSize: 13, color: colors.primary }}
+              >
+                {card.account.name}
+              </ThemedText>
+              {card.hasLimit && (
+                <ThemedText
+                  style={{ fontFamily: fonts.signal, fontSize: 11, color: tone, marginRight: 10 }}
+                >
+                  {`${Math.round(card.utilizationPct)}%`}
+                </ThemedText>
+              )}
+              <AmountText
+                value={card.amountDue ?? card.outstanding}
+                size={13}
+                currency={currency}
+                masked={masked}
+                kind="debit"
+              />
+            </Pressable>
+          );
+        })}
+
+        {ranked.length > detailLimit && (
+          <Pressable
+            onPress={() => setExpanded((v) => !v)}
+            style={{ paddingVertical: 8, alignItems: 'center' }}
+          >
+            <SectionLabel color={colors.accent}>
+              {expanded ? 'Show less' : `Show all ${ranked.length} cards`}
+            </SectionLabel>
+          </Pressable>
+        )}
       </View>
     </WidgetSection>
   );

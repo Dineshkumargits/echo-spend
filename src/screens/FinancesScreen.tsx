@@ -18,7 +18,8 @@ import { useIsFocused } from '@react-navigation/native';
 import {
   getGoals, getLoans, getSubscriptions, getAccounts, getSplits,
   paySubscription, contributeToGoal, recordLoanPayment,
-  Goal, Loan, Subscription, Account, SplitWithStats,
+  getOpenStatements,
+  Goal, Loan, Subscription, Account, SplitWithStats, CardStatement,
 } from '../services/database';
 import { useTheme } from '../theme/ThemeProvider';
 import { useStore } from '../store/useStore';
@@ -204,6 +205,9 @@ export const FinancesScreen = ({ navigation, route }: any) => {
   const [loans, setLoans] = useState<Loan[]>([]);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [creditCards, setCreditCards] = useState<Account[]>([]);
+  // Open statements keyed by account — the Cards tab must quote what is actually
+  // DUE, not the running balance (which includes post-statement spend).
+  const [cardStatements, setCardStatements] = useState<CardStatement[]>([]);
   const [splits, setSplits] = useState<SplitWithStats[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
@@ -254,6 +258,7 @@ export const FinancesScreen = ({ navigation, route }: any) => {
     setSubscriptions(ss);
     setAccounts(accs);
     setCreditCards(accs.filter(a => a.accountType === 'credit_card'));
+    getOpenStatements().then(setCardStatements).catch(() => {});
     setSplits(sps);
     setLoading(false);
   };
@@ -861,6 +866,15 @@ export const FinancesScreen = ({ navigation, route }: any) => {
 
   const renderCardsTab = () => {
     const totalOutstanding = creditCards.reduce((s, c) => s + Math.max(c.balance, 0), 0);
+    // Oldest unpaid statement per card, and what is still owed on it.
+    const openFor = (id: number) =>
+      cardStatements
+        .filter(st => st.accountId === id && !st.isPaid)
+        .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())[0] ?? null;
+    const totalDue = creditCards.reduce((sum, c) => {
+      const st = openFor(c.id);
+      return sum + (st ? Math.max(st.totalDue - st.paidAmount, 0) : 0);
+    }, 0);
 
     return (
       <MotiView from={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 1.05 }}>
@@ -887,10 +901,19 @@ export const FinancesScreen = ({ navigation, route }: any) => {
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                   <LucideCreditCard color={colors.danger} size={20} />
                   <View>
-                    <ThemedText style={{ fontWeight: 'bold', fontSize: 15 }}>Total Outstanding</ThemedText>
-                    <ThemedText style={{ color: colors.danger, fontWeight: 'bold', fontSize: 20, marginTop: 2 }}>
-                      {preferences.hideAmounts ? '****' : `${preferences.currency}${totalOutstanding.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`}
+                    <ThemedText style={{ fontWeight: 'bold', fontSize: 15 }}>
+                      {totalDue > 0 ? 'Total Due Now' : 'Total Outstanding'}
                     </ThemedText>
+                    <ThemedText style={{ color: colors.danger, fontWeight: 'bold', fontSize: 20, marginTop: 2 }}>
+                      {preferences.hideAmounts ? '****' : `${preferences.currency}${(totalDue > 0 ? totalDue : totalOutstanding).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`}
+                    </ThemedText>
+                    {totalDue > 0 && totalOutstanding > totalDue && (
+                      <ThemedText style={{ fontSize: 11, color: colors.secondary, marginTop: 2 }}>
+                        {preferences.hideAmounts
+                          ? '****'
+                          : `${preferences.currency}${totalOutstanding.toLocaleString('en-IN')} outstanding incl. unbilled`}
+                      </ThemedText>
+                    )}
                   </View>
                 </View>
               </View>
@@ -902,6 +925,10 @@ export const FinancesScreen = ({ navigation, route }: any) => {
                 : null;
               const available = card.creditLimit ? card.creditLimit - card.balance : null;
 
+              const openStatement = openFor(card.id);
+              const cardDue = openStatement
+                ? Math.max(openStatement.totalDue - openStatement.paidAmount, 0)
+                : null;
               const hasCycle = !!(card.statementDay || card.billDueDay);
               const isPaidUp = hasCycle && card.balance <= 0;
               const nextEvent = hasCycle && !isPaidUp ? getNextCardEvent(card.statementDay, card.billDueDay) : null;
@@ -935,9 +962,20 @@ export const FinancesScreen = ({ navigation, route }: any) => {
                     </View>
                     <View style={{ alignItems: 'flex-end' }}>
                       <ThemedText style={{ color: colors.danger, fontWeight: 'bold', fontSize: 18 }}>
-                        {preferences.hideAmounts ? '****' : `-${preferences.currency}${card.balance.toLocaleString('en-IN')}`}
+                        {preferences.hideAmounts
+                          ? '****'
+                          : `-${preferences.currency}${(cardDue ?? card.balance).toLocaleString('en-IN')}`}
                       </ThemedText>
-                      <ThemedText style={{ fontSize: 10, color: colors.secondary }}>OUTSTANDING</ThemedText>
+                      <ThemedText style={{ fontSize: 10, color: colors.secondary }}>
+                        {cardDue !== null ? 'DUE NOW' : 'OUTSTANDING'}
+                      </ThemedText>
+                      {cardDue !== null && card.balance > cardDue && (
+                        <ThemedText style={{ fontSize: 10, color: colors.secondary, marginTop: 2 }}>
+                          {preferences.hideAmounts
+                            ? '****'
+                            : `+${preferences.currency}${(card.balance - cardDue).toLocaleString('en-IN')} unbilled`}
+                        </ThemedText>
+                      )}
                     </View>
                   </View>
 

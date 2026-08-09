@@ -8,19 +8,16 @@
  */
 import type { Account, Subscription, Loan, CardStatement } from '../../services/database';
 
-const DAY_MS = 86_400_000;
+import {
+  DAY_MS,
+  startOfDay,
+  daysUntil,
+  nextOccurrenceOfDay,
+  formatDueLabel,
+} from '../../utils/dateUtils';
 
-const startOfDay = (d: Date): Date => {
-  const c = new Date(d);
-  c.setHours(0, 0, 0, 0);
-  return c;
-};
-
-/** Whole days from today to `iso`. Negative means overdue. */
-export const daysUntil = (iso: string, now = new Date()): number =>
-  Math.round(
-    (startOfDay(new Date(iso)).getTime() - startOfDay(now).getTime()) / DAY_MS,
-  );
+// Re-exported so existing importers keep working unchanged.
+export { daysUntil, nextOccurrenceOfDay, formatDueLabel };
 
 // ─── Financial cycle ─────────────────────────────────────────────────────────
 
@@ -84,7 +81,12 @@ export const getUpcomingBills = (
   subscriptions: Subscription[],
   loans: Loan[],
   accounts: Account[],
-  withinDays = 30,
+  /**
+   * End of the current budget cycle. Bills due after it belong to NEXT cycle and
+   * are excluded — otherwise rent paid on the 1st reappears on the 9th as "due
+   * in 22 days", which reads as if it were still owed.
+   */
+  cycleEnd: Date,
   now = new Date(),
   /** Open card statements. Without these, card bills are omitted rather than guessed. */
   statements: CardStatement[] = [],
@@ -144,23 +146,10 @@ export const getUpcomingBills = (
   }
 
   return bills
-    .filter((b) => b.daysLeft <= withinDays)
+    // Overdue items are always kept — a genuinely missed bill is the most
+    // important thing here — but nothing from the next cycle leaks in.
+    .filter((b) => b.daysLeft < 0 || new Date(b.dueDate) < cycleEnd)
     .sort((a, b) => a.daysLeft - b.daysLeft);
-};
-
-/**
- * The next date landing on `dayOfMonth`, this month if it hasn't passed yet,
- * otherwise next month. Clamped so day 31 resolves in short months.
- */
-export const nextOccurrenceOfDay = (dayOfMonth: number, now = new Date()): Date => {
-  const today = startOfDay(now);
-  const day = Math.min(Math.max(Math.round(dayOfMonth) || 1, 1), 31);
-  const build = (year: number, month: number): Date => {
-    const lastDay = new Date(year, month + 1, 0).getDate();
-    return startOfDay(new Date(year, month, Math.min(day, lastDay)));
-  };
-  const thisMonth = build(today.getFullYear(), today.getMonth());
-  return thisMonth >= today ? thisMonth : build(today.getFullYear(), today.getMonth() + 1);
 };
 
 // ─── Safe to spend ───────────────────────────────────────────────────────────
@@ -294,13 +283,6 @@ export const getCardHealth = (
     })
     .sort((a, b) => b.utilizationPct - a.utilizationPct);
 
-/** "Today" / "Tomorrow" / "in 4d" / "3d overdue" */
-export const formatDueLabel = (daysLeft: number): string => {
-  if (daysLeft < 0) return `${Math.abs(daysLeft)}d overdue`;
-  if (daysLeft === 0) return 'Today';
-  if (daysLeft === 1) return 'Tomorrow';
-  return `in ${daysLeft}d`;
-};
 
 /**
  * How long a purchase made *today* stays interest-free.
