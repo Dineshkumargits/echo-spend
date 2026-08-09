@@ -338,9 +338,26 @@ const BudgetScreen = () => {
     // Each selection maps to a category group (name + its subcategories) —
     // exactly the budget's own matching. Budget lives on the root stack, so
     // target the Txns tab through the Main navigator.
+    //
+    // The window matters as much as the categories: this used to pass no date
+    // filter at all, so the list fell back to its "all" default and showed every
+    // matching transaction ever, not the ones behind the figure just tapped.
+    // A "month" preset would be wrong too — monthly budgets run on the salary
+    // cycle and weekly ones on a Monday-start week — so the row's own measured
+    // window is carried across verbatim.
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    // windowEnd is exclusive; the filter's endDate is inclusive.
+    const endInclusive = new Date(new Date(u.windowEnd).getTime() - 86_400_000);
+
     navigation.navigate("Main", {
       screen: "Txns",
-      params: { presetCategoryGroups: budgetSelections(u.budget) },
+      params: {
+        presetCategoryGroups: budgetSelections(u.budget),
+        presetDatePreset: "custom",
+        presetCustomStart: fmt(new Date(u.windowStart)),
+        presetCustomEnd: fmt(endInclusive),
+      },
     });
   };
 

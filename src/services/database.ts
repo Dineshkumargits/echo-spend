@@ -2595,6 +2595,15 @@ export interface BudgetUtilization {
   pace: BudgetPace;
   /** true when the budget's category no longer exists */
   orphaned: boolean;
+  /**
+   * The exact window this row was measured over — the salary cycle for monthly
+   * budgets, a Monday-start week for weekly ones. Exposed so a "view
+   * transactions" drill-down can filter to the SAME window; without it the list
+   * defaulted to all-time and showed far more than the budget counted.
+   */
+  windowStart: string;
+  /** Exclusive end of the measured window. */
+  windowEnd: string;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -2671,6 +2680,8 @@ export const getBudgetUtilization = async (
       elapsedPct,
       projectedSpend,
       pace,
+      windowStart: win.start.toISOString(),
+      windowEnd: win.end.toISOString(),
       // Orphaned only when every selected category is gone — partial losses
       // still match remaining names.
       orphaned: selections.every((n) => !liveNames.has(n)),
