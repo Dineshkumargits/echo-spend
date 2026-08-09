@@ -28,7 +28,7 @@ const AIModelSetupStep = ({ onComplete, showClose = false }: AIModelSetupStepPro
   const navigation = useNavigation<any>();
   const { aiModelStatus, aiModelProgress, aiModelError } = useStore();
   const [error, setError] = useState<string | null>(null);
-  const [expectedSize, setExpectedSize] = useState<string>('~1.2 GB');
+  const [expectedSize, setExpectedSize] = useState<string>('~380 MB');
   const [loadingSize, setLoadingSize] = useState<boolean>(true);
 
   useEffect(() => {
@@ -158,7 +158,7 @@ const AIModelSetupStep = ({ onComplete, showClose = false }: AIModelSetupStepPro
             {isComplete
               ? 'Your offline Echo AI is set up. Smart SMS parsing is now active.'
               : !isCompatible
-                ? 'Echo AI is disabled because your device has less than 2GB of total RAM. Echo Spend will use high-performance local regex parsing to scan transactions safely.'
+                ? 'Echo AI is disabled because your device has less than 4GB of total RAM. Echo Spend will use high-performance local regex parsing to scan transactions safely.'
                 : 'A small local AI will be downloaded to your device for intelligent SMS analysis. Everything runs locally — your data never leaves your phone.'}
           </ThemedText>
 

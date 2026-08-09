@@ -6,7 +6,7 @@ import { useStore } from '../store/useStore';
 
 const extra = Constants.expoConfig?.extra ?? {};
 const AI_MODEL_URL: string =
-  extra.aiModelUrl || 'https://huggingface.co/ADKDinesh/Qwen2.5-1.5B-SMS-Finance-Parser-GGUF/resolve/main/qwen2.5-1.5b-sms-finance-parser-q4_k_m.gguf';
+  extra.aiModelUrl || 'https://huggingface.co/ADKDinesh/Qwen2.5-0.5B-SMS-Finance-Parser-GGUF/resolve/main/qwen2.5-0.5b-sms-finance-parser-q4_k_m.gguf';
 
 const MODEL_DIR = `${FileSystem.documentDirectory}models/`;
 const getModelFilename = (): string => {
@@ -17,13 +17,16 @@ const getModelFilename = (): string => {
       return lastPart;
     }
   } catch { /* fallback */ }
-  return 'qwen2.5-1.5b-sms-finance-parser-q4_k_m.gguf';
+  return 'qwen2.5-0.5b-sms-finance-parser-q4_k_m.gguf';
 };
 const MODEL_FILENAME = getModelFilename();
 const MODEL_PATH = `${MODEL_DIR}${MODEL_FILENAME}`;
 
 // Auto-release model from RAM after this many ms of inactivity
 const AUTO_RELEASE_MS = 60_000;
+
+// Minimum total device RAM before Echo AI is offered at all. See isDeviceCompatible.
+const MIN_DEVICE_RAM_BYTES = 4 * 1024 * 1024 * 1024;
 
 // ─── Singleton State ─────────────────────────────────────────────────────────
 
@@ -36,6 +39,25 @@ let _downloadResumable: FileSystem.DownloadResumable | null = null;
 // releaseModel() would null the context out from under a job still mid-batch —
 // every remaining inference then throws "AI model is not loaded".
 let _refCount = 0;
+
+/**
+ * Threads to give llama.cpp. A hardcoded 2 left most of the CPU idle on the
+ * 6- and 8-core devices this app actually runs on, and on a CPU-only context
+ * decode throughput scales close to linearly with threads until memory bandwidth
+ * saturates — so this is the cheapest latency win available.
+ *
+ * Neither expo-device nor React Native exposes a core count without a native
+ * module, so RAM stands in as a proxy for device class: in practice Android
+ * phones with >=6GB are 8-core, 4-6GB are 8-core but slower, and anything under
+ * 4GB is a low-end 4-core. Two cores are always left for the UI thread and the
+ * rest of the system so a scan can't make the app janky.
+ */
+const inferenceThreadCount = (): number => {
+  const gb = (Device.totalMemory ?? 0) / (1024 * 1024 * 1024);
+  if (gb >= 6) return 6;
+  if (gb >= 4) return 4;
+  return 2;
+};
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -81,7 +103,7 @@ export const AIModelManager = {
     } catch (e) {
       console.warn('[AIModelManager] Failed to fetch dynamic model size, using fallback:', e);
     }
-    return 986047968; // fallback ~940 MB
+    return 397807392; // fallback ~379 MB (0.5B q4_k_m)
   },
 
   /** Get human-readable formatted expected model size */
@@ -120,11 +142,18 @@ export const AIModelManager = {
    * Calls `onProgress(0–100)` during download.
    * Resolves `true` on success, throws on failure.
    */
-  /** Check if the device is compatible (has at least 2GB of total RAM) */
+  /** Check if the device is compatible (has at least 4GB of total RAM) */
   isDeviceCompatible(): boolean {
+    // A 2GB floor was aspirational rather than honest: the model file alone is
+    // ~380MB, and a 2GB device running Android plus the app has little to spare
+    // free. Those devices passed the gate, downloaded a GB over mobile data, then
+    // either OOM'd on initLlama or ran inference so slowly that the scan timed
+    // out — the worst possible outcome, since it looks like the app is broken.
+    // 4GB is the realistic floor for loading it at all; below that, regex-only
+    // parsing is genuinely the better product.
     const totalMemory = Device.totalMemory;
-    if (totalMemory && totalMemory < 2 * 1024 * 1024 * 1024) {
-      console.warn('[AIModelManager] Device incompatible: total RAM is < 2GB:', totalMemory);
+    if (totalMemory && totalMemory < MIN_DEVICE_RAM_BYTES) {
+      console.warn('[AIModelManager] Device incompatible: total RAM is < 4GB:', totalMemory);
       return false;
     }
     return true;
@@ -155,7 +184,7 @@ export const AIModelManager = {
     onProgress?: (percent: number) => void,
   ): Promise<boolean> {
     if (!AIModelManager.isDeviceCompatible()) {
-      throw new Error('Device is not compatible: at least 2GB of total RAM is required.');
+      throw new Error('Device is not compatible: at least 4GB of total RAM is required.');
     }
 
     // Guard: Prevent concurrent downloads
@@ -287,7 +316,7 @@ export const AIModelManager = {
   /** Load the model into memory. No-op if already loaded. */
   async initModel(): Promise<boolean> {
     if (!AIModelManager.isDeviceCompatible()) {
-      console.warn('[AIModelManager] Cannot init model: device total RAM is < 2GB.');
+      console.warn('[AIModelManager] Cannot init model: device total RAM is < 4GB.');
       return false;
     }
     if (_context) {
@@ -310,7 +339,7 @@ export const AIModelManager = {
       _context = await initLlama({
         model: MODEL_PATH,
         n_ctx: 2048,      // 2048 context — safe for mobile and covers prompt + categories
-        n_threads: 2,     // Don't hog all CPU cores
+        n_threads: inferenceThreadCount(),
         n_gpu_layers: 0,  // CPU-only for max device compatibility
         use_mlock: false,  // Don't lock pages — let OS manage memory
       });
@@ -328,7 +357,7 @@ export const AIModelManager = {
       // size-checked at fetch time — so initLlama throwing almost always means
       // a runtime/native issue: missing JSI bindings on an unsupported ABI,
       // transient OOM (common in headless background scans), etc. None of these
-      // are fixed by re-downloading the ~940 MB model, yet setting status to
+      // are fixed by re-downloading the ~380 MB model, yet setting status to
       // 'error' makes every screen nag "Echo AI Download Failed → redownload".
       // Keep the model marked 'downloaded' so parsing silently falls back to
       // regex and loading can be retried later. Only flag for redownload when
@@ -369,7 +398,7 @@ export const AIModelManager = {
    * Drop a hold taken by acquireModel(). The last holder decides what happens:
    * `immediate` unloads right away (headless/background callers, where RAM
    * pressure kills the task), otherwise the context is left warm for the idle
-   * timer so a foreground screen doesn't pay a ~940 MB reload.
+   * timer so a foreground screen doesn't pay a ~380 MB reload.
    */
   async releaseHold(immediate = false): Promise<void> {
     _refCount = Math.max(0, _refCount - 1);
@@ -449,7 +478,10 @@ export const AIModelManager = {
       maxTokens = 512,
       temperature = 0.1,
       timeoutMs = 25000,
-      stopSequences = ['}'],
+      // Callers that constrain output with a JSON grammar need no stop sequence —
+      // the grammar itself ends generation. Defaulting to '}' truncated the closing
+      // brace off every response and required patching it back on.
+      stopSequences = [],
       jsonSchema,
     } = options ?? {};
 
@@ -477,13 +509,6 @@ export const AIModelManager = {
     try {
       const result = await Promise.race([inferencePromise, timeoutPromise]);
       const text = (result as any)?.text ?? '';
-
-      // Append the final '}' that was used as a stop sequence (if the output looks like JSON)
-      if (text.trim().length > 0 && !text.trim().endsWith('}')) {
-        const completedText = text + '}';
-        console.log('[AIModelManager] Inference complete (JSON post-processed).');
-        return completedText;
-      }
       console.log('[AIModelManager] Inference complete.');
       return text;
     } catch (err) {

@@ -442,7 +442,7 @@ const SettingsScreen = ({ navigation }: any) => {
   const [autoLockInput, setAutoLockInput] = useState(
     (preferences?.autoLockMinutes ?? 5).toString(),
   );
-  const [expectedModelSize, setExpectedModelSize] = useState<string>("~1.2 GB");
+  const [expectedModelSize, setExpectedModelSize] = useState<string>("~380 MB");
   const [loadingExpectedSize, setLoadingExpectedSize] = useState<boolean>(true);
 
   useEffect(() => {

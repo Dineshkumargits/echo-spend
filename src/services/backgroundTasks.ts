@@ -39,6 +39,7 @@ import {
 import { toLocalDateKey, cycleAnchorFrom } from './salaryCycle';
 // Shared date helpers — a service must not reach into a components folder.
 import { nextOccurrenceOfDay, daysUntil, daysBetween } from '../utils/dateUtils';
+import { isScanCandidate } from '../utils/smsFilter';
 import { runCategoryBudgetAlerts } from './budgetAlerts';
 import { SmsParserService, hashSms, matchSmsToAccount, smsReferencesAccountNumber, parseCardStatementSms } from './smsParserService';
 import { NotificationService } from './notifications';
@@ -98,15 +99,53 @@ const waitForHydration = (timeoutMs = 10000): Promise<void> =>
     }, timeoutMs);
   });
 
-const BANK_KEYWORDS = [
-  'debited', 'credited', 'spent', 'received', 'transferred', 'withdrawn',
-  'paid', 'payment', 'purchase', 'txn', 'upi', 'vpa', 'neft', 'imps', 'atm', 'pos',
-  'inr', 'rs.', 'rs ', '₹', 'transaction', 'a/c', 'acct', 'account', 'bal',
-  'deducted', 'charged', 'sent', 'amount', 'amt', 'dr', 'cr', 'card',
-  'salary', 'refund', 'cashback', 'deposited', 'deposit',
-];
-const OTP_KEYWORDS = ['otp', 'password', 'verification code', 'one time', 'one-time'];
-// Due reminders, promos, and balance alerts are sent to AI for classification — no EXCLUDE_KEYWORDS here.
+// Keyword lists now live in src/utils/smsFilter.ts so the foreground SmartScan
+// and this background scan share one definition of "worth parsing".
+// Due reminders, promos, and balance alerts still reach the AI for classification.
+
+// SmsProvider reads are capped per call, and the provider orders newest-first —
+// so any single capped read drops the oldest messages in the window rather than
+// failing loudly. These bound the paging below: PAGE_SIZE per query, and a hard
+// ceiling so a first-ever scan over a huge inbox can't run the task out of time.
+const SMS_PAGE_SIZE = 250;
+const SMS_MAX_TOTAL = 5000;
+
+/**
+ * Read every SMS in the inbox from `minDate` onwards, paging through SmsProvider
+ * until it runs dry. Returns newest-first, the same order a single call gave.
+ */
+const listAllSms = async (
+  SmsAndroid: any,
+  minDate: number,
+): Promise<{ body: string; date: number }[]> => {
+  const all: { body: string; date: number }[] = [];
+
+  for (let indexFrom = 0; indexFrom < SMS_MAX_TOTAL; indexFrom += SMS_PAGE_SIZE) {
+    const page = await new Promise<{ body: string; date: number }[]>((resolve) => {
+      SmsAndroid.list(
+        JSON.stringify({ box: 'inbox', maxCount: SMS_PAGE_SIZE, indexFrom, minDate }),
+        () => resolve([]),
+        (_: number, list: string) => {
+          try {
+            const parsed = JSON.parse(list) as any[];
+            resolve(parsed.map((s: any) => ({ body: s.body as string, date: s.date as number })));
+          } catch {
+            resolve([]);
+          }
+        },
+      );
+    });
+
+    all.push(...page);
+    // A short page means the provider has no more rows in this window.
+    if (page.length < SMS_PAGE_SIZE) break;
+  }
+
+  if (all.length >= SMS_MAX_TOTAL) {
+    console.warn(`[SmsScan] Hit the ${SMS_MAX_TOTAL} SMS ceiling — window may be truncated.`);
+  }
+  return all;
+};
 
 // ─── 1. Cloud Sync Task ──────────────────────────────────────────────────────
 
@@ -299,7 +338,7 @@ export const processIncomingSms = async (body: string, date: number) => {
     const { context, merchantHints } = await SmsParserService.getContext();
 
     // Real-time path is REGEX-ONLY (preferRegexOnly) — it must never load the
-    // ~940 MB model in a headless context, which OOMs/times out and drops the SMS.
+    // ~380 MB model in a headless context, which OOMs/times out and drops the SMS.
     // Regex parses standard bank SMS reliably and fast; the AI enriches later
     // during the periodic/foreground scan. AI is still used here if already warm.
     const result = await SmsParserService.parse(body, [], merchantHints, context, date, {
@@ -436,7 +475,7 @@ const _doEnrichPendingSms = async (): Promise<number> => {
     }
   } finally {
     // Not `immediate`: this runs in the foreground too, so leave the context warm
-    // for the idle timer rather than forcing the next caller to reload ~940 MB.
+    // for the idle timer rather than forcing the next caller to reload ~380 MB.
     AIModelManager.releaseHold().catch(() => {});
   }
 
@@ -755,16 +794,11 @@ const _doSmsScan = async (silent = false): Promise<BackgroundFetch.BackgroundFet
       return BackgroundFetch.BackgroundFetchResult.NoData;
     }
 
-    smsInbox = await new Promise<{ body: string; date: number }[]>((resolve) => {
-      SmsAndroid.list(
-        JSON.stringify({ box: 'inbox', maxCount: 250, indexFrom: 0, minDate: fetchFromMs }),
-        () => resolve([]),
-        (_: number, list: string) => {
-          const parsed = JSON.parse(list) as any[];
-          resolve(parsed.map((s: any) => ({ body: s.body as string, date: s.date as number })));
-        }
-      );
-    });
+    // SmsProvider returns newest-first, so a single capped read silently drops the
+    // OLDEST messages in the window. With a month-wide cursor and a busy inbox the
+    // 250-row cap was routinely hit, which is why some bank SMS never showed up in
+    // a scan. Page through instead so the whole window is always covered.
+    smsInbox = await listAllSms(SmsAndroid, fetchFromMs);
   } catch {
     return BackgroundFetch.BackgroundFetchResult.Failed;
   }
@@ -773,11 +807,7 @@ const _doSmsScan = async (silent = false): Promise<BackgroundFetch.BackgroundFet
 
   // Cheap pre-filter: skip OTPs and non-financial SMS.
   // Due reminders and promos are intentionally kept here — AI's isTransaction gate handles them.
-  const filtered = smsInbox.filter(sms => {
-    const lower = sms.body.toLowerCase();
-    if (OTP_KEYWORDS.some((k: string) => lower.includes(k))) return false;
-    return BANK_KEYWORDS.some((k: string) => lower.includes(k));
-  });
+  const filtered = smsInbox.filter(sms => isScanCandidate(sms.body));
 
   if (filtered.length === 0) return BackgroundFetch.BackgroundFetchResult.NoData;
 

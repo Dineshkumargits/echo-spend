@@ -60,7 +60,7 @@ export const TipsScreen = () => {
 
   const [isBatteryOptimized, setIsBatteryOptimized] = useState(true);
   const [isExactAlarmAllowed, setIsExactAlarmAllowed] = useState(true);
-  const [expectedModelSize, setExpectedModelSize] = useState<string>('~1.2 GB');
+  const [expectedModelSize, setExpectedModelSize] = useState<string>('~380 MB');
   const [loadingExpectedSize, setLoadingExpectedSize] = useState<boolean>(true);
 
   useEffect(() => {

@@ -19,6 +19,7 @@ import {
 import { extractJSONObject } from '../utils/extractJSON';
 import { notify } from '../utils/notify';
 import { AIModelManager } from './aiModelManager';
+import { SMS_PARSER_SYSTEM_PROMPT } from './generated/smsPrompt';
 
 // Re-exported so existing importers keep working unchanged.
 import { normalizeSmsBody, hashSms } from './smsHash';
@@ -615,6 +616,14 @@ function buildBudgetContext(budgets: Budget[]): string {
   return monthly ? `\nMonthly budgets set by user: ${monthly}` : '';
 }
 
+/** Render an ISO timestamp as the DD-MM-YYYY form the model was fine-tuned on. */
+function toTrainingDate(isoDate: string): string {
+  const d = new Date(isoDate);
+  if (Number.isNaN(d.getTime())) return isoDate;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${d.getFullYear()}`;
+}
+
 /**
  * On-device LLM parser — used only for ambiguous SMS that regex can't handle confidently.
  * Returns a parsed result or null if the LLM determines it's not a transaction.
@@ -647,23 +656,20 @@ async function parseWithLLM(
   const categoryHint = `[${categoryNames.map(name => `'${name}'`).join(', ')}]`;
   const merchantContext = 'Merchant Context: Clean string resolution for known nodes.';
 
-  // Byte-for-byte exact prompt template used during SFT fine-tuning and validation
+  // Training writes the date as DD-MM-YYYY. Passing an ISO timestamp here (which
+  // is what `smsDate` carries) is off-distribution and measurably degrades the
+  // date-sensitive rules, so format it the way the model was taught to read it.
+  const promptDate = toTrainingDate(smsDate);
+
+  // The system block is generated from the SFT dataset — see
+  // model-training-lab/echo-spend-01/export_prompt_to_app.py. Keeping the served
+  // prompt identical to the trained one is what makes the fine-tune worth having;
+  // never hand-edit it here.
   const prompt = `<|im_start|>system
-You are a strict, deterministic banking SMS data extraction engine. Analyze the provided SMS input text and output a single valid JSON object matching the exact schema keys in sequence.
-
-Schema:
-{"isTransaction": boolean, "amount": float, "merchant": string, "type": string, "category": string}
-
-Rules:
-1. isTransaction MUST be false for alerts, payment requests, links, OTP verification codes, minimum balance warnings, statement generation notices, pre-approved limit offers, standing instruction activations, mandate setups, subscription registrations, failed/declined transactions, card activations, marketing/promotional offers, voucher rewards, or EMI conversion advertisements. It is true ONLY if money has explicitly and successfully been debited, credited, or spent.
-2. If isTransaction is false, the amount key MUST be strictly forced to 0.
-3. If isTransaction is false and no merchant is being paid, use the bank or service name as the merchant.
-4. type MUST be determined by what happened to YOUR account: if YOUR account was credited, type is "credit". If YOUR account was debited or money was spent, type is "debit". Ignore references to other accounts.
-5. amount MUST be the actual transaction amount, NOT the available balance, available limit, or any other number in the SMS.
-6. Output ONLY the raw JSON block without markdown backticks.<|im_end|>
+${SMS_PARSER_SYSTEM_PROMPT}<|im_end|>
 <|im_start|>user
 SMS: "${smsBody}"
-SMS Date: ${smsDate}
+SMS Date: ${promptDate}
 Available Categories: ${categoryHint}
 ${merchantContext}
 
@@ -686,14 +692,20 @@ Return JSON matching the schema.<|im_end|>
 
   try {
     const rawOutput = await AIModelManager.runInference(prompt, {
-      maxTokens: 256,
+      // The schema above is a flat five-key object; a correct response is ~40
+      // tokens. 256 only ever mattered when the model ran away, and on a CPU-only
+      // context decode is the dominant cost — every unused token in this budget is
+      // latency the user waits for. The grammar guarantees a well-formed object,
+      // so a tight cap can't truncate a valid answer.
+      maxTokens: 80,
       temperature: 0.1,
       timeoutMs: 25000,
-      stopSequences: ['}'],
+      // No stop sequence: the JSON grammar terminates generation on its own at the
+      // closing brace. Stopping on '}' instead removed that brace from the output
+      // and forced a string-patching step that broke on any nested object.
+      stopSequences: [],
       jsonSchema: JSON.stringify(schema),
     });
-
-    console.log('raw output=======', rawOutput)
 
     if (!rawOutput || rawOutput.trim() === '') {
       return null;
@@ -814,7 +826,7 @@ export const SmsParserService = {
     // incorrectly on SMSes that contain both "credited" and "debited" words.
     let modelLoaded = AIModelManager.isModelLoaded();
     // Low-latency callers (real-time incoming-SMS handler) pass preferRegexOnly to
-    // skip the heavy on-demand model load — loading ~940 MB in a headless context
+    // skip the heavy on-demand model load — loading ~380 MB in a headless context
     // frequently OOMs or overruns the task timeout, which silently drops the SMS.
     // They use the AI only if it is ALREADY warm; otherwise regex handles it.
     if (!modelLoaded && !opts?.preferRegexOnly && await AIModelManager.isModelDownloaded() && AIModelManager.isDeviceCompatible()) {

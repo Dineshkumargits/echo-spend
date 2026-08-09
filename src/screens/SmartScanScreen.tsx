@@ -60,6 +60,7 @@ import { useStore } from "../store/useStore";
 import { setForegroundScanActive } from "../services/backgroundTasks";
 import { MotiView, AnimatePresence } from "moti";
 import { notify } from "../utils/notify";
+import { isScanCandidate } from "../utils/smsFilter";
 import { useTheme } from "../theme/ThemeProvider";
 import {
   ThemedSafeAreaView,
@@ -74,58 +75,8 @@ import { fonts } from "../theme/tokens";
 
 type Phase = "scanning" | "review";
 
-// Cheap pre-filter: at least one financial term must be present before we bother sending to AI.
-const BANK_KEYWORDS = [
-  "debited",
-  "credited",
-  "spent",
-  "received",
-  "transferred",
-  "withdrawn",
-  "deposited",
-  "paid",
-  "payment",
-  "purchase",
-  "rs.",
-  "rs ",
-  "₹",
-  "inr",
-  "upi",
-  "vpa",
-  "neft",
-  "imps",
-  "rtgs",
-  "atm",
-  "pos",
-  "txn",
-  "transaction",
-  "a/c",
-  "acct",
-  "account",
-  "bal",
-  "deducted",
-  "charged",
-  "sent",
-  "amount",
-  "amt",
-  "dr",
-  "cr",
-  "card",
-  "salary",
-  "refund",
-  "cashback",
-  "deposited",
-  "deposit",
-];
-// Always skip OTPs — never send them to AI.
-const OTP_KEYWORDS = [
-  "otp",
-  "one time",
-  "password",
-  "verification code",
-  "one-time",
-];
-// Everything else (due reminders, promos, balance alerts) is sent to AI for classification.
+// Pre-filter keywords live in src/utils/smsFilter.ts, shared with the background
+// scan so both paths agree on which SMS are even eligible for parsing.
 
 const SmartScanScreen = ({ navigation }: any) => {
   const { colors } = useTheme();
@@ -408,11 +359,7 @@ const SmartScanScreen = ({ navigation }: any) => {
         // the AI's isTransaction gate handles them in the parse loop below.
         // Cheap sync filters first, so the hash lookup only covers SMS that
         // survived them — this used to load every hash ever recorded.
-        const preFiltered = smsInbox.filter((sms) => {
-          const lower = sms.body.toLowerCase();
-          if (OTP_KEYWORDS.some((k: string) => lower.includes(k))) return false;
-          return BANK_KEYWORDS.some((k: string) => lower.includes(k));
-        });
+        const preFiltered = smsInbox.filter((sms) => isScanCandidate(sms.body));
         const savedHashes = await getProcessedHashesFor(
           preFiltered.map((sms) => hashSms(sms.body)),
         );
@@ -824,7 +771,7 @@ const SmartScanScreen = ({ navigation }: any) => {
             </ThemedText>
             <ThemedText type="secondary" className="text-sm text-center">
               {isModelInitializing
-                ? "Loading local Qwen2.5-1.5B model context…"
+                ? "Loading local Qwen2.5-0.5B model context…"
                 : `Matching SMS to your ${accounts.filter((a) => a.accountType === "bank" || a.accountType === "credit_card").length} tracked account${accounts.filter((a) => a.accountType === "bank" || a.accountType === "credit_card").length !== 1 ? "s" : ""}`}
             </ThemedText>
             <SectionLabel color={colors.ai} style={{ marginTop: 10 }}>
