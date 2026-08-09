@@ -387,6 +387,24 @@ export const initDatabase = async () => {
         value TEXT
       );`);
 
+      // Tombstones for default categories the user deliberately deleted.
+      // seedDatabase() runs on EVERY initDatabase() — including in the fresh JS
+      // context of each headless background task — and decides what to insert by
+      // asking "does this category exist?". Without a record of intent it cannot
+      // tell a user's deletion from a fresh install, so it kept resurrecting
+      // deleted defaults minutes later. `parentName` is NULL for a top-level
+      // category; subcategory names are only unique within their parent.
+      await db.execAsync(`CREATE TABLE IF NOT EXISTS deleted_default_categories (
+        name TEXT NOT NULL,
+        type TEXT NOT NULL,
+        parentName TEXT,
+        deletedAt TEXT NOT NULL
+      );`);
+      await db.execAsync(
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_deleted_default_categories
+         ON deleted_default_categories(name, type, IFNULL(parentName, ''));`
+      );
+
       // Run Migrations & Seeding
       await runMigrations();
       await seedDatabase();
@@ -542,6 +560,54 @@ const runMigrations = async () => {
   }
 };
 
+// ─── Default-category tombstones ─────────────────────────────────────────────
+
+/** Stable identity for a seed entry. Subcategory names are unique per parent. */
+const defaultCategoryKey = (name: string, type: string, parentName: string | null): string =>
+  JSON.stringify([name, type, parentName ?? '']);
+
+const getDeletedDefaultCategoryKeys = async (): Promise<Set<string>> => {
+  const rows = await db.getAllAsync<{ name: string; type: string; parentName: string | null }>(
+    'SELECT name, type, parentName FROM deleted_default_categories'
+  );
+  return new Set(rows.map((r) => defaultCategoryKey(r.name, r.type, r.parentName)));
+};
+
+/**
+ * Record that the user deleted a category so seeding never brings it back.
+ *
+ * Written for every deletion, not just ones currently in the seed list: a name
+ * that is not a default today may become one in a later app version, and the
+ * user's intent should still hold.
+ */
+const tombstoneDeletedCategory = async (
+  name: string,
+  type: string,
+  parentName: string | null,
+) => {
+  await db.runAsync(
+    `INSERT OR IGNORE INTO deleted_default_categories (name, type, parentName, deletedAt)
+     VALUES (?, ?, ?, ?)`,
+    name, type, parentName, new Date().toISOString(),
+  );
+};
+
+/**
+ * Clear a tombstone so the category can be seeded again — called when the user
+ * re-creates a category by hand, which is an explicit reversal of the deletion.
+ */
+const clearCategoryTombstone = async (
+  name: string,
+  type: string,
+  parentName: string | null,
+) => {
+  await db.runAsync(
+    `DELETE FROM deleted_default_categories
+     WHERE name = ? AND type = ? AND IFNULL(parentName, '') = IFNULL(?, '')`,
+    name, type, parentName,
+  );
+};
+
 export const seedDatabase = async () => {
   // Seed initial categories (ensure base defaults always exist)
   const seedCategories: [string, string, string, string][] = [
@@ -567,7 +633,12 @@ export const seedDatabase = async () => {
     ['Transfer', '🔄', '#FF9500', 'transfer'],
   ];
 
+  // Everything the user has deliberately deleted, loaded once. Seeding must skip
+  // these or it resurrects them on the next init (see the tombstone table).
+  const tombstones = await getDeletedDefaultCategoryKeys();
+
   for (const [name, icon, color, type] of seedCategories) {
+    if (tombstones.has(defaultCategoryKey(name, type, null))) continue;
     const exists = await db.getFirstAsync('SELECT id FROM categories WHERE name = ? AND type = ? AND parentId IS NULL', name, type);
     if (!exists) {
       await db.runAsync('INSERT INTO categories (name, icon, color, type, parentId) VALUES (?, ?, ?, ?, NULL)', name, icon, color, type);
@@ -578,6 +649,7 @@ export const seedDatabase = async () => {
     const parent = await db.getFirstAsync<{ id: number }>('SELECT id FROM categories WHERE name = ? AND parentId IS NULL', parentName);
     if (parent) {
       for (const [n, i] of subs) {
+        if (tombstones.has(defaultCategoryKey(n, 'expense', parentName))) continue;
         const exists = await db.getFirstAsync('SELECT id FROM categories WHERE name = ? AND parentId = ?', n, parent.id);
         if (!exists) await db.runAsync('INSERT INTO categories (name, icon, color, type, parentId) VALUES (?, ?, ?, ?, ?)', n, i, color, 'expense', parent.id);
       }
@@ -1741,6 +1813,15 @@ export const addCategory = async (category: Omit<Category, 'id'>) => {
     'INSERT INTO categories (name, icon, color, type, parentId) VALUES (?, ?, ?, ?, ?)',
     category.name, category.icon, category.color, category.type, category.parentId || null
   );
+
+  // Re-creating a category by hand reverses an earlier deletion, so drop any
+  // tombstone — otherwise deleting it again later would be a no-op to seeding.
+  const parentName = category.parentId
+    ? (await db.getFirstAsync<{ name: string }>(
+        'SELECT name FROM categories WHERE id = ?', category.parentId
+      ))?.name ?? null
+    : null;
+  await clearCategoryTombstone(category.name, category.type, parentName);
 };
 
 export const updateCategory = async (category: Category) => {
@@ -1760,13 +1841,29 @@ export const updateCategory = async (category: Category) => {
 
 export const deleteCategory = async (id: number) => {
   // Collect the category and its subcategories (they cascade-delete) so their
-  // budgets don't linger as orphans.
-  const doomed = await db.getAllAsync<{ name: string }>(
-    'SELECT name FROM categories WHERE id = ? OR parentId = ?', id, id
+  // budgets don't linger as orphans, and so each one can be tombstoned.
+  // Read everything BEFORE the delete — afterwards these rows are gone and a
+  // subcategory tombstone could no longer be keyed to its parent's name.
+  const doomed = await db.getAllAsync<{ id: number; name: string; type: string; parentId: number | null }>(
+    'SELECT id, name, type, parentId FROM categories WHERE id = ? OR parentId = ?', id, id
   );
+  const target = doomed.find((r) => r.id === id);
+  // Only needed when the target is itself a subcategory.
+  const targetParentName = target?.parentId
+    ? (await db.getFirstAsync<{ name: string }>(
+        'SELECT name FROM categories WHERE id = ?', target.parentId
+      ))?.name ?? null
+    : null;
+
   await db.runAsync('DELETE FROM categories WHERE id = ?', id);
+
   for (const row of doomed) {
     await removeCategoryNameFromBudgets(row.name);
+    // Top-level: no parent. Cascade-deleted child: its parent is the target.
+    // The target itself when it is a subcategory: its own parent's name.
+    const parentName =
+      row.parentId === null ? null : row.parentId === id ? target?.name ?? null : targetParentName;
+    await tombstoneDeletedCategory(row.name, row.type, parentName);
   }
 };
 
@@ -2700,7 +2797,11 @@ export const resetAllData = async () => {
   await db.execAsync('DELETE FROM sms_hashes;');
   await db.execAsync('DELETE FROM app_settings;');
   await db.execAsync('DELETE FROM categories;');
-  
+  // Clear tombstones too — a factory reset must restore the full default set,
+  // and without this the re-seed below would skip every category the user had
+  // ever deleted, leaving them permanently missing.
+  await db.execAsync('DELETE FROM deleted_default_categories;');
+
   // Re-seed default categories so the app isn't empty after reset
   await seedDatabase();
 };
