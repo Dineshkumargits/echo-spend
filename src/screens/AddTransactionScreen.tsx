@@ -67,6 +67,7 @@ import {
   useCategoryManager,
   CategoryManagerModal,
 } from "../components/CategoryManager";
+import { handleSalaryCreditById } from "../services/backgroundTasks";
 import { useNotifications } from "../hooks/useNotifications";
 import { TagInput } from "../components/TagInput";
 import { CategoryPicker } from "../components/CategoryPicker";
@@ -1329,6 +1330,10 @@ export const AddTransactionScreen = ({ navigation: navProp, route }: any) => {
       tags: tags.length > 0 ? tags : undefined,
       splitMemberId: selectedSplitMember || undefined,
     });
+
+    // A manually entered salary credit is as real a cycle boundary as a
+    // detected one — same 25-day gap rules decide reset vs. suggestion.
+    await handleSalaryCreditById(txId);
 
     if (splitEnabled && type === "debit") {
       const allMembers = [

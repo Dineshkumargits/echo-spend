@@ -2461,8 +2461,24 @@ export const addSalaryDate = async (
   invalidateCycleCache();
 };
 
+/** Is this exact instant already a recorded cycle boundary? */
+export const salaryDateExists = async (occurredAt: string): Promise<boolean> => {
+  const row = await db.getFirstAsync<{ id: number }>(
+    'SELECT id FROM salary_dates WHERE occurredAt = ?', occurredAt,
+  );
+  return !!row;
+};
+
 /** Move an existing record — the "salary actually came on the 30th, not the 31st" fix. */
 export const updateSalaryDate = async (id: number, occurredAt: string): Promise<void> => {
+  // occurredAt is UNIQUE. Correcting a record onto an instant another row
+  // already holds (the previous cycle's entry, or a detected duplicate) would
+  // throw a constraint error and silently abandon the edit — the cycle would
+  // stay where it was with nothing to show for the save. Absorb that row
+  // instead: two records for one instant were never meaningful anyway.
+  await db.runAsync(
+    'DELETE FROM salary_dates WHERE occurredAt = ? AND id != ?', occurredAt, id,
+  );
   await db.runAsync('UPDATE salary_dates SET occurredAt = ? WHERE id = ?', occurredAt, id);
   invalidateCycleCache();
 };

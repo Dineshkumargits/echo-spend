@@ -47,7 +47,7 @@ import {
   Account,
   Category,
 } from '../services/database';
-import { enrichPendingSmsWithAI } from '../services/backgroundTasks';
+import { enrichPendingSmsWithAI, handleSalaryCreditById } from '../services/backgroundTasks';
 
 type SheetKind = null | 'category' | 'account' | 'toAccount' | 'tags';
 type CatType = 'expense' | 'income' | 'transfer';
@@ -189,6 +189,9 @@ const SmartInboxScreen = ({ navigation }: any) => {
   const changeCategory = useCallback(async (name: string) => {
     if (!activeTx) return;
     await updateTransaction(activeTx.id, { category: name });
+    // Same as the review card: tagging a credit as salary is what identifies a
+    // payday, so the budget cycle has to follow.
+    await handleSalaryCreditById(activeTx.id);
     patchTx(activeTx.id, { category: name });
     Haptics.selectionAsync().catch(() => {});
     setSheet(null);

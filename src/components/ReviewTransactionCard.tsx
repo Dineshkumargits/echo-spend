@@ -22,6 +22,7 @@ import { ThemedText } from './ThemedSafeAreaView';
 import { useTheme } from '../theme/ThemeProvider';
 import { useStore } from '../store/useStore';
 import { Transaction, Account, Category, updateTransaction } from '../services/database';
+import { handleSalaryCreditById } from '../services/backgroundTasks';
 import { TagInput } from './TagInput';
 import { ConfidenceChip } from './Signal';
 import { fonts } from '../theme/tokens';
@@ -111,6 +112,9 @@ export const ReviewTransactionCard = ({
 
   const changeCategory = async (catName: string) => {
     await updateTransaction(tx.id, { category: catName });
+    // Labelling a credit as the salary category here is the usual way a real
+    // payday gets identified — it has to move the budget cycle too.
+    await handleSalaryCreditById(tx.id);
     onTransactionUpdated({ ...tx, category: catName });
     setShowCatPicker(false);
     setCatSearch('');

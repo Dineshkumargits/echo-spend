@@ -30,6 +30,7 @@ import {
   getPendingSplitMembers,
   PendingSplitMember,
 } from '../services/database';
+import { handleSalaryCreditById } from '../services/backgroundTasks';
 import { useTheme } from '../theme/ThemeProvider';
 import { SectionLabel } from '../components/Signal';
 import { fonts } from '../theme/tokens';
@@ -494,6 +495,11 @@ export const EditTransactionScreen = () => {
         tags: tags.length > 0 ? tags : undefined,
         splitMemberId: selectedSplitMember || undefined,
       });
+
+      // Recategorising a credit as salary, or fixing when it landed, moves the
+      // cycle boundary — the edit is often where the salary signal first
+      // appears, since SMS credits arrive as plain income.
+      await handleSalaryCreditById(transaction.id);
 
       if (shouldDeleteSplit && existingSplitId !== null) {
         await deleteSplit(existingSplitId);

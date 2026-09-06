@@ -119,6 +119,8 @@ const BudgetScreen = () => {
     preferences,
     setMonthlyBudget,
     setSalaryCategory,
+    setSalaryDay,
+    setSalaryTime,
   } = useStore();
   const currency = preferences?.currency ?? "₹";
   const salaryDay = preferences?.salaryDay ?? 1;
@@ -382,19 +384,53 @@ const BudgetScreen = () => {
     });
   };
 
+  /**
+   * A salary can only have arrived already. `maximumDate` only guards the date
+   * stage — Android's time picker ignores it — so picking today plus a later
+   * time built a future instant, which resolveCycle discards outright: the
+   * cycle silently fell back to the recurring anchor and the budget never
+   * moved. Every instant the picker produces goes through here.
+   */
+  const clampToNow = (d: Date): Date => {
+    const now = new Date();
+    return d.getTime() > now.getTime() ? now : d;
+  };
+
   const savePlan = async () => {
     const budgetVal = parseFloat(monthlyBudgetInput);
     if (!isNaN(budgetVal) && budgetVal >= 0) setMonthlyBudget(budgetVal);
 
-    const iso = salaryAt.toISOString();
-    if (latestSalary) {
-      // Editing the existing record is the "salary actually came on the 30th,
-      // not the 31st" correction — it must move the boundary, not add a cycle.
-      if (latestSalary.occurredAt !== iso) await updateSalaryDate(latestSalary.id, iso);
-    } else {
-      await addSalaryDate(iso, "manual");
+    // Last line of defence against a future instant: the cycle resolver ignores
+    // salary dates that haven't happened yet, so saving one would look like the
+    // change did nothing at all. clampToNow already runs in the picker; this
+    // covers a sheet left open across the chosen minute.
+    const instant = clampToNow(salaryAt);
+    const iso = instant.toISOString();
+    try {
+      if (latestSalary) {
+        // Editing the existing record is the "salary actually came on the 30th,
+        // not the 31st" correction — it must move the boundary, not add a cycle.
+        if (latestSalary.occurredAt !== iso) await updateSalaryDate(latestSalary.id, iso);
+      } else {
+        await addSalaryDate(iso, "manual");
+      }
+    } catch (e) {
+      console.warn("[Budget] Failed to save salary date", e);
+      notify.error("Couldn't update the salary date");
+      return;
     }
 
+    // Mirror the instant into the recurring anchor. It is only the fallback
+    // (recorded dates win), but it has to agree with them — otherwise anything
+    // resolving before the first record lands on a different cycle.
+    setSalaryDay(instant.getDate());
+    setSalaryTime(
+      `${String(instant.getHours()).padStart(2, "0")}:${String(
+        instant.getMinutes(),
+      ).padStart(2, "0")}`,
+    );
+
+    setSalaryAt(instant);
     setShowSalaryPicker(false);
     setShowPlan(false);
     notify.success("Plan updated");
@@ -430,7 +466,7 @@ const BudgetScreen = () => {
     if (!selected) return;
 
     if (Platform.OS === "ios") {
-      setSalaryAt(selected);
+      setSalaryAt(clampToNow(selected));
       return;
     }
 
@@ -438,14 +474,14 @@ const BudgetScreen = () => {
       // Keep the time already chosen while the date changes.
       const next = new Date(selected);
       next.setHours(salaryAt.getHours(), salaryAt.getMinutes(), 0, 0);
-      setSalaryAt(next);
+      setSalaryAt(clampToNow(next));
       setPickerMode("time");
       return;
     }
 
     const next = new Date(salaryAt);
     next.setHours(selected.getHours(), selected.getMinutes(), 0, 0);
-    setSalaryAt(next);
+    setSalaryAt(clampToNow(next));
     setShowSalaryPicker(false);
     setPickerMode("date");
   };

@@ -29,6 +29,7 @@ import {
   getSalaryCycleWindowAsync,
   getSalaryDates,
   addSalaryDate,
+  salaryDateExists,
   setPendingSalaryDate,
   clearPendingSalaryDate,
   upsertCardStatement,
@@ -553,6 +554,10 @@ const AUTO_SALARY_MIN_GAP_DAYS = 25;
  *  - Ambiguous (sooner than that): store it as a suggestion for the user to
  *    confirm in Budget settings. Deliberately not discarded, so a genuinely
  *    early salary is never lost, it just needs a tap.
+ *  - Older than the newest boundary: recorded quietly as history only.
+ *
+ * Safe to run repeatedly over the same transaction — an instant that is already
+ * a boundary is a no-op — which is what lets every edit path re-check.
  */
 export const handleSalaryCredit = async (tx: {
   type?: string;
@@ -571,10 +576,25 @@ export const handleSalaryCredit = async (tx: {
     const when = new Date(tx.date);
     if (Number.isNaN(when.getTime())) return;
 
+    // Already the boundary of a cycle — re-running over the same transaction
+    // (every edit re-checks it) must not re-notify or re-suggest.
+    if (await salaryDateExists(when.toISOString())) return;
+
     const recorded = await getSalaryDates(1);
     const last = recorded[0] ? new Date(recorded[0].occurredAt) : null;
+
+    // Older than the newest boundary: an edit to a past salary, or a back-scan
+    // reaching further into the inbox. It fills in history (real previous-cycle
+    // windows to compare against) but must not claim to start a cycle or
+    // suggest one — the current cycle is already past it.
+    if (last && when.getTime() < last.getTime()) {
+      await addSalaryDate(when.toISOString(), 'detected');
+      console.log('[SalaryDate] Backfilled historical boundary at', when.toISOString());
+      return;
+    }
+
     const gapDays = last
-      ? Math.abs(when.getTime() - last.getTime()) / 86_400_000
+      ? (when.getTime() - last.getTime()) / 86_400_000
       : Number.POSITIVE_INFINITY;
 
     if (gapDays >= AUTO_SALARY_MIN_GAP_DAYS) {
@@ -589,6 +609,25 @@ export const handleSalaryCredit = async (tx: {
     console.log('[SalaryDate] Suggested (ambiguous, gap', Math.round(gapDays), 'days)');
   } catch (e) {
     console.warn('[SalaryDate] Failed to handle salary credit:', e);
+  }
+};
+
+/**
+ * Re-run the salary check against a transaction that already exists.
+ *
+ * The salary signal usually appears *after* the row is written: an SMS credit
+ * lands as "Income" or uncategorised and the user relabels it as Salary while
+ * reviewing, or corrects its date. Only the raw ingest paths called
+ * handleSalaryCredit, so those corrections never moved the cycle. Callers pass
+ * the id and the current row is re-read, so partial edits can't be judged
+ * against a stale category or date.
+ */
+export const handleSalaryCreditById = async (id: number) => {
+  try {
+    const tx = await getTransactionById(id);
+    if (tx) await handleSalaryCredit(tx);
+  } catch (e) {
+    console.warn('[SalaryDate] Failed to re-check transaction', id, e);
   }
 };
 

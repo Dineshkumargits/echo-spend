@@ -57,7 +57,7 @@ import {
   SmsAccountMatch,
 } from "../services/smsParserService";
 import { useStore } from "../store/useStore";
-import { setForegroundScanActive } from "../services/backgroundTasks";
+import { setForegroundScanActive, handleSalaryCredit } from "../services/backgroundTasks";
 import { MotiView, AnimatePresence } from "moti";
 import { notify } from "../utils/notify";
 import { isScanCandidate } from "../utils/smsFilter";
@@ -527,6 +527,9 @@ const SmartScanScreen = ({ navigation }: any) => {
                   source: "sms" as const,
                 } as Omit<Transaction, "id">;
                 const newId = await addTransaction(txData);
+                // The background listener does this on its own ingest path; a
+                // foreground scan is the same event and must react the same way.
+                await handleSalaryCredit(txData);
                 await markSmsProcessed(hashSms(sms.body));
                 newlySavedIds.push(newId);
                 if (parsed.parsedOffline) offlineSavedIds.push(newId);
