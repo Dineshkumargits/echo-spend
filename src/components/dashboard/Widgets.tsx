@@ -14,8 +14,10 @@ import {
   useWindowDimensions,
   NativeSyntheticEvent,
   NativeScrollEvent,
+  LayoutChangeEvent,
 } from 'react-native';
 import { MotiView } from 'moti';
+import { Easing } from 'react-native-reanimated';
 import {
   LucideChevronRight,
   LucideCreditCard,
@@ -23,6 +25,7 @@ import {
   LucideRepeat,
   LucideLandmark,
   LucideTarget,
+  LucideChevronDown,
 } from 'lucide-react-native';
 import { ThemedText } from '../ThemedSafeAreaView';
 import { useTheme } from '../../theme/ThemeProvider';
@@ -81,6 +84,13 @@ const MutedNote: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
 // ─── Upcoming — bills and planned contributions ──────────────────────────────
 
+/**
+ * Ceiling on an expanded face. Without it a wallet with thirty subscriptions
+ * turns the widget into the whole dashboard; past this the footer points at
+ * the full screen instead.
+ */
+const MAX_EXPANDED_ROWS = 12;
+
 const BILL_ICON = {
   subscription: LucideRepeat,
   emi: LucideLandmark,
@@ -105,36 +115,45 @@ const UpcomingRow: React.FC<{
 }> = ({ icon, tone, label, sub, amount, currency, masked, kind, first, onPress }) => {
   const { colors } = useTheme();
   return (
-    <Pressable
-      onPress={onPress}
-      style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 12,
-        paddingVertical: 10,
-        borderTopWidth: first ? 0 : 1,
-        borderTopColor: colors.border,
-      }}
+    // Mount animation, so rows revealed by "Show all" arrive rather than
+    // appearing between frames. Keys are stable, so already-visible rows do not
+    // remount and do not replay it.
+    <MotiView
+      from={{ opacity: 0, translateY: -4 }}
+      animate={{ opacity: 1, translateY: 0 }}
+      transition={{ type: 'timing', duration: 180 }}
     >
-      <IconTile color={tone} size={32}>
-        {icon}
-      </IconTile>
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <ThemedText
-          numberOfLines={1}
-          style={{ fontFamily: fonts.textMedium, fontSize: 13.5, color: colors.primary }}
-        >
-          {label}
-        </ThemedText>
-        <ThemedText
-          numberOfLines={1}
-          style={{ fontFamily: fonts.signal, fontSize: 10.5, color: tone, marginTop: 2 }}
-        >
-          {sub}
-        </ThemedText>
-      </View>
-      <AmountText value={amount} size={14} currency={currency} masked={masked} kind={kind} />
-    </Pressable>
+      <Pressable
+        onPress={onPress}
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 12,
+          paddingVertical: 10,
+          borderTopWidth: first ? 0 : 1,
+          borderTopColor: colors.border,
+        }}
+      >
+        <IconTile color={tone} size={32}>
+          {icon}
+        </IconTile>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <ThemedText
+            numberOfLines={1}
+            style={{ fontFamily: fonts.textMedium, fontSize: 13.5, color: colors.primary }}
+          >
+            {label}
+          </ThemedText>
+          <ThemedText
+            numberOfLines={1}
+            style={{ fontFamily: fonts.signal, fontSize: 10.5, color: tone, marginTop: 2 }}
+          >
+            {sub}
+          </ThemedText>
+        </View>
+        <AmountText value={amount} size={14} currency={currency} masked={masked} kind={kind} />
+      </Pressable>
+    </MotiView>
   );
 };
 
@@ -150,13 +169,66 @@ const LensFace: React.FC<{
   totalKind: 'debit' | 'neutral';
   empty?: string;
   children?: React.ReactNode;
+  /** Items the face is not showing right now. Drives the footer's label. */
   more?: number;
+  expanded?: boolean;
+  /** Absent = nothing to expand, and no footer is rendered. */
+  onToggle?: () => void;
+  /** Total items in this lens, for the "Show all N" label. */
+  count?: number;
+  /** Stretch to the deck's shared height. False once any face is expanded. */
+  fill?: boolean;
+  /** Rows visible while collapsed. Children beyond it are clipped, not unmounted. */
+  collapsedRows?: number;
 }> = ({
-  eyebrow, total, caption, action, currency, masked, totalKind, empty, children, more = 0,
+  eyebrow, total, caption, action, currency, masked, totalKind, empty, children,
+  more = 0, expanded = false, onToggle, count = 0, fill = true, collapsedRows = 3,
 }) => {
   const { colors } = useTheme();
+
+  /**
+   * Animating the reveal needs a real height to animate: growing the box by
+   * mounting rows re-lays out instantly, which is the jump. So both heights are
+   * measured, every row stays mounted, and the box is clipped to whichever
+   * height applies — a style height, so the widget and the dashboard below it
+   * follow the animation instead of snapping to the end state.
+   *
+   * Measured rather than computed from a row height: rows carry separator
+   * borders and honour the OS font scale, so any arithmetic estimate drifts and
+   * clips the last row.
+   */
+  const rows = React.Children.toArray(children);
+  const [hCollapsed, setHCollapsed] = useState<number | null>(null);
+  const [hFull, setHFull] = useState<number | null>(null);
+
+  // A changed row set invalidates both measurements — remeasure from scratch.
+  useEffect(() => {
+    setHCollapsed(null);
+    setHFull(null);
+  }, [rows.length]);
+
+  // Pass 1 renders only the collapsed rows at natural height, so the first
+  // frame is already correct and nothing flashes; from pass 2 every row is
+  // mounted and the box clips.
+  const measuring = hCollapsed === null;
+  const rendered = measuring ? rows.slice(0, collapsedRows) : rows;
+  const targetH = measuring ? undefined : expanded ? hFull ?? undefined : hCollapsed;
+
+  const onMeasure = (e: LayoutChangeEvent) => {
+    const h = e.nativeEvent.layout.height;
+    if (!h) return;
+    if (hCollapsed === null) setHCollapsed(h);
+    else if (hFull === null || Math.abs(hFull - h) > 0.5) setHFull(h);
+  };
+
   return (
-    <Card style={{ flex: 1, paddingVertical: 16 }}>
+    // `fill` is how the deck stays honest in both states. Collapsed, every face
+    // grows to the tallest so swiping never resizes the widget. Expanded, the
+    // other face must NOT grow to match — it keeps its natural height and the
+    // space below it is simply background, not a hollow card. (Done with flex
+    // rather than by dropping the container's `stretch`: a flex:1 child inside
+    // an auto-height parent collapses to zero height in Yoga.)
+    <Card style={{ flex: fill ? 1 : undefined, paddingVertical: 16 }}>
       <View
         style={{
           flexDirection: 'row',
@@ -210,17 +282,56 @@ const LensFace: React.FC<{
         </View>
       ) : (
         <View style={{ marginTop: 10 }}>
-          {children}
-          {more > 0 && (
+          <MotiView
+            animate={targetH === undefined ? {} : { height: targetH }}
+            transition={{ type: 'timing', duration: 260, easing: Easing.out(Easing.cubic) }}
+            style={{ overflow: 'hidden' }}
+          >
+            <View onLayout={onMeasure}>{rendered}</View>
+          </MotiView>
+
+          {/* The total is a claim; this is the proof. Expanding lists every item
+              behind it in place, rather than sending the user to another screen
+              to add the figures up themselves. */}
+          {onToggle && (
+            <Pressable
+              onPress={onToggle}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 4,
+                marginTop: 6,
+                paddingVertical: 9,
+                borderTopWidth: 1,
+                borderTopColor: colors.border,
+              }}
+            >
+              <SectionLabel color={colors.accent}>
+                {expanded ? 'Show less' : `Show all ${count}`}
+              </SectionLabel>
+              <MotiView
+                animate={{ rotate: expanded ? '180deg' : '0deg' }}
+                transition={{ type: 'timing', duration: 260 }}
+              >
+                <LucideChevronDown size={12} color={colors.accent} />
+              </MotiView>
+            </Pressable>
+          )}
+
+          {/* Only reachable on a very long list: expansion is capped so the
+              widget can't grow without bound. */}
+          {expanded && more > 0 && (
             <ThemedText
               style={{
                 fontFamily: fonts.signal,
                 fontSize: 10.5,
                 color: colors.muted,
-                marginTop: 10,
+                textAlign: 'center',
+                marginTop: 8,
               }}
             >
-              {`+${more} more`}
+              {`+${more} more — open Manage to see them all`}
             </ThemedText>
           )}
         </View>
@@ -271,6 +382,9 @@ export const UpcomingWidget: React.FC<UpcomingWidgetProps> = ({
   const { colors } = useTheme();
   const { width } = useWindowDimensions();
   const [page, setPage] = useState(0);
+  // Which face is showing its full list. One at a time: only one is on screen,
+  // and letting both expand would leave the hidden one holding dead height.
+  const [expanded, setExpanded] = useState<'due' | 'planned' | null>(null);
 
   const GAP = 12;
   const faceWidth = width - gutter * 2;
@@ -280,6 +394,19 @@ export const UpcomingWidget: React.FC<UpcomingWidgetProps> = ({
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
       const next = Math.round(e.nativeEvent.contentOffset.x / interval);
       setPage((prev) => (prev === next ? prev : next));
+    },
+    [interval],
+  );
+
+  // Collapse on settle, not mid-gesture: shrinking the deck while the finger is
+  // still moving drags everything below the widget up under the swipe. Waiting
+  // for momentum to end makes it one clean change after the motion stops.
+  const onMomentumEnd = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const next = Math.round(e.nativeEvent.contentOffset.x / interval);
+      setExpanded((prev) =>
+        prev === null || prev === (next === 0 ? 'due' : 'planned') ? prev : null,
+      );
     },
     [interval],
   );
@@ -313,20 +440,32 @@ export const UpcomingWidget: React.FC<UpcomingWidgetProps> = ({
     );
   }
 
+  // Every row up to the cap is handed to the face and stays mounted — the face
+  // clips to the collapsed height and animates the reveal. `hidden` is only for
+  // the note about rows past the cap, which no amount of expanding will show.
+  const hidden = (n: number) => Math.max(n - MAX_EXPANDED_ROWS, 0);
+  const toggle = (key: 'due' | 'planned') => () =>
+    setExpanded((prev) => (prev === key ? null : key));
+
   const faces = [
     <LensFace
       key="due"
       eyebrow="Due this cycle"
       total={billsTotal}
       caption={bills.length === 0 ? undefined : bills.length === 1 ? '1 bill' : `${bills.length} bills`}
-      action={bills.length > 0 ? { label: `All ${bills.length}`, onPress: onSeeAllBills } : undefined}
+      action={bills.length > 0 ? { label: 'Manage', onPress: onSeeAllBills } : undefined}
       currency={currency}
       masked={masked}
       totalKind="debit"
       empty={bills.length === 0 ? 'Nothing left to pay this cycle.' : undefined}
-      more={Math.max(bills.length - rowsPerFace, 0)}
+      count={bills.length}
+      fill={expanded === null}
+      expanded={expanded === 'due'}
+      collapsedRows={rowsPerFace}
+      onToggle={bills.length > rowsPerFace ? toggle('due') : undefined}
+      more={hidden(bills.length)}
     >
-      {bills.slice(0, rowsPerFace).map((bill, idx) => {
+      {bills.slice(0, MAX_EXPANDED_ROWS).map((bill, idx) => {
         const Icon = BILL_ICON[bill.kind];
         const overdue = bill.daysLeft < 0;
         const urgent = bill.daysLeft >= 0 && bill.daysLeft <= 3;
@@ -357,15 +496,20 @@ export const UpcomingWidget: React.FC<UpcomingWidgetProps> = ({
         eyebrow="To set aside"
         total={plannedTotal}
         caption={planned.length === 1 ? '1 goal' : `${planned.length} goals`}
-        action={{ label: `All ${planned.length}`, onPress: onSeeAllGoals }}
+        action={{ label: 'Manage', onPress: onSeeAllGoals }}
         currency={currency}
         masked={masked}
         // Never debit-toned: this money has not left, and colouring it like a
         // bill is what made the old carousel read as an obligation.
         totalKind="neutral"
-        more={Math.max(planned.length - rowsPerFace, 0)}
+        count={planned.length}
+        fill={expanded === null}
+        expanded={expanded === 'planned'}
+        collapsedRows={rowsPerFace}
+        onToggle={planned.length > rowsPerFace ? toggle('planned') : undefined}
+        more={hidden(planned.length)}
       >
-        {planned.slice(0, rowsPerFace).map((item, idx) => {
+        {planned.slice(0, MAX_EXPANDED_ROWS).map((item, idx) => {
           const overdue = item.daysLeft !== null && item.daysLeft < 0;
           const tone = overdue ? colors.danger : colors.credit;
           const parts = [
@@ -408,6 +552,10 @@ export const UpcomingWidget: React.FC<UpcomingWidgetProps> = ({
         decelerationRate="fast"
         disableIntervalMomentum
         onScroll={onScroll}
+        onMomentumScrollEnd={onMomentumEnd}
+        // A slow drag released without momentum never fires the above. Both
+        // land after the finger is up, so neither resizes mid-gesture.
+        onScrollEndDrag={onMomentumEnd}
         scrollEventThrottle={16}
         style={{ marginHorizontal: -gutter }}
         contentContainerStyle={{ paddingHorizontal: gutter, alignItems: 'stretch' }}
