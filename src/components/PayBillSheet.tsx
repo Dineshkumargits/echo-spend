@@ -20,7 +20,7 @@ import { AmountText } from './Signal';
 import { notify } from '../utils/notify';
 import {
   addTransaction,
-  applyCardPayment,
+  syncCardPaymentForTransaction,
   Account,
   CardStatement,
 } from '../services/database';
@@ -89,7 +89,7 @@ export const PayBillSheet: React.FC<PayBillSheetProps> = ({
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
 
-      await addTransaction({
+      const txId = await addTransaction({
         amount,
         category: 'Transfer',
         merchant: `${card.name} payment`,
@@ -102,8 +102,9 @@ export const PayBillSheet: React.FC<PayBillSheetProps> = ({
         source: 'manual',
       } as any);
 
-      // Reduce the statement through the same waterfall SMS-detected payments use.
-      await applyCardPayment(card.id, amount);
+      // Settled through the shared ledger, keyed to this transaction — so
+      // deleting or editing the payment later gives the statement its money back.
+      await syncCardPaymentForTransaction(txId);
 
       notify.success(
         amount >= remaining - 0.01 ? 'Bill paid' : 'Partial payment recorded',

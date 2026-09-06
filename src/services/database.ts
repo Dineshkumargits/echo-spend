@@ -424,6 +424,33 @@ export const initDatabase = async () => {
         'CREATE INDEX IF NOT EXISTS idx_card_statements_due ON card_statements(accountId, dueDate DESC);'
       );
 
+      // Which transaction settled which statement, and for how much.
+      //
+      // Statement paidAmount used to be incremented in place, which is only safe
+      // when a payment is seen exactly once — true while the only caller was SMS
+      // ingest. A card payment is usually only *identifiable* later (the bank's
+      // SMS says money left the account, not that a card was paid), so the same
+      // transaction gets re-examined on every edit. UNIQUE(transactionId) is what
+      // makes that safe: re-applying replaces the row instead of paying twice,
+      // and deleting the transaction gives the amount back.
+      await db.execAsync(`CREATE TABLE IF NOT EXISTS card_payments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        transactionId INTEGER NOT NULL,
+        statementId INTEGER NOT NULL,
+        accountId INTEGER NOT NULL,
+        amount REAL NOT NULL,
+        appliedAt TEXT NOT NULL,
+        UNIQUE(transactionId, statementId),
+        FOREIGN KEY(transactionId) REFERENCES transactions(id) ON DELETE CASCADE,
+        FOREIGN KEY(statementId) REFERENCES card_statements(id) ON DELETE CASCADE
+      );`);
+      await db.execAsync(
+        'CREATE INDEX IF NOT EXISTS idx_card_payments_stmt ON card_payments(statementId);'
+      );
+      await db.execAsync(
+        'CREATE INDEX IF NOT EXISTS idx_card_payments_tx ON card_payments(transactionId);'
+      );
+
       // Actual salary arrivals the user has confirmed. The budget cycle is
       // anchored on these rather than a recurring day-of-month, because payroll
       // moves (30th, then 31st, then the 1st). UNIQUE on the instant so the same
@@ -483,6 +510,11 @@ const runMigrations = async () => {
     'ALTER TABLE budgets ADD COLUMN rollover INTEGER DEFAULT 0',
     'ALTER TABLE budgets ADD COLUMN categoryNames TEXT',
     'ALTER TABLE budgets ADD COLUMN name TEXT',
+    // What the BANK told us was already paid, kept apart from what our own
+    // ledger accounts for. paidAmount is the greater of the two — the bank's
+    // figure already includes payments we may have matched ourselves, so adding
+    // them would double count.
+    'ALTER TABLE card_statements ADD COLUMN reportedPaid REAL NOT NULL DEFAULT 0',
     'ALTER TABLE transactions ADD COLUMN isRecurring INTEGER DEFAULT 0',
     'ALTER TABLE transactions ADD COLUMN recurrenceRule TEXT',
     'ALTER TABLE transactions ADD COLUMN notes TEXT',
@@ -754,6 +786,30 @@ const runMigrations = async () => {
       console.warn('[Database] Migration to v10 warning:', e);
     }
     await db.execAsync('PRAGMA user_version = 10');
+  }
+
+  if (dbVersion < 11) {
+    // Card payments were only ever applied at SMS ingest, and only for shapes
+    // recognisable at that moment — which excluded the common case, a bank debit
+    // the user later marks as a transfer to their card. Every such payment ever
+    // recorded left its statement untouched and still showing as due.
+    //
+    // Replayed through the ledger, oldest first, restricted to statements whose
+    // billing period actually contains each payment. Statements already settled
+    // are left alone: this can only ever pay a bill down, never re-open one.
+    try {
+      const cards = await db.getAllAsync<{ id: number }>(
+        "SELECT id FROM accounts WHERE accountType = 'credit_card'"
+      );
+      for (const c of cards) await resyncCardPayments(c.id);
+      const settled = await db.getFirstAsync<{ n: number }>(
+        'SELECT COUNT(*) as n FROM card_payments'
+      );
+      console.log(`[Database] v11: matched ${settled?.n ?? 0} card payments to statements.`);
+    } catch (e) {
+      console.warn('[Database] Migration to v11 warning:', e);
+    }
+    await db.execAsync('PRAGMA user_version = 11');
   }
 };
 
@@ -1366,6 +1422,8 @@ export const deleteTransaction = async (id: number) => {
   if (tx && tx.isConfirmed) {
     await revertTransactionImpact(tx);
   }
+  // Statements this transaction was settling go back to owing the money.
+  await clearCardPaymentForTransaction(id);
   await db.runAsync('DELETE FROM transactions WHERE id = ?', id);
 };
 
@@ -2247,7 +2305,10 @@ export interface CardStatement {
   /** Frozen at generation — what the bank billed. Never raised by a reminder. */
   totalDue: number;
   minimumDue: number | null;
+  /** Reconciled total: the greater of what the bank reported and our ledger. */
   paidAmount: number;
+  /** What the BANK implied was paid, independent of transactions we matched. */
+  reportedPaid: number;
   isPaid: boolean;
   source: 'sms' | 'manual';
   rawSms: string | null;
@@ -2258,6 +2319,7 @@ export interface CardStatement {
 const mapStatement = (row: any): CardStatement => ({
   ...row,
   isPaid: !!row.isPaid,
+  reportedPaid: row.reportedPaid ?? 0,
   minimumDue: row.minimumDue ?? null,
   statementDate: row.statementDate ?? null,
   rawSms: row.rawSms ?? null,
@@ -2311,36 +2373,40 @@ export const upsertCardStatement = async (input: {
       input.rawSms ?? null,
       now, now,
     );
+    // A statement can land after the payment that settles it — reconcile now
+    // rather than waiting for the transaction to be touched again.
+    await resyncCardPayments(input.accountId);
     return await getStatementById(input.accountId, input.dueDate);
   }
 
   const st = mapStatement(existing);
   const reported = input.totalDue;
-  let paidAmount = st.paidAmount;
 
   // A reminder quoting less than the original bill implies payments we haven't
   // matched. Trust the bank and reconcile — but only ever upward, so a stale
-  // duplicate can't un-pay a settled statement.
-  if (reported < st.totalDue) {
-    paidAmount = Math.max(paidAmount, st.totalDue - reported);
-  }
+  // duplicate can't un-pay a settled statement. Stored as the bank's own figure;
+  // recompute then reconciles it against the ledger with max(), so a payment
+  // counted in both places is not counted twice.
+  const reportedPaid =
+    reported < st.totalDue
+      ? Math.max(st.reportedPaid, st.totalDue - reported)
+      : st.reportedPaid;
 
-  const isPaid = paidAmount >= st.totalDue - 0.01;
   await db.runAsync(
     `UPDATE card_statements
         SET minimumDue = COALESCE(?, minimumDue),
             statementDate = COALESCE(?, statementDate),
-            paidAmount = ?,
-            isPaid = ?,
+            reportedPaid = ?,
             updatedAt = ?
       WHERE id = ?`,
     input.minimumDue ?? null,
     input.statementDate ?? null,
-    paidAmount,
-    isPaid ? 1 : 0,
+    reportedPaid,
     now,
     st.id,
   );
+  await recomputeStatementPaid(st.id);
+  await resyncCardPayments(input.accountId);
   return await getStatementById(input.accountId, input.dueDate);
 };
 
@@ -2381,50 +2447,198 @@ export const getStatementsForAccount = async (
   return rows.map(mapStatement);
 };
 
-/**
- * Apply a payment to a card, oldest open statement first — the same waterfall
- * banks use. Handles partial payments (statement stays open with a smaller
- * remaining) and overpayment (spills onto the next open statement).
- *
- * Returns how much of the payment was absorbed by statements; any excess is
- * simply advance credit on the card and needs no statement row.
- */
-export const applyCardPayment = async (
-  accountId: number,
-  amount: number,
-): Promise<number> => {
-  if (!(amount > 0)) return 0;
-  const open = await getOpenStatements(accountId);
-  let left = amount;
-  const now = new Date().toISOString();
-
-  for (const st of open) {
-    if (left <= 0) break;
-    const due = statementRemaining(st);
-    if (due <= 0) continue;
-
-    const applied = Math.min(due, left);
-    const paidAmount = st.paidAmount + applied;
-    const isPaid = paidAmount >= st.totalDue - 0.01;
-
-    await db.runAsync(
-      'UPDATE card_statements SET paidAmount = ?, isPaid = ?, updatedAt = ? WHERE id = ?',
-      paidAmount, isPaid ? 1 : 0, now, st.id,
-    );
-    left -= applied;
-  }
-
-  return amount - left;
-};
-
 /** Manual override for "I paid this outside the app". */
 export const markStatementPaid = async (id: number): Promise<void> => {
   const row = await db.getFirstAsync<any>('SELECT * FROM card_statements WHERE id = ?', id);
   if (!row) return;
+  // Recorded as a bank-reported figure so a later ledger recompute can't undo it.
   await db.runAsync(
-    'UPDATE card_statements SET paidAmount = totalDue, isPaid = 1, updatedAt = ? WHERE id = ?',
+    'UPDATE card_statements SET reportedPaid = totalDue, updatedAt = ? WHERE id = ?',
     new Date().toISOString(), id,
   );
+  await recomputeStatementPaid(id);
+};
+
+// ─── Card payments ledger ────────────────────────────────────────────────────
+
+/**
+ * Longest plausible gap between a statement being generated and its due date,
+ * used only when the bank's SMS never told us the statement date. Payments older
+ * than this before the due date belong to an earlier billing period.
+ */
+const STATEMENT_WINDOW_DAYS = 35;
+
+/** Start of the period a payment must fall in to count toward this statement. */
+const statementOpensAt = (st: CardStatement): number =>
+  st.statementDate
+    ? new Date(st.statementDate).getTime()
+    : new Date(st.dueDate).getTime() - STATEMENT_WINDOW_DAYS * 86_400_000;
+
+/**
+ * Rewrite a statement's paidAmount from its two independent sources.
+ *
+ * `reportedPaid` is what the bank implied (a reminder quoting less than it
+ * billed, or a manual "already paid"); the ledger is what we matched to real
+ * transactions. The bank's figure already includes anything we also matched, so
+ * these are reconciled with max(), never a sum.
+ */
+const recomputeStatementPaid = async (statementId: number): Promise<void> => {
+  const st = await db.getFirstAsync<any>(
+    'SELECT * FROM card_statements WHERE id = ?', statementId,
+  );
+  if (!st) return;
+
+  const row = await db.getFirstAsync<{ total: number | null }>(
+    'SELECT SUM(amount) as total FROM card_payments WHERE statementId = ?', statementId,
+  );
+  const ledger = row?.total ?? 0;
+  const paidAmount = Math.max(st.reportedPaid ?? 0, ledger);
+  const isPaid = paidAmount >= st.totalDue - 0.01;
+
+  await db.runAsync(
+    'UPDATE card_statements SET paidAmount = ?, isPaid = ?, updatedAt = ? WHERE id = ?',
+    paidAmount, isPaid ? 1 : 0, new Date().toISOString(), statementId,
+  );
+};
+
+/**
+ * Is this transaction money arriving at one of the user's credit cards, and is
+ * it a payment rather than a refund?
+ *
+ * Two shapes count, and the distinction matters:
+ *
+ *  - A TRANSFER whose destination is a card. Always a payment: the user moved
+ *    their own money to the card. The amount is irrelevant — paying ₹500 against
+ *    a ₹5,000 bill is an ordinary partial payment, and three transfers in one day
+ *    are three payments.
+ *  - A CREDIT on the card account, but only when it reads as a payment. A
+ *    merchant refund, a cashback posting and a manual balance adjustment all
+ *    credit the card without paying a bill; applying them to a statement would
+ *    settle a bill the user never paid. (A balance adjustment is the user
+ *    correcting the running balance — counting it twice is exactly wrong.)
+ */
+const NON_PAYMENT_CREDIT = /refund|cashback|reversal|balance adjustment|interest reversal/i;
+
+export const cardPaymentTarget = (
+  tx: { type?: string; amount?: number; accountId?: number; toAccountId?: number; merchant?: string; category?: string },
+  cardIds: Set<number>,
+): { cardId: number; amount: number } | null => {
+  const amount = tx.amount ?? 0;
+  if (!(amount > 0)) return null;
+
+  if (tx.type === 'transfer' && tx.toAccountId && cardIds.has(tx.toAccountId)) {
+    return { cardId: tx.toAccountId, amount };
+  }
+
+  if (tx.type === 'credit' && tx.accountId && cardIds.has(tx.accountId)) {
+    const text = `${tx.merchant ?? ''} ${tx.category ?? ''}`;
+    if (NON_PAYMENT_CREDIT.test(text)) return null;
+    return { cardId: tx.accountId, amount };
+  }
+
+  return null;
+};
+
+/** Drop a transaction's allocations and re-settle whatever it had been paying. */
+export const clearCardPaymentForTransaction = async (transactionId: number): Promise<void> => {
+  const rows = await db.getAllAsync<{ statementId: number }>(
+    'SELECT DISTINCT statementId FROM card_payments WHERE transactionId = ?', transactionId,
+  );
+  if (rows.length === 0) return;
+  await db.runAsync('DELETE FROM card_payments WHERE transactionId = ?', transactionId);
+  for (const r of rows) await recomputeStatementPaid(r.statementId);
+};
+
+/**
+ * Re-settle one transaction against the card statements it can pay.
+ *
+ * Safe to call as often as you like, on any transaction — that is the point.
+ * The salary-credit hook learned the same lesson: the signal that makes a row a
+ * card payment (its destination account) is set by the user in review, long
+ * after ingest, so every write path re-runs this and the ledger absorbs the
+ * repeats. A row that stops being a payment gives its allocation back.
+ *
+ * Allocation is the bank's own waterfall — oldest open statement first, spilling
+ * into the next — restricted to statements whose billing period actually
+ * contains the payment. Without that check a payment made before a statement
+ * existed would settle it, which is how a naive backfill wipes out real debt.
+ */
+export const syncCardPaymentForTransaction = async (transactionId: number): Promise<number> => {
+  const tx = await getTransactionById(transactionId);
+  if (!tx) {
+    await clearCardPaymentForTransaction(transactionId);
+    return 0;
+  }
+
+  const accounts = await getAccounts();
+  const cardIds = new Set(
+    accounts.filter((a) => a.accountType === 'credit_card').map((a) => a.id),
+  );
+  const target = cardPaymentTarget(tx, cardIds);
+
+  // Always start from a clean slate for this transaction: an edit may have
+  // changed the amount, the destination card, or made it not a payment at all.
+  await clearCardPaymentForTransaction(transactionId);
+  if (!target) return 0;
+
+  const paidAt = new Date(tx.date).getTime();
+  if (Number.isNaN(paidAt)) return 0;
+
+  const open = (await getOpenStatements(target.cardId)).filter(
+    (st) => paidAt >= statementOpensAt(st),
+  );
+
+  let left = target.amount;
+  const now = new Date().toISOString();
+  for (const st of open) {
+    if (left <= 0.01) break;
+    const due = statementRemaining(st);
+    if (due <= 0) continue;
+
+    const applied = Math.min(due, left);
+    await db.runAsync(
+      `INSERT INTO card_payments (transactionId, statementId, accountId, amount, appliedAt)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(transactionId, statementId) DO UPDATE SET amount = excluded.amount, appliedAt = excluded.appliedAt`,
+      transactionId, st.id, target.cardId, applied, now,
+    );
+    await recomputeStatementPaid(st.id);
+    left -= applied;
+  }
+
+  // Anything left over is advance credit on the card, not a statement payment.
+  return target.amount - left;
+};
+
+/**
+ * Re-settle every payment a card's open statements could plausibly be waiting on.
+ *
+ * The other direction of the same problem: statements often arrive AFTER the
+ * payment. A bank re-sends a reminder days later, or the statement SMS is only
+ * read on the next scan — by then the payment transaction is long saved and
+ * nothing would ever revisit it. Called whenever a statement is written, so the
+ * two can meet in either order.
+ */
+export const resyncCardPayments = async (accountId: number): Promise<void> => {
+  const open = await getOpenStatements(accountId);
+  if (open.length === 0) return;
+
+  const since = Math.min(...open.map(statementOpensAt));
+  const rows = await db.getAllAsync<any>(
+    `SELECT * FROM transactions
+      WHERE (type = 'transfer' AND toAccountId = ?)
+         OR (type = 'credit' AND accountId = ?)
+      ORDER BY date ASC`,
+    accountId, accountId,
+  );
+
+  // Chronological, so the oldest payment claims the oldest statement — the same
+  // order the waterfall assumes.
+  for (const row of rows) {
+    const tx = mapTransactionRow(row);
+    if (new Date(tx.date).getTime() < since) continue;
+    await syncCardPaymentForTransaction(tx.id);
+  }
 };
 
 // ─── Salary dates ────────────────────────────────────────────────────────────

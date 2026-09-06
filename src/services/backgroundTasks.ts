@@ -33,7 +33,7 @@ import {
   setPendingSalaryDate,
   clearPendingSalaryDate,
   upsertCardStatement,
-  applyCardPayment,
+  syncCardPaymentForTransaction,
   getOpenStatements,
   getAccounts,
 } from './database';
@@ -414,9 +414,9 @@ const _doProcessIncomingSms = async (body: string, date: number) => {
         source: 'sms' as const,
       } as Omit<Transaction, 'id'>;
 
-      await addTransaction(txData);
+      const savedId = await addTransaction(txData);
       await handleSalaryCredit(txData);
-      await applyCardPaymentFromTx(txData);
+      await applyCardPaymentForTransaction(savedId);
       const nowStr = new Date().toISOString();
       await updateAccountLastScanned(accountId, nowStr);
 
@@ -678,30 +678,20 @@ export const captureCardStatement = async (body: string): Promise<boolean> => {
 };
 
 /**
- * A payment landing on a card reduces its open statements, oldest first — the
- * same waterfall banks use, so partial payments leave the bill open with a
- * smaller remaining rather than flipping it to paid.
+ * Re-settle a saved transaction against the card statements it can pay.
+ *
+ * Thin wrapper over the ledger so callers never have to care whether the row is
+ * a payment: it decides, and re-running is free. Every path that can create or
+ * change a transaction calls this, because a bank's SMS says money left the
+ * account — not that a card was paid. The destination card is chosen by the user
+ * in review, which is the moment the payment actually becomes identifiable.
  */
-export const applyCardPaymentFromTx = async (tx: {
-  type?: string;
-  amount?: number;
-  accountId?: number;
-  toAccountId?: number;
-}) => {
+export const applyCardPaymentForTransaction = async (transactionId: number) => {
   try {
-    const accounts = await getAccounts();
-    const isCard = (id?: number) =>
-      !!id && accounts.some((a) => a.id === id && a.accountType === 'credit_card');
-
-    // Money reaching a card: a credit on the card, or a transfer into it.
-    const cardId =
-      tx.type === 'credit' && isCard(tx.accountId) ? tx.accountId
-        : tx.type === 'transfer' && isCard(tx.toAccountId) ? tx.toAccountId
-          : null;
-    if (!cardId || !(tx.amount && tx.amount > 0)) return;
-
-    const applied = await applyCardPayment(cardId, tx.amount);
-    if (applied > 0) console.log('[CardStatement] Applied payment', applied, 'to card', cardId);
+    const applied = await syncCardPaymentForTransaction(transactionId);
+    if (applied > 0) {
+      console.log('[CardStatement] Settled', applied, 'from transaction', transactionId);
+    }
   } catch (e) {
     console.warn('[CardStatement] Failed to apply payment:', e);
   }
@@ -992,9 +982,9 @@ const _doSmsScan = async (silent = false): Promise<BackgroundFetch.BackgroundFet
         aiEnriched: AIModelManager.isModelLoaded(),
       } as Omit<Transaction, 'id'>;
 
-      await addTransaction(txData);
+      const savedId = await addTransaction(txData);
       await handleSalaryCredit(txData);
-      await applyCardPaymentFromTx(txData);
+      await applyCardPaymentForTransaction(savedId);
       newTxCount++;
       totalAmount += txData.amount ?? 0;
       if (!topMerchant && txData.merchant) topMerchant = txData.merchant;

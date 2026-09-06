@@ -478,24 +478,6 @@ const BankAccountDetailScreen = ({ navigation, route }: any) => {
     preferences.hideAmounts ? '****' : `${preferences.currency}${Math.abs(val).toLocaleString('en-IN')}`;
 
   // ── Data loaders ─────────────────────────────────────────────────────────
-  const loadPageData = async (range: DateRangePreset) => {
-    const { startDate, endDate } = getDateBounds(range);
-    const trendDays = range === 'all' ? 90 : range === '90d' ? 90 : range === '30d' ? 30 : 7;
-    const [accs, cats, tr, ins, stmt] = await Promise.all([
-      getAccounts(),
-      getCategories(),
-      getAccountSpendTrend(accountId, trendDays),
-      getAccountInsights(accountId, startDate, endDate),
-      getCurrentStatement(accountId),
-    ]);
-    setAccount(accs.find(a => a.id === accountId) ?? null);
-    setAllAccounts(accs);
-    setStatement(stmt);
-    setCategories(cats);
-    setTrend(tr);
-    setInsights(ins);
-  };
-
   const loadTabData = async (range: DateRangePreset, tab: ActiveTab, cats: Category[]) => {
     try {
       const { startDate, endDate } = getDateBounds(range);
@@ -562,14 +544,22 @@ const BankAccountDetailScreen = ({ navigation, route }: any) => {
       setTabLoading(true);
       const { startDate, endDate } = getDateBounds(range);
       const trendDays = range === 'all' ? 90 : range === '90d' ? 90 : range === '30d' ? 30 : 7;
-      const [accs, cats, tr, ins] = await Promise.all([
+      const [accs, cats, tr, ins, stmt] = await Promise.all([
         getAccounts(),
         getCategories(),
         getAccountSpendTrend(accountId, trendDays),
         getAccountInsights(accountId, startDate, endDate),
+        getCurrentStatement(accountId),
       ]);
       const acc = accs.find(a => a.id === accountId) ?? null;
       setAccount(acc);
+      // Every account, not just this one: the Pay Bill sheet funds a card
+      // payment from them. Its "Pay from" list was empty on every visit because
+      // this loader replaced an older one and never took over these two setters.
+      setAllAccounts(accs);
+      // Drives the real due amount and date on the Pay Bill button, and the
+      // statement the sheet quotes instead of falling back to the balance.
+      setStatement(stmt);
       setCategories(cats);
       setTrend(tr);
       setInsights(ins);
@@ -1066,7 +1056,7 @@ const BankAccountDetailScreen = ({ navigation, route }: any) => {
         fundingAccounts={allAccounts.filter(a => a.accountType !== 'credit_card')}
         currency={preferences.currency}
         masked={preferences.hideAmounts}
-        onPaid={() => loadPageData(dateRange)}
+        onPaid={() => loadAll(dateRange, activeTab)}
       />
     </ThemedSafeAreaView>
   );

@@ -47,7 +47,11 @@ import {
   Account,
   Category,
 } from '../services/database';
-import { enrichPendingSmsWithAI, handleSalaryCreditById } from '../services/backgroundTasks';
+import {
+  enrichPendingSmsWithAI,
+  handleSalaryCreditById,
+  applyCardPaymentForTransaction,
+} from '../services/backgroundTasks';
 
 type SheetKind = null | 'category' | 'account' | 'toAccount' | 'tags';
 type CatType = 'expense' | 'income' | 'transfer';
@@ -182,6 +186,7 @@ const SmartInboxScreen = ({ navigation }: any) => {
     if (type === 'transfer' && tx.category !== 'Transfer') updates.category = 'Transfer';
     Haptics.selectionAsync().catch(() => {});
     await updateTransaction(tx.id, updates as any);
+    await applyCardPaymentForTransaction(tx.id);
     patchTx(tx.id, updates);
     setCatType(type === 'credit' ? 'income' : type === 'transfer' ? 'transfer' : 'expense');
   }, [patchTx]);
@@ -208,6 +213,8 @@ const SmartInboxScreen = ({ navigation }: any) => {
   const changeToAccount = useCallback(async (accId: number) => {
     if (!activeTx) return;
     await updateTransaction(activeTx.id, { toAccountId: accId });
+    // The destination is what makes a bank debit a card payment.
+    await applyCardPaymentForTransaction(activeTx.id);
     patchTx(activeTx.id, { toAccountId: accId });
     Haptics.selectionAsync().catch(() => {});
     setSheet(null);

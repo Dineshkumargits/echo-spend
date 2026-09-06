@@ -22,7 +22,7 @@ import { ThemedText } from './ThemedSafeAreaView';
 import { useTheme } from '../theme/ThemeProvider';
 import { useStore } from '../store/useStore';
 import { Transaction, Account, Category, updateTransaction } from '../services/database';
-import { handleSalaryCreditById } from '../services/backgroundTasks';
+import { handleSalaryCreditById, applyCardPaymentForTransaction } from '../services/backgroundTasks';
 import { TagInput } from './TagInput';
 import { ConfidenceChip } from './Signal';
 import { fonts } from '../theme/tokens';
@@ -83,6 +83,8 @@ export const ReviewTransactionCard = ({
       updates.isTransfer = 0;
     }
     await updateTransaction(tx.id, updates);
+    // Switching to (or away from) a transfer changes whether this settles a card.
+    await applyCardPaymentForTransaction(tx.id);
     onTransactionUpdated({ ...tx, ...updates, isTransfer: !!updates.isTransfer });
     setCatTab(newType === 'credit' ? 'income' : newType === 'transfer' ? 'transfer' : 'expense');
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -90,6 +92,9 @@ export const ReviewTransactionCard = ({
 
   const changeToAccount = async (toAccountId: number) => {
     await updateTransaction(tx.id, { toAccountId });
+    // Picking the destination is what identifies a bank debit as a card payment —
+    // the SMS itself never says so. Settle the statement now.
+    await applyCardPaymentForTransaction(tx.id);
     onTransactionUpdated({ ...tx, toAccountId });
     setShowToAccPicker(false);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);

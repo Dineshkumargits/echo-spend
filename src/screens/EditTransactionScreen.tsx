@@ -30,7 +30,10 @@ import {
   getPendingSplitMembers,
   PendingSplitMember,
 } from '../services/database';
-import { handleSalaryCreditById } from '../services/backgroundTasks';
+import {
+  handleSalaryCreditById,
+  applyCardPaymentForTransaction,
+} from '../services/backgroundTasks';
 import { useTheme } from '../theme/ThemeProvider';
 import { SectionLabel } from '../components/Signal';
 import { fonts } from '../theme/tokens';
@@ -500,6 +503,9 @@ export const EditTransactionScreen = () => {
       // cycle boundary — the edit is often where the salary signal first
       // appears, since SMS credits arrive as plain income.
       await handleSalaryCreditById(transaction.id);
+      // Amount, date and destination all change what this settles — and an edit
+      // that stops it being a payment hands the statement its money back.
+      await applyCardPaymentForTransaction(transaction.id);
 
       if (shouldDeleteSplit && existingSplitId !== null) {
         await deleteSplit(existingSplitId);
