@@ -23,6 +23,9 @@ import { performBackgroundSmsScan } from './src/services/backgroundTasks';
 import { SyncService } from './src/services/sync';
 import { AIModelManager } from './src/services/aiModelManager';
 import { checkForUpdate } from './src/services/updateChecker';
+import { refreshEntitlement } from './src/services/entitlements';
+import { addPurchaseListeners } from './src/services/billing';
+import { notify } from './src/utils/notify';
 import { useFonts } from 'expo-font';
 import { fontFiles } from './src/theme/tokens';
 
@@ -356,6 +359,53 @@ function AppContent() {
 
     const sub = AppState.addEventListener('change', handleAppStateChange);
     return () => sub.remove();
+  }, [hasHydrated]);
+
+  // Ask Google Play what this account owns. Gated on hydration for the same
+  // reason as the update check: the throttle and the last-verified stamp that
+  // bounds the offline grace window both live in the persisted store, and
+  // reading them before rehydration would hit Play on every cold start.
+  //
+  // Foreground matters more here than for updates — a subscription can be
+  // cancelled or refunded from the Play app while Echo Spend sits in the
+  // background, and this is how we find out without a server to notify us.
+  useEffect(() => {
+    if (!hasHydrated) return;
+
+    refreshEntitlement();
+
+    const handleAppStateChange = (nextState: AppStateStatus) => {
+      if (nextState === 'active') refreshEntitlement();
+    };
+
+    const sub = AppState.addEventListener('change', handleAppStateChange);
+    return () => sub.remove();
+  }, [hasHydrated]);
+
+  // The one listener that owns granting Pro.
+  //
+  // It lives here rather than on the paywall because a purchase can complete
+  // long after the sheet is gone: UPI and net-banking payments settle
+  // asynchronously and routinely arrive minutes later. It also carries the
+  // acknowledgement — Play auto-refunds anything left unacknowledged for three
+  // days — so the grant cannot be missed just because the user navigated away.
+  useEffect(() => {
+    if (!hasHydrated) return;
+
+    const unsubscribe = addPurchaseListeners({
+      onOwnershipChanged: async () => {
+        await refreshEntitlement(true);
+        notify.success('Echo Pro is active', 'Thank you');
+      },
+      onPending: () => {
+        notify.info(
+          'Payment processing',
+          'Echo Pro switches on by itself once Google confirms it',
+        );
+      },
+    });
+
+    return unsubscribe;
   }, [hasHydrated]);
 
   // Biometric auto-lock on app background

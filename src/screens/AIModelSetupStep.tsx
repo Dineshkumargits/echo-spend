@@ -17,19 +17,35 @@ import { useStore } from '../store/useStore';
 interface AIModelSetupStepProps {
   onComplete?: () => void;
   showClose?: boolean;
+  /**
+   * Where this is rendered, which decides the CTA hierarchy.
+   *
+   * 'standalone' (Settings) means the user navigated here on purpose, so
+   * downloading is the primary action. 'onboarding' means we interrupted them,
+   * so continuing without Echo AI is primary and the download is the quiet
+   * option — the built-in regex parser is the recommended default path and
+   * Echo AI is an optional extra for unusual SMS formats.
+   */
+  variant?: 'onboarding' | 'standalone';
 }
 
 /**
- * AI Model download step — used in both onboarding and as a standalone screen.
+ * Echo AI download step — used in both onboarding and as a standalone screen.
  * Shows download progress and handles the full lifecycle.
+ *
+ * Copy here deliberately never frames the regex parser as a degraded fallback.
+ * It is the default engine, it is fast, and it handles the overwhelming
+ * majority of bank messages on its own; Echo AI is an addition, not a fix.
  */
-const AIModelSetupStep = ({ onComplete, showClose = false }: AIModelSetupStepProps) => {
+const AIModelSetupStep = ({ onComplete, showClose = false, variant = 'standalone' }: AIModelSetupStepProps) => {
   const { colors } = useTheme();
   const navigation = useNavigation<any>();
   const { aiModelStatus, aiModelProgress, aiModelError } = useStore();
   const [error, setError] = useState<string | null>(null);
   const [expectedSize, setExpectedSize] = useState<string>('~380 MB');
   const [loadingSize, setLoadingSize] = useState<boolean>(true);
+
+  const isOnboarding = variant === 'onboarding';
 
   useEffect(() => {
     AIModelManager.getFormattedExpectedSize()
@@ -40,13 +56,16 @@ const AIModelSetupStep = ({ onComplete, showClose = false }: AIModelSetupStepPro
   // Sparkle animation
   const sparkleAnim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
+    // The pulse is a sell. In onboarding this step is presented as optional,
+    // so it sits still instead.
+    if (isOnboarding) return;
     Animated.loop(
       Animated.sequence([
         Animated.timing(sparkleAnim, { toValue: 1, duration: 2000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
         Animated.timing(sparkleAnim, { toValue: 0, duration: 2000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
       ]),
     ).start();
-  }, []);
+  }, [isOnboarding]);
 
   const sparkleScale = sparkleAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.15] });
   const sparkleOpacity = sparkleAnim.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.7, 1, 0.7] });
@@ -137,6 +156,8 @@ const AIModelSetupStep = ({ onComplete, showClose = false }: AIModelSetupStepPro
             styles.iconContainer,
             {
               backgroundColor: isComplete ? colors.success : `${colors.accent}20`,
+            },
+            !isOnboarding && {
               transform: [{ scale: sparkleScale }],
               opacity: sparkleOpacity,
             },
@@ -150,16 +171,16 @@ const AIModelSetupStep = ({ onComplete, showClose = false }: AIModelSetupStepPro
 
           {/* Title */}
           <ThemedText style={[styles.title, { color: colors.primary }]}>
-            {isComplete ? 'Echo AI is Ready!' : 'Power Up Echo AI'}
+            {isComplete ? 'Echo AI is Ready!' : isOnboarding ? 'Echo AI (optional)' : 'Echo AI'}
           </ThemedText>
 
           {/* Subtitle */}
           <ThemedText style={[styles.subtitle, { color: colors.secondary }]}>
             {isComplete
-              ? 'Your offline Echo AI is set up. Smart SMS parsing is now active.'
+              ? 'Echo AI is set up. It runs entirely on your phone and steps in on unusual message formats.'
               : !isCompatible
-                ? 'Echo AI is disabled because your device has less than 4GB of total RAM. Echo Spend will use high-performance local regex parsing to scan transactions safely.'
-                : 'A small local AI will be downloaded to your device for intelligent SMS analysis. Everything runs locally — your data never leaves your phone.'}
+                ? 'Echo AI needs more RAM than this device has, so it stays off. Nothing is missing — Echo Spend reads your bank messages with its built-in parser.'
+                : 'Echo Spend already reads your bank SMS instantly with its built-in parser. Echo AI is an optional extra for unusual message formats, and it runs entirely on your phone.'}
           </ThemedText>
 
           {/* Size Badge */}
@@ -295,8 +316,37 @@ const AIModelSetupStep = ({ onComplete, showClose = false }: AIModelSetupStepPro
                   </ThemedText>
                 </TouchableOpacity>
               </View>
+            ) : isOnboarding ? (
+              // Onboarding: the hierarchy is inverted on purpose. Moving on
+              // without Echo AI is the recommended path, so it owns the filled
+              // button and the download sits underneath as the quiet option.
+              <>
+                <TouchableOpacity
+                  onPress={handleSkip}
+                  style={[styles.primaryButton, { backgroundColor: colors.accent }]}
+                  activeOpacity={0.8}
+                >
+                  <ThemedText style={styles.primaryButtonText}>
+                    Continue
+                  </ThemedText>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={handleDownload}
+                  style={[styles.secondaryButton, { borderColor: colors.border }]}
+                  activeOpacity={0.7}
+                >
+                  <LucideDownload color={colors.secondary} size={20} />
+                  <ThemedText style={[styles.secondaryButtonText, { color: colors.secondary }]}>
+                    Download Echo AI
+                  </ThemedText>
+                </TouchableOpacity>
+                <ThemedText style={[styles.skipNote, { color: colors.muted }]}>
+                  Optional — you can add Echo AI any time in Settings.
+                </ThemedText>
+              </>
             ) : (
-              // Normal state: start download or skip
+              // Standalone (Settings): the user came here to get the model.
               <>
                 <TouchableOpacity
                   onPress={handleDownload}
@@ -315,11 +365,11 @@ const AIModelSetupStep = ({ onComplete, showClose = false }: AIModelSetupStepPro
                   activeOpacity={0.7}
                 >
                   <ThemedText style={[styles.skipText, { color: colors.secondary }]}>
-                    Skip for now
+                    Not now
                   </ThemedText>
                 </TouchableOpacity>
                 <ThemedText style={[styles.skipNote, { color: colors.muted }]}>
-                  You can download later in Settings. SMS parsing will use basic mode.
+                  You can add Echo AI any time in Settings.
                 </ThemedText>
               </>
             )
@@ -331,11 +381,11 @@ const AIModelSetupStep = ({ onComplete, showClose = false }: AIModelSetupStepPro
                 activeOpacity={0.8}
               >
                 <ThemedText style={styles.primaryButtonText}>
-                  Continue in Basic Mode
+                  Continue
                 </ThemedText>
               </TouchableOpacity>
               <ThemedText style={[styles.skipNote, { color: colors.muted, marginTop: 4 }]}>
-                Device RAM is too low to run local AI safely. Basic mode will match bank messages deterministically.
+                Echo Spend will read your bank messages with its built-in parser.
               </ThemedText>
             </>
           )

@@ -36,9 +36,9 @@ import {
   TopMerchants,
   InteractiveDonut,
   CalendarHeatmap,
-  PremiumGate,
   DonutSegment,
 } from "../components/AnalyticsKit";
+import { Gate } from "../components/Gate";
 import { fonts, budgetPaceColor } from "../theme/tokens";
 import {
   getSpendTrend,
@@ -118,9 +118,6 @@ const AnalyticsScreen = () => {
   const currency = preferences?.currency ?? "₹";
   const onFill = colors.onAccent;
 
-  // Premium seam — advanced sections are wrapped in <PremiumGate>. Flip this to
-  // false (from the future subscription flow) to lock them behind the paywall.
-  const isPremium = true;
 
   const INSIGHT_COLORS: Record<string, string> = {
     anomaly: colors.danger,
@@ -958,17 +955,16 @@ const AnalyticsScreen = () => {
           >
             When you spend
           </ThemedText>
-          <PremiumGate
-            premium={isPremium}
+          <Gate
+            feature="spendingPatterns"
             title="Unlock spending patterns"
-            onUnlock={() => notify.success("Premium coming soon")}
           >
             <WeekdayBars
               data={weekday}
               currency={currency}
               masked={preferences.hideAmounts}
             />
-          </PremiumGate>
+          </Gate>
         </View>
 
         {/* Top merchants — premium */}
@@ -980,10 +976,9 @@ const AnalyticsScreen = () => {
             >
               Top merchants · {trendDays}d
             </ThemedText>
-            <PremiumGate
-              premium={isPremium}
+            <Gate
+              feature="merchantAnalytics"
               title="Unlock merchant analytics"
-              onUnlock={() => notify.success("Premium coming soon")}
             >
               <TopMerchants
                 data={merchants}
@@ -991,7 +986,7 @@ const AnalyticsScreen = () => {
                 masked={preferences.hideAmounts}
                 onPressMerchant={drillMerchant}
               />
-            </PremiumGate>
+            </Gate>
           </View>
         )}
 

@@ -54,6 +54,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 
   plugins: [
     'expo-font',
+    'expo-iap',
     'expo-secure-store',
     'expo-sqlite',
     'expo-task-manager',

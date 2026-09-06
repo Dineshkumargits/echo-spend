@@ -26,7 +26,7 @@ const STACK_ROUTES = new Set([
   'AddAccount', 'EditTransaction', 'SmartScan', 'AddGoal', 'AddLoan',
   'AddSubscription', 'Subscriptions', 'TransactionDetail', 'BankAccountDetail',
   'SplitExpense', 'SplitDetail', 'Finances', 'Budget', 'Tips', 'AIModelSetup',
-  'AccountBackup',
+  'AccountBackup', 'Paywall',
 ]);
 
 /** Older builds shipped notifications carrying these names. */
