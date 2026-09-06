@@ -88,6 +88,24 @@ export const SavingsMeter: React.FC<{
   const tone = positive ? colors.credit : colors.danger;
   const fillPct = Math.min(Math.max(rate, 0), 100);
 
+  /**
+   * A rate is a share of income, so it degrades badly as income approaches zero
+   * — six days into a cycle, before payday, ₹134 of income against ₹22k of
+   * spend printed "-16356%", which is arithmetically right and useless.
+   *
+   * Below -100% (exactly the point where spending passes twice income) the
+   * percentage stops carrying meaning that a multiple doesn't carry better, so
+   * the headline switches to "×  income". No arbitrary threshold: -100% is the
+   * natural boundary where a savings rate stops describing saving at all.
+   */
+  const overspendMultiple = income > 0 && rate < -100 ? expense / income : null;
+  const headline =
+    income <= 0
+      ? '—'
+      : overspendMultiple !== null
+        ? `${overspendMultiple >= 10 ? Math.round(overspendMultiple) : overspendMultiple.toFixed(1)}×`
+        : `${rate}%`;
+
   return (
     <View
       style={{
@@ -116,7 +134,7 @@ export const SavingsMeter: React.FC<{
               color: colors.secondary,
             }}
           >
-            Savings rate · month
+            Savings rate · cycle
           </ThemedText>
           <ThemedText
             style={{
@@ -127,15 +145,18 @@ export const SavingsMeter: React.FC<{
               fontVariant: ['tabular-nums'],
             }}
           >
-            {income > 0 ? `${rate}%` : '—'}
+            {headline}
           </ThemedText>
         </View>
         <ThemedText
           font="signal"
           style={{ fontSize: 10, color: colors.secondary, marginBottom: 4 }}
         >
-          {positive ? 'saved ' : 'over by '}
-          {shortMoney(Math.abs(net), currency, masked)}
+          {income <= 0
+            ? 'no income recorded yet'
+            : overspendMultiple !== null
+              ? `income spent · over by ${shortMoney(Math.abs(net), currency, masked)}`
+              : `${positive ? 'saved ' : 'over by '}${shortMoney(Math.abs(net), currency, masked)}`}
         </ThemedText>
       </View>
       <View
@@ -446,6 +467,13 @@ export interface DonutSegment {
   value: number;
   color: string;
   label: string;
+  /**
+   * Stable identity, when the label is not unique. A synthetic "everything else"
+   * slice and a real category that happens to be called "Other" share a label
+   * but are not the same thing — selection and React keys must tell them apart.
+   * Defaults to `label`.
+   */
+  key?: string;
 }
 
 export const InteractiveDonut: React.FC<{
@@ -454,8 +482,9 @@ export const InteractiveDonut: React.FC<{
   strokeWidth?: number;
   centerTitle: string;
   centerValue: string;
+  /** Identity of the selected segment — its `key`, falling back to its label. */
   selectedLabel?: string | null;
-  onSelect?: (label: string | null) => void;
+  onSelect?: (id: string | null) => void;
 }> = ({
   segments,
   size = 168,
@@ -475,20 +504,21 @@ export const InteractiveDonut: React.FC<{
   let cursor = 0;
   const paths = segments.map((seg, i) => {
     const sweep = (seg.value / total) * (360 - gapDeg * segments.length);
-    const selected = selectedLabel === seg.label;
+    const id = seg.key ?? seg.label;
+    const selected = selectedLabel === id;
     const dim = selectedLabel != null && !selected;
     const d = arcPath(cx, cy, r, cursor, cursor + Math.max(sweep, 1));
     cursor += sweep + gapDeg;
     return (
       <Path
-        key={seg.label + i}
+        key={id}
         d={d}
         stroke={seg.color}
         strokeWidth={selected ? strokeWidth + 4 : strokeWidth}
         strokeLinecap="round"
         strokeOpacity={dim ? 0.28 : 1}
         fill="none"
-        onPress={() => onSelect?.(selected ? null : seg.label)}
+        onPress={() => onSelect?.(selected ? null : id)}
       />
     );
   });

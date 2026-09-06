@@ -651,6 +651,9 @@ const BankAccountDetailScreen = ({ navigation, route }: any) => {
         amount: absDiff,
         category: 'Others',
         merchant: 'Balance Adjustment',
+        // A correction, not a purchase: keeps the balance honest while staying
+        // out of spend totals, budgets, charts and safe-to-spend.
+        isAdjustment: true,
         type,
         date: new Date().toISOString(),
         accountId,

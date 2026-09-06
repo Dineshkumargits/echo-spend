@@ -23,6 +23,11 @@ export interface Transaction {
   isConfirmed: boolean;
   rawSms?: string;
   isRecurring?: boolean;
+  /**
+   * A correction to make a running balance match reality — not spending, not
+   * income. Moves the balance, excluded from every total and chart.
+   */
+  isAdjustment?: boolean;
   recurrenceRule?: string;
   notes?: string;
   subscriptionId?: number;
@@ -524,6 +529,7 @@ const runMigrations = async () => {
     'ALTER TABLE card_statements ADD COLUMN reportedPaid REAL NOT NULL DEFAULT 0',
     'ALTER TABLE subscriptions ADD COLUMN lastPaidTxId INTEGER REFERENCES transactions(id) ON DELETE SET NULL',
     'ALTER TABLE subscriptions ADD COLUMN billingDay INTEGER',
+    'ALTER TABLE transactions ADD COLUMN isAdjustment INTEGER DEFAULT 0',
     'ALTER TABLE transactions ADD COLUMN isRecurring INTEGER DEFAULT 0',
     'ALTER TABLE transactions ADD COLUMN recurrenceRule TEXT',
     'ALTER TABLE transactions ADD COLUMN notes TEXT',
@@ -820,6 +826,22 @@ const runMigrations = async () => {
     }
     await db.execAsync('PRAGMA user_version = 11');
   }
+
+  if (dbVersion < 12) {
+    // Balance adjustments were plain debits and credits, so every total, chart,
+    // budget gauge and safe-to-spend figure counted the user's own bookkeeping
+    // corrections as real money. Flagged retroactively by the merchant name the
+    // adjust-balance flow has always written.
+    try {
+      const res = await db.runAsync(
+        "UPDATE transactions SET isAdjustment = 1 WHERE merchant = 'Balance Adjustment'"
+      );
+      console.log(`[Database] v12: excluded ${res.changes} balance adjustments from spend.`);
+    } catch (e) {
+      console.warn('[Database] Migration to v12 warning:', e);
+    }
+    await db.execAsync('PRAGMA user_version = 12');
+  }
 };
 
 // ─── Default-category tombstones ─────────────────────────────────────────────
@@ -992,6 +1014,7 @@ const mapTransactionRow = (row: any): Transaction => {
     ...row,
     isConfirmed: !!row.isConfirmed,
     isRecurring: !!row.isRecurring,
+    isAdjustment: !!row.isAdjustment,
     isTransfer: !!row.isTransfer,
     aiEnriched: !!row.aiEnriched,
     tags: row.tags ? (() => {
@@ -1144,8 +1167,8 @@ export const getTransactions = async (opts?: {
 export const addTransaction = async (transaction: Omit<Transaction, 'id'>) => {
   const result = await db.runAsync(
     `INSERT INTO transactions
-      (amount, category, merchant, type, date, accountId, toAccountId, isConfirmed, rawSms, isRecurring, recurrenceRule, notes, subscriptionId, goalId, loanId, confidence, source, isTransfer, tags, balanceAfter, splitMemberId, aiEnriched, rawSmsHash)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (amount, category, merchant, type, date, accountId, toAccountId, isConfirmed, rawSms, isRecurring, recurrenceRule, notes, subscriptionId, goalId, loanId, confidence, source, isTransfer, tags, balanceAfter, splitMemberId, aiEnriched, rawSmsHash, isAdjustment)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     transaction.amount,
     transaction.category,
     transaction.merchant,
@@ -1169,6 +1192,7 @@ export const addTransaction = async (transaction: Omit<Transaction, 'id'>) => {
     (transaction as any).splitMemberId ?? null,
     transaction.aiEnriched ? 1 : 0,
     transaction.rawSms ? hashSms(transaction.rawSms) : null,
+    transaction.isAdjustment ? 1 : 0,
   );
 
   const insertId = result.lastInsertRowId;
@@ -1477,6 +1501,17 @@ export const getUnconfirmedTransactions = async (): Promise<Transaction[]> => {
  * anywhere we SUM debit amounts for analytics / trend / budget queries.
  * The outer table MUST be aliased as `t`.
  */
+/**
+ * Rows that are not real money moving in or out of the user's world.
+ *
+ * Transfers move money between the user's own accounts; a balance adjustment is
+ * the user correcting a running balance. Both change balances and neither is
+ * income or spending. Counted as spend, balance adjustments alone were
+ * inflating every total, gauge and chart in the app.
+ */
+const NOT_CASHFLOW = `(t.isTransfer = 0 OR t.isTransfer IS NULL)
+       AND (t.isAdjustment = 0 OR t.isAdjustment IS NULL)`;
+
 const EFFECTIVE_DEBIT_AMOUNT = `COALESCE(
   (SELECT sm.share FROM splits s
    JOIN split_members sm ON sm.splitId = s.id
@@ -1492,7 +1527,7 @@ export const getSpendTrend = async (days = 7): Promise<SpendTrendPoint[]> => {
   const rows = await db.getAllAsync<{ date: string; total: number }>(
     `SELECT DATE(t.date, 'localtime') as date, SUM(${EFFECTIVE_DEBIT_AMOUNT}) as total
      FROM transactions t
-     WHERE t.type = 'debit' AND t.isConfirmed = 1 AND (t.isTransfer = 0 OR t.isTransfer IS NULL) AND t.date >= ?
+     WHERE t.type = 'debit' AND t.isConfirmed = 1 AND ${NOT_CASHFLOW} AND t.date >= ?
      GROUP BY DATE(t.date, 'localtime')
      ORDER BY DATE(t.date, 'localtime') ASC`,
     since.toISOString()
@@ -1529,7 +1564,7 @@ export const getCategoryBreakdownForRange = async (
     `SELECT t.category, SUM(${EFFECTIVE_DEBIT_AMOUNT}) as total, COUNT(*) as count
      FROM transactions t
      WHERE t.type = 'debit' AND t.isConfirmed = 1
-       AND (t.isTransfer = 0 OR t.isTransfer IS NULL)
+       AND ${NOT_CASHFLOW}
        AND t.date >= ? AND t.date < ?
      GROUP BY t.category
      ORDER BY total DESC`,
@@ -1549,7 +1584,7 @@ export const getTopMerchantsForRange = async (
     `SELECT t.merchant, SUM(${EFFECTIVE_DEBIT_AMOUNT}) as total, COUNT(*) as count
      FROM transactions t
      WHERE t.type = 'debit' AND t.isConfirmed = 1
-       AND (t.isTransfer = 0 OR t.isTransfer IS NULL)
+       AND ${NOT_CASHFLOW}
        AND t.merchant IS NOT NULL AND t.merchant != ''
        AND t.date >= ? AND t.date < ?
      GROUP BY t.merchant ORDER BY total DESC LIMIT ?`,
@@ -1566,7 +1601,7 @@ export const getCategoryBreakdown = async (
   const rows = await db.getAllAsync<{ category: string; total: number; count: number }>(
     `SELECT t.category, SUM(${EFFECTIVE_DEBIT_AMOUNT}) as total, COUNT(*) as count
      FROM transactions t
-     WHERE t.type = 'debit' AND t.isConfirmed = 1 AND (t.isTransfer = 0 OR t.isTransfer IS NULL) AND strftime('%Y-%m', t.date, 'localtime') = ?
+     WHERE t.type = 'debit' AND t.isConfirmed = 1 AND ${NOT_CASHFLOW} AND strftime('%Y-%m', t.date, 'localtime') = ?
      GROUP BY t.category
      ORDER BY total DESC`,
     target
@@ -1582,12 +1617,73 @@ export const getMonthlyTotals = async (): Promise<{ month: string; income: numbe
   return await db.getAllAsync(
     `SELECT
        strftime('%Y-%m', t.date, 'localtime') as month,
-       SUM(CASE WHEN t.type = 'credit' AND (t.isTransfer = 0 OR t.isTransfer IS NULL) THEN t.amount ELSE 0 END) as income,
-       SUM(CASE WHEN t.type = 'debit' AND (t.isTransfer = 0 OR t.isTransfer IS NULL) THEN ${EFFECTIVE_DEBIT_AMOUNT} ELSE 0 END) as expense
+       SUM(CASE WHEN t.type = 'credit' AND ${NOT_CASHFLOW} THEN t.amount ELSE 0 END) as income,
+       SUM(CASE WHEN t.type = 'debit' AND ${NOT_CASHFLOW} THEN ${EFFECTIVE_DEBIT_AMOUNT} ELSE 0 END) as expense
      FROM transactions t WHERE t.isConfirmed = 1
      GROUP BY strftime('%Y-%m', t.date, 'localtime')
      ORDER BY month DESC
      LIMIT 6`
+  );
+};
+
+/**
+ * Income and expense per BUDGET CYCLE, newest first.
+ *
+ * The calendar-month version this replaces was the only place in the app still
+ * measuring a month by the calendar. Everything the user compares it against —
+ * the dashboard hero, budgets, safe-to-spend — runs on the salary cycle, so with
+ * a salary landing on the 31st the two screens answered the same question
+ * differently, by whatever the last day of the month happened to spend.
+ *
+ * `month` stays a "YYYY-MM" key so the bar chart reads unchanged; it names the
+ * month the cycle mostly covers (the month its final day falls in).
+ */
+export const getCycleTotals = async (
+  anchorLike: CycleAnchor | number = 1,
+  count = 6,
+): Promise<
+  { month: string; start: string; income: number; expense: number; expenseToDate: number }[]
+> => {
+  const windows = await Promise.all(
+    Array.from({ length: count }, (_, i) => getSalaryCycleWindowAsync(anchorLike, -i)),
+  );
+
+  // How far into the current cycle we are. Every cycle also reports its spend at
+  // this same offset, so "vs last cycle" can compare six days against six days
+  // instead of six days against a finished month.
+  const current = windows[0];
+  const elapsedMs = current
+    ? Math.min(Date.now() - current.start.getTime(), current.end.getTime() - current.start.getTime())
+    : 0;
+
+  return await Promise.all(
+    windows.map(async (win) => {
+      const sameElapsed = new Date(
+        Math.min(win.start.getTime() + elapsedMs, win.end.getTime()),
+      );
+      const row = await db.getFirstAsync<{
+        income: number | null;
+        expense: number | null;
+        expenseToDate: number | null;
+      }>(
+        `SELECT
+           SUM(CASE WHEN t.type = 'credit' AND ${NOT_CASHFLOW} THEN t.amount ELSE 0 END) as income,
+           SUM(CASE WHEN t.type = 'debit'  AND ${NOT_CASHFLOW} THEN ${EFFECTIVE_DEBIT_AMOUNT} ELSE 0 END) as expense,
+           SUM(CASE WHEN t.type = 'debit'  AND ${NOT_CASHFLOW} AND t.date < ? THEN ${EFFECTIVE_DEBIT_AMOUNT} ELSE 0 END) as expenseToDate
+         FROM transactions t
+         WHERE t.isConfirmed = 1 AND t.date >= ? AND t.date < ?`,
+        sameElapsed.toISOString(), win.start.toISOString(), win.end.toISOString(),
+      );
+      // End is exclusive, so the last day inside the cycle names it.
+      const lastDay = new Date(win.end.getTime() - 86_400_000);
+      return {
+        month: `${lastDay.getFullYear()}-${String(lastDay.getMonth() + 1).padStart(2, '0')}`,
+        start: win.start.toISOString(),
+        income: row?.income ?? 0,
+        expense: row?.expense ?? 0,
+        expenseToDate: row?.expenseToDate ?? 0,
+      };
+    }),
   );
 };
 
@@ -1733,6 +1829,7 @@ export const getHighSpendTransactions = async (threshold = 2000): Promise<Transa
     `SELECT * FROM transactions
      WHERE amount >= ? AND isConfirmed = 1
        AND type = 'debit' AND (isTransfer = 0 OR isTransfer IS NULL)
+       AND (isAdjustment = 0 OR isAdjustment IS NULL)
      ORDER BY date DESC LIMIT 20`,
     threshold
   );
@@ -1757,7 +1854,7 @@ export const getWeekdaySpending = async (
             SUM(${EFFECTIVE_DEBIT_AMOUNT}) as total,
             COUNT(*) as count
      FROM transactions t
-     WHERE t.type = 'debit' AND t.isConfirmed = 1 AND (t.isTransfer = 0 OR t.isTransfer IS NULL) AND t.date >= ?
+     WHERE t.type = 'debit' AND t.isConfirmed = 1 AND ${NOT_CASHFLOW} AND t.date >= ?
      GROUP BY strftime('%w', t.date, 'localtime')`,
     since.toISOString(),
   );
@@ -1783,7 +1880,7 @@ export const getTopMerchants = async (
   return await db.getAllAsync<{ merchant: string; total: number; count: number }>(
     `SELECT t.merchant, SUM(${EFFECTIVE_DEBIT_AMOUNT}) as total, COUNT(*) as count
      FROM transactions t
-     WHERE t.type = 'debit' AND t.isConfirmed = 1 AND (t.isTransfer = 0 OR t.isTransfer IS NULL)
+     WHERE t.type = 'debit' AND t.isConfirmed = 1 AND ${NOT_CASHFLOW}
        AND t.merchant IS NOT NULL AND t.merchant != ''
        AND strftime('%Y-%m', t.date, 'localtime') = ?
      GROUP BY t.merchant
@@ -1807,7 +1904,7 @@ export const getCurrentMonthSpend = async (
 
   const row = await db.getFirstAsync<{ total: number }>(
     `SELECT SUM(${EFFECTIVE_DEBIT_AMOUNT}) as total FROM transactions t
-     WHERE t.type = 'debit' AND t.isConfirmed = 1 AND (t.isTransfer = 0 OR t.isTransfer IS NULL) AND t.date >= ? AND t.date < ?`,
+     WHERE t.type = 'debit' AND t.isConfirmed = 1 AND ${NOT_CASHFLOW} AND t.date >= ? AND t.date < ?`,
     startDate.toISOString(),
     endDate.toISOString()
   );
@@ -2803,7 +2900,7 @@ const getSpendByCategory = async (start: Date, end: Date): Promise<Map<string, n
   const rows = await db.getAllAsync<{ category: string; total: number }>(
     `SELECT t.category as category, SUM(${EFFECTIVE_DEBIT_AMOUNT}) as total FROM transactions t
      WHERE t.type = 'debit' AND t.isConfirmed = 1
-       AND (t.isTransfer = 0 OR t.isTransfer IS NULL)
+       AND ${NOT_CASHFLOW}
        AND t.date >= ? AND t.date < ?
      GROUP BY t.category`,
     start.toISOString(), end.toISOString()

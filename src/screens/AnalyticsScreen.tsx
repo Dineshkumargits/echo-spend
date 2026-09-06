@@ -44,7 +44,7 @@ import {
   getSpendTrend,
   getCategoryBreakdownForRange,
   getSpendingByTag,
-  getMonthlyTotals,
+  getCycleTotals,
   getCategories,
   getBudgetUtilization,
   getHighSpendTransactions,
@@ -73,6 +73,12 @@ const INSIGHT_ICONS: Record<string, any> = {
   weekly_digest: LucideTrendingDown,
   recurring_detected: LucideRefreshCw,
 };
+
+/**
+ * Identity of the donut's synthetic "everything else" slice. Not a category
+ * name, so it can never collide with one.
+ */
+const OVERFLOW_KEY = "__overflow__";
 
 const TREND_PERIODS = [7, 14, 30, 90];
 
@@ -142,7 +148,7 @@ const AnalyticsScreen = () => {
       getSpendTrend(trendDays),
       getSpendTrend(30),
       getCategoryBreakdownForRange(rangeStart, rangeEnd),
-      getMonthlyTotals(),
+      getCycleTotals(cycleAnchorFrom(preferences)),
       getInsights(),
       getCategories(),
       getSpendingByTag(dStart, dEnd),
@@ -304,12 +310,17 @@ const AnalyticsScreen = () => {
     [currency, preferences.hideAmounts],
   );
 
-  // This month vs last month (from the 6-month monthly totals)
+  // This cycle vs the previous one. Cycles, not calendar months, so this agrees
+  // with the dashboard hero and the budget gauges.
   const thisMonth = monthlyTotals[0] ?? { income: 0, expense: 0 };
   const lastMonth = monthlyTotals[1] ?? { income: 0, expense: 0 };
   const monthExpense = Number(thisMonth.expense);
   const monthIncome = Number(thisMonth.income);
   const prevExpense = Number(lastMonth.expense);
+  // The comparison the chip makes: last cycle measured at the same point in its
+  // run. Against the finished total it read "down 91%" six days in, every cycle,
+  // which said nothing about spending.
+  const prevExpenseToDate = Number(lastMonth.expenseToDate ?? lastMonth.expense);
 
   // Donut segments: top 5 parent groups + "Other"
   const donutSegments = useMemo<DonutSegment[]>(() => {
@@ -327,14 +338,24 @@ const AnalyticsScreen = () => {
     const top = sorted.slice(0, 5);
     const rest = sorted.slice(5).reduce((s, [, v]) => s + v, 0);
     const segs: DonutSegment[] = top.map(([name, value]) => ({
+      key: name,
       label: name,
       value,
       color:
         categories.find((c) => c.name === name && !c.parentId)?.color ||
         colors.secondary,
     }));
+    // The overflow bucket is not a category. Keyed separately — and labelled
+    // distinctly — because a real category called "Other" is common, and sharing
+    // a label made React see two children with the same key and made tapping the
+    // real one filter to the overflow instead.
     if (rest > 0)
-      segs.push({ label: "Other", value: rest, color: colors.muted });
+      segs.push({
+        key: OVERFLOW_KEY,
+        label: "Other categories",
+        value: rest,
+        color: colors.muted,
+      });
     return segs;
   }, [breakdown, categories, colors]);
 
@@ -342,10 +363,13 @@ const AnalyticsScreen = () => {
   // Named (non-"Other") donut labels — used so tapping the synthetic "Other"
   // segment filters the card list to the overflow parents instead of blanking it.
   const donutNamedLabels = useMemo(
-    () => new Set(donutSegments.filter((s) => s.label !== "Other").map((s) => s.label)),
+    () =>
+      new Set(
+        donutSegments.filter((s) => s.key !== OVERFLOW_KEY).map((s) => s.label),
+      ),
     [donutSegments],
   );
-  const selectedSeg = donutSegments.find((s) => s.label === selectedCat);
+  const selectedSeg = donutSegments.find((s) => (s.key ?? s.label) === selectedCat);
   const rhythmMax = Math.max(...rhythm.map((p) => p.total), 1);
   const monthlyMax = Math.max(
     ...monthlyTotals.map((r) => Math.max(Number(r.income), Number(r.expense))),
@@ -398,8 +422,12 @@ const AnalyticsScreen = () => {
           style={cardStyle}
         >
           <View className="flex-row items-center justify-between">
-            <SectionLabel>Spent · this month</SectionLabel>
-            <DeltaChip current={monthExpense} previous={prevExpense} />
+            <SectionLabel>Spent · this cycle</SectionLabel>
+            <DeltaChip
+              current={monthExpense}
+              previous={prevExpenseToDate}
+              label="at this point"
+            />
           </View>
           <ThemedText
             style={{
@@ -415,7 +443,7 @@ const AnalyticsScreen = () => {
             font="signal"
             style={{ fontSize: 10, color: colors.secondary, marginTop: 2 }}
           >
-            income {fmtShort(monthIncome)} · last month {fmtShort(prevExpense)}
+            income {fmtShort(monthIncome)} · last cycle {fmtShort(prevExpense)}
           </ThemedText>
         </View>
 
@@ -657,14 +685,13 @@ const AnalyticsScreen = () => {
                 />
                 <View className="flex-1" style={{ gap: 8 }}>
                   {donutSegments.map((seg) => {
-                    const active = selectedCat === seg.label;
+                    const id = seg.key ?? seg.label;
+                    const active = selectedCat === id;
                     const dim = selectedCat != null && !active;
                     return (
                       <TouchableOpacity
-                        key={seg.label}
-                        onPress={() =>
-                          setSelectedCat(active ? null : seg.label)
-                        }
+                        key={id}
+                        onPress={() => setSelectedCat(active ? null : id)}
                         className="flex-row items-center"
                         style={{ gap: 8, opacity: dim ? 0.4 : 1 }}
                       >
@@ -739,7 +766,7 @@ const AnalyticsScreen = () => {
                     if (selectedCat == null) return true;
                     // Tapping the donut's "Other" bucket shows the overflow
                     // parents (everything not surfaced as its own donut slice).
-                    if (selectedCat === "Other") return !donutNamedLabels.has(name);
+                    if (selectedCat === OVERFLOW_KEY) return !donutNamedLabels.has(name);
                     return selectedCat === name;
                   })
                   .map(([parentName, data], index) => {
@@ -999,7 +1026,7 @@ const AnalyticsScreen = () => {
         {monthlyTotals.length > 0 && (
           <View className="p-4 rounded-apple-md border mb-6" style={cardStyle}>
             <SectionLabel>
-              In vs out · last {monthlyTotals.length} months
+              In vs out · last {monthlyTotals.length} cycles
             </SectionLabel>
             <View className="flex-row justify-between mt-3 mb-2">
               <ThemedText
@@ -1024,7 +1051,7 @@ const AnalyticsScreen = () => {
               const net = Number(row.income) - Number(row.expense);
               return (
                 <MotiView
-                  key={row.month}
+                  key={row.start ?? row.month}
                   from={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: i * 60 }}
