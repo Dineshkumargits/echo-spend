@@ -43,6 +43,7 @@ import {
   LucideCpu,
   LucideAlertTriangle,
   LucideSparkles,
+  LucideCreditCard,
   LucideLightbulb,
   LucideWallet,
   LucideCalendar,
@@ -53,6 +54,8 @@ import { GoogleSignin } from "@react-native-google-signin/google-signin";
 import Constants from "expo-constants";
 import { notify } from "../utils/notify";
 import { useStore } from "../store/useStore";
+import { useEntitlement } from '../hooks/useEntitlement';
+import { openManageSubscriptions } from '../services/billing';
 import { SyncService } from "../services/sync";
 import { resetAllData } from "../services/database";
 import { useBiometric } from "../hooks/useBiometric";
@@ -100,6 +103,7 @@ const SettingsScreen = ({ navigation }: any) => {
   } = useStore();
 
   const aiModelStatus = useStore((s) => s.aiModelStatus);
+  const { isPro, onGrace, entitlement } = useEntitlement();
   const aiModelProgress = useStore((s) => s.aiModelProgress);
   const aiModelError = useStore((s) => s.aiModelError);
 
@@ -774,6 +778,47 @@ const SettingsScreen = ({ navigation }: any) => {
             </View>
             <LucideChevronRight color={colors.muted} size={18} />
           </TouchableOpacity>
+
+          {/* ── Echo Pro ── */}
+          <Section title="Echo Pro" />
+          <View
+            className="rounded-apple-md overflow-hidden"
+            style={{
+              backgroundColor: colors.surface,
+              borderWidth: 1,
+              borderColor: colors.border,
+            }}
+          >
+            <Row
+              icon={<LucideSparkles color={colors.accent} size={20} />}
+              label={isPro ? "Echo Pro is active" : "Upgrade to Echo Pro"}
+              sub={
+                isPro
+                  ? onGrace
+                    ? "Offline — will re-check with Google Play"
+                    : entitlement.source === "lifetime"
+                      ? "Lifetime — thank you"
+                      : entitlement.source === "founder"
+                        ? "Founder access — thank you"
+                        : "Subscription active"
+                  : "Full history, deeper analysis and automation"
+              }
+              onPress={() =>
+                navigation.navigate("Paywall", { trigger: "settings" })
+              }
+            />
+            {isPro && entitlement.source === "play_sub" && (
+              <Row
+                icon={<LucideCreditCard color={colors.primary} size={20} />}
+                label="Manage subscription"
+                sub="Change plan or cancel in Google Play"
+                onPress={() => {
+                  triggerHaptic();
+                  openManageSubscriptions();
+                }}
+              />
+            )}
+          </View>
 
           {/* ── Appearance ── */}
           <Section title="Appearance" />
@@ -1463,8 +1508,8 @@ const SettingsScreen = ({ navigation }: any) => {
               <>
                 <Row
                   icon={<LucideAlertTriangle color={colors.danger} size={20} />}
-                  label="Echo AI Incompatible"
-                  sub="Your device has less than 2GB of total RAM. On-device Echo AI is disabled to prevent crashes."
+                  label="Echo AI Unavailable"
+                  sub="This device has less than 2GB of RAM, so the on-device model stays off to prevent crashes."
                 />
                 <View
                   style={{
@@ -1474,8 +1519,8 @@ const SettingsScreen = ({ navigation }: any) => {
                   }}
                 >
                   <ThemedText type="secondary" className="text-xs">
-                    Echo Spend will fall back to high-performance local regex
-                    parsing. No action is required.
+                    Nothing is missing. Echo Spend reads your bank messages with
+                    its built-in parser, which is the default engine anyway.
                   </ThemedText>
                 </View>
               </>
@@ -1483,11 +1528,9 @@ const SettingsScreen = ({ navigation }: any) => {
               /* Model not downloaded — show download prompt */
               <>
                 <Row
-                  icon={
-                    <LucideAlertTriangle color={colors.warning} size={20} />
-                  }
+                  icon={<LucideBrain color={colors.secondary} size={20} />}
                   label="Echo AI Not Installed"
-                  sub="Smart SMS parsing is using basic mode"
+                  sub="Optional — the built-in parser is handling your SMS"
                 />
                 <TouchableOpacity
                   onPress={() => {
@@ -1587,7 +1630,7 @@ const SettingsScreen = ({ navigation }: any) => {
                   onPress={() => {
                     Alert.alert(
                       "Delete Echo AI?",
-                      `Without the Echo AI, SMS analysis will use basic pattern matching which is less accurate for unusual transactions.\n\nYou'll need to re-download ${expectedModelSize} later to restore Echo AI features.`,
+                      `SMS parsing carries on with the built-in parser, which handles almost every bank message on its own. Echo AI only adds help with unusual formats.\n\nYou can re-download it (${expectedModelSize}) any time.`,
                       [
                         { text: "Keep Echo AI", style: "cancel" },
                         {
@@ -1598,7 +1641,7 @@ const SettingsScreen = ({ navigation }: any) => {
                             setAiModelSize("");
                             notify.info(
                               "Echo AI deleted",
-                              "Using basic SMS parsing mode",
+                              "Built-in SMS parsing is still active",
                             );
                             triggerHaptic(Haptics.ImpactFeedbackStyle.Heavy);
                           },

@@ -21,6 +21,7 @@ import {
   LucideZap,
   LucideCloudSync,
   LucideTimer,
+  LucideBrain,
 } from 'lucide-react-native';
 import { MotiView } from 'moti';
 import * as Haptics from 'expo-haptics';
@@ -362,7 +363,7 @@ export const TipsScreen = () => {
             {/* Offline AI Assistant */}
             {isAiCompatible && (
               <Row
-                icon={isAiActive ? <LucideCheckCircle2 color={colors.success} size={20} /> : <LucideLock color={colors.warning} size={18} />}
+                icon={isAiActive ? <LucideCheckCircle2 color={colors.success} size={20} /> : <LucideBrain color={colors.secondary} size={18} />}
                 label="Offline AI Assistant"
                 sub={
                   aiModelStatus === 'ready'
@@ -371,12 +372,12 @@ export const TipsScreen = () => {
                     ? "Qwen AI model is downloaded and ready to initialize."
                     : aiModelStatus === 'loading'
                     ? "Qwen AI model is initializing in the background..."
-                    : `Smart categorization without internet. Tap to view how to install the model ${loadingExpectedSize ? '' : `(${expectedModelSize})`}.`
+                    : `Optional extra for unusual SMS formats — your messages are already parsed on-device without it ${loadingExpectedSize ? '' : `(${expectedModelSize})`}.`
                 }
                 right={
-                  <View style={[styles.badge, { backgroundColor: isAiActive ? `${colors.success}20` : `${colors.warning}20` }]}>
-                    <ThemedText style={[styles.badgeText, { color: isAiActive ? colors.success : colors.warning }]}>
-                      {aiModelStatus === 'ready' ? "ACTIVE" : aiModelStatus === 'downloaded' ? "READY" : aiModelStatus === 'loading' ? "LOADING" : "GET MODEL"}
+                  <View style={[styles.badge, { backgroundColor: isAiActive ? `${colors.success}20` : colors.translucent }]}>
+                    <ThemedText style={[styles.badgeText, { color: isAiActive ? colors.success : colors.secondary }]}>
+                      {aiModelStatus === 'ready' ? "ACTIVE" : aiModelStatus === 'downloaded' ? "READY" : aiModelStatus === 'loading' ? "LOADING" : "OPTIONAL"}
                     </ThemedText>
                   </View>
                 }
@@ -384,8 +385,8 @@ export const TipsScreen = () => {
                   triggerHaptic();
                   if (!isAiActive) {
                     showCustomAlert(
-                      "Download AI Model",
-                      "To enable smart on-device categorization, go back to Settings, scroll down to the 'AI Engine' section, and tap 'Download AI Model'.",
+                      "Echo AI is optional",
+                      "Your bank SMS is already parsed on-device by the built-in parser. Echo AI only adds help with unusual message formats.\n\nTo add it anyway: Settings → Echo AI Engine → Download Echo AI.",
                       [{ text: "OK" }]
                     );
                   } else {

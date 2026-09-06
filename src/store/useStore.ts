@@ -3,6 +3,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import * as SecureStore from 'expo-secure-store';
 import { DEFAULT_THEME_ID } from '../theme/tokens';
 import type { UpdateInfo } from '../services/updateChecker';
+import type { Entitlement } from '../services/entitlements';
 
 
 interface UserPreferences {
@@ -92,6 +93,21 @@ interface AppState {
    */
   updateDismissedVersionCode: number | null;
 
+  /**
+   * Last entitlement Google Play confirmed (see services/entitlements).
+   *
+   * Persisted so the app knows what the user owns before — and without — a
+   * network round trip. null means "never checked", which reads as free once
+   * enforcement is on.
+   */
+  proEntitlement: Entitlement | null;
+  /**
+   * ISO timestamp of the last successful Play round trip. This is what bounds
+   * the offline grace window, so it is only ever stamped on a real answer from
+   * Play, never on a failed check.
+   */
+  entitlementVerifiedAt: string | null;
+
   setTheme: (theme: 'dark' | 'light' | 'system') => void;
   setThemeId: (themeId: string) => void;
   toggleAutoApprove: () => void;
@@ -144,6 +160,9 @@ interface AppState {
   setUpdateLastCheckedAt: (iso: string) => void;
   /** null clears the dismissal, so a manual check can resurface the banner. */
   dismissUpdate: (versionCode: number | null) => void;
+
+  /** Written only by services/entitlements after Play answers. */
+  setProEntitlement: (entitlement: Entitlement | null, verifiedAt: string | null) => void;
 }
 
 const secureStorage = {
@@ -197,6 +216,8 @@ export const useStore = create<AppState>()(
       updateInfo: null,
       updateLastCheckedAt: null,
       updateDismissedVersionCode: null,
+      proEntitlement: null,
+      entitlementVerifiedAt: null,
       googleUser: null,
       hasHydrated: false,
 
@@ -381,6 +402,9 @@ export const useStore = create<AppState>()(
       setUpdateLastCheckedAt: (updateLastCheckedAt) => set({ updateLastCheckedAt }),
       dismissUpdate: (updateDismissedVersionCode) => set({ updateDismissedVersionCode }),
 
+      setProEntitlement: (proEntitlement, entitlementVerifiedAt) =>
+        set({ proEntitlement, entitlementVerifiedAt }),
+
       resetOnboarding: () =>
         set({
           isOnboarded: false,
@@ -390,6 +414,11 @@ export const useStore = create<AppState>()(
         }),
 
       fullLogout: async () => {
+        // The Play entitlement belongs to the device's Google Play account,
+        // not the Drive sign-in this clears — a paying user must not read as
+        // free just because they logged out of backup/sync.
+        const { proEntitlement, entitlementVerifiedAt } = get();
+
         // 1. Clear Zustand state in memory
         set({
           isOnboarded: false,
@@ -400,6 +429,11 @@ export const useStore = create<AppState>()(
         });
         // 2. Wipe the SecureStore persistence
         await SecureStore.deleteItemAsync('echo-spend-storage');
+        // 3. Re-persist the entitlement immediately after the wipe. The next
+        // set() call is what actually writes to SecureStore again (via the
+        // persist middleware), so without this the purchase would sit
+        // unpersisted until the next Play round trip re-populates it.
+        set({ proEntitlement, entitlementVerifiedAt });
       },
     }),
     {

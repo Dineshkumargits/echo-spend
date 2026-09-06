@@ -431,7 +431,7 @@ const OnboardingScreen = () => {
         />
       )}
       {step === 2 && (
-        <AIModelSetupStep onComplete={() => setStep(3)} />
+        <AIModelSetupStep variant="onboarding" onComplete={() => setStep(3)} />
       )}
       {step === 3 && (
         <ProTipsStep onFinish={completeOnboarding} />
