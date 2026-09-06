@@ -226,14 +226,15 @@ const SettingsScreen = ({ navigation }: any) => {
   };
 
   const handleAutoSmsScanToggle = async (value: boolean) => {
+    // Not gated: preferences.autoSmsScan is what processIncomingSms and the
+    // periodic BACKGROUND_SMS_SCAN_TASK both check in services/backgroundTasks
+    // — it is the real-time capture mechanism itself, not a convenience layered
+    // on top of it. Gating this would gate capture, which config/features.ts
+    // explicitly rules out.
     triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
     if (!value) {
       toggleAutoSmsScan();
       setTimeout(() => registerBackgroundTasks(), 0);
-      return;
-    }
-    if (locked("backgroundSmsScan")) {
-      navigation.navigate("Paywall", { trigger: "automation_toggle" });
       return;
     }
 

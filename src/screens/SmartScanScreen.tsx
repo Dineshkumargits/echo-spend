@@ -196,8 +196,8 @@ const SmartScanScreen = ({ navigation }: any) => {
         // Only bank + credit_card accounts produce SMS; cash/wallet accounts are excluded
         historyTruncatedRef.current = false;
         const scanHistoryDays = limit("scanHistoryDays");
-        // Infinity for Pro (and always, while ENFORCEMENT_ENABLED is false) —
-        // Number.isFinite guards that rather than special-casing the constant.
+        // Infinity for Pro — Number.isFinite guards that rather than special-casing
+        // the constant.
         const freeFloorMs = Number.isFinite(scanHistoryDays)
           ? Date.now() - scanHistoryDays * 24 * 60 * 60 * 1000
           : -Infinity;

@@ -47,7 +47,12 @@ export type FeatureKey =
   | 'customDateRange'
   | 'categoryDrilldown'
   // ── Automation ──
-  | 'backgroundSmsScan'
+  // Note: no 'backgroundSmsScan' here on purpose. In this codebase there is a
+  // single preference (autoSmsScan) that both processIncomingSms and the
+  // periodic BACKGROUND_SMS_SCAN_TASK check — it IS real-time capture, not a
+  // convenience layered on top of it. Gating it would violate the capture
+  // rule above, so it stays free and ungated; only scheduled backup and the
+  // notification automations below are genuine convenience layers.
   | 'scheduledBackup'
   | 'budgetAlerts'
   | 'billReminders'
@@ -74,7 +79,6 @@ export const GATED_FEATURES: ReadonlySet<FeatureKey> = new Set<FeatureKey>([
   'cycleComparison',
   'customDateRange',
   'categoryDrilldown',
-  'backgroundSmsScan',
   'scheduledBackup',
   'budgetAlerts',
   'billReminders',

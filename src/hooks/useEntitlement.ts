@@ -21,8 +21,8 @@ import {
  * Nothing outside services/entitlements may touch billing, and nothing outside
  * config/features may hardcode a limit — this hook is the seam between them.
  *
- * While ENFORCEMENT_ENABLED is false this always reports Pro, so wiring a
- * screen up to it now is a no-op that can be reviewed on its own.
+ * Enforcement is live (services/entitlements.ENFORCEMENT_ENABLED) — these
+ * calls are real gates now, not the no-ops they were while it was false.
  */
 export interface EntitlementApi {
   entitlement: Entitlement;

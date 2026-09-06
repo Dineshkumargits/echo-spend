@@ -12,12 +12,11 @@ import { ensureFirstSeenAt, ensureTrialStarted, getTrialStartedAt } from './data
  * it ever touches a billing API.
  *
  * ── Status ───────────────────────────────────────────────────────────────────
- * Steps 1-3 of 4 are in. `ENFORCEMENT_ENABLED` is still false, so
- * `deriveEntitlement()` reports Pro for everyone and behaviour is unchanged.
- * `bootstrapLocalEntitlement()` (step 3) already runs on every cold start and
- * establishes founder/trial status from real history now, on purpose — by the
- * time step 4 flips the flag, every install's status is already settled from
- * genuine historical data rather than computed fresh at flip time.
+ * All 4 steps are in. `ENFORCEMENT_ENABLED` is true: gates in config/features
+ * are now live for anyone who is not founder/lifetime/subscribed/mid-trial.
+ * Every install already on a device before FOUNDER_CUTOFF_ISO carries the
+ * founder grant from bootstrapLocalEntitlement's backdated first_seen_at, so
+ * this did not retroactively downgrade anyone using the app already.
  *
  * ── Precedence ───────────────────────────────────────────────────────────────
  * lifetime > founder > play_sub > trial > free. Ranked in RANK below; the
@@ -74,19 +73,21 @@ export interface Entitlement {
 /**
  * Master switch for the paywall.
  *
- * Stays false until every existing install has had a chance to run
- * bootstrapLocalEntitlement() and pick up its founder grant. Flipping this is a
- * deliberate, separate release — never a side effect of landing gating code.
+ * Flipped true 2026-09-06, the same release that pins FOUNDER_CUTOFF_ISO
+ * below — every install already on a device before this release ships gets
+ * the founder grant via bootstrapLocalEntitlement's backdated first_seen_at,
+ * so this is not a retroactive downgrade for anyone using the app today.
  */
-export const ENFORCEMENT_ENABLED = false;
+export const ENFORCEMENT_ENABLED = true;
 
 /**
  * Installs that predate this are grandfathered permanently, free.
  *
- * MUST be pinned to the actual release date of the build this ships in before
- * ENFORCEMENT_ENABLED is ever flipped to true — and must never move backward
- * afterward, or someone who already earned a trial could be reclassified.
- * Placeholder is today; update it if the real rollout lands later.
+ * Pinned to the release date of the build that flips ENFORCEMENT_ENABLED
+ * above. MUST NOT move backward from here — moving it later would leave a
+ * window of installs that are neither founder nor have a full trial ahead of
+ * them, and moving it earlier could strip someone who already earned founder
+ * status under the original date.
  */
 export const FOUNDER_CUTOFF_ISO = '2026-09-06T00:00:00.000Z';
 
