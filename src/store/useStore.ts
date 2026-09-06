@@ -414,6 +414,11 @@ export const useStore = create<AppState>()(
         }),
 
       fullLogout: async () => {
+        // The Play entitlement belongs to the device's Google Play account,
+        // not the Drive sign-in this clears — a paying user must not read as
+        // free just because they logged out of backup/sync.
+        const { proEntitlement, entitlementVerifiedAt } = get();
+
         // 1. Clear Zustand state in memory
         set({
           isOnboarded: false,
@@ -424,6 +429,11 @@ export const useStore = create<AppState>()(
         });
         // 2. Wipe the SecureStore persistence
         await SecureStore.deleteItemAsync('echo-spend-storage');
+        // 3. Re-persist the entitlement immediately after the wipe. The next
+        // set() call is what actually writes to SecureStore again (via the
+        // persist middleware), so without this the purchase would sit
+        // unpersisted until the next Play round trip re-populates it.
+        set({ proEntitlement, entitlementVerifiedAt });
       },
     }),
     {
