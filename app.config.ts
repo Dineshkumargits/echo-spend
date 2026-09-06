@@ -83,6 +83,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ],
 
   extra: {
+    // Static update manifest — see services/updateChecker and docs/updates.md
+    updateManifestUrl: process.env.UPDATE_MANIFEST_URL ||
+      'https://raw.githubusercontent.com/Dineshkumargits/echo-spend-releases/main/version.json',
     aiModelUrl: process.env.AI_MODEL_URL || 'https://huggingface.co/ADKDinesh/Qwen2.5-0.5B-SMS-Finance-Parser-GGUF/resolve/main/qwen2.5-0.5b-sms-finance-parser-q4_k_m.gguf',
     googleAndroidClientId: process.env.GOOGLE_ANDROID_CLIENT_ID ||
       '608510187153-uere9cnfgq0ji1iqcq56ajp2pnuaqr8p.apps.googleusercontent.com',

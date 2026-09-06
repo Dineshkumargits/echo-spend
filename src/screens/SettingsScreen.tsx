@@ -46,6 +46,7 @@ import {
   LucideLightbulb,
   LucideWallet,
   LucideCalendar,
+  LucideArrowUpCircle,
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { GoogleSignin } from "@react-native-google-signin/google-signin";
@@ -59,6 +60,11 @@ import { useTheme } from "../theme/ThemeProvider";
 import { registerBackgroundTasks } from "../services/backgroundTasks";
 import { NotificationService } from "../services/notifications";
 import { AIModelManager } from "../services/aiModelManager";
+import {
+  checkForUpdate,
+  getCurrentVersionName,
+  getCurrentVersionCode,
+} from "../services/updateChecker";
 import { TourGuideModal } from "../components/TourGuideModal";
 import { SectionLabel } from "../components/Signal";
 import { fonts, THEMES, themeSwatches } from "../theme/tokens";
@@ -90,6 +96,7 @@ const SettingsScreen = ({ navigation }: any) => {
     toggleHaptics,
     setAutoLockMinutes,
     toggleAutoSmsScan,
+    updateInfo,
   } = useStore();
 
   const aiModelStatus = useStore((s) => s.aiModelStatus);
@@ -453,6 +460,7 @@ const SettingsScreen = ({ navigation }: any) => {
 
   const { checkSupport, authenticate, isSupported } = useBiometric();
   const [showTour, setShowTour] = useState(false);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
 
   useEffect(() => {
     checkSupport();
@@ -476,6 +484,41 @@ const SettingsScreen = ({ navigation }: any) => {
       Haptics.impactAsync(style);
     }
   };
+
+  const appVersionLabel = `${getCurrentVersionName() || "—"} (${getCurrentVersionCode()})`;
+
+  /**
+   * Manual "check now". Bypasses the once-a-day throttle, and clears any
+   * previous dismissal so a user who tapped "Later" and then deliberately came
+   * looking gets the dashboard banner back instead of silence.
+   *
+   * checkForUpdate() swallows its own failures and returns null for both "up to
+   * date" and "the check failed", so the two cases are distinguished here by
+   * whether the timestamp actually moved.
+   */
+  const handleCheckForUpdate = async () => {
+    if (checkingUpdate) return;
+    triggerHaptic();
+    setCheckingUpdate(true);
+    const before = useStore.getState().updateLastCheckedAt;
+    try {
+      const info = await checkForUpdate(true);
+      if (info) {
+        useStore.getState().dismissUpdate(null);
+        notify.success(
+          `Version ${info.versionName || info.versionCode} is available`,
+          "Open the store listing from the banner on your dashboard.",
+        );
+      } else if (useStore.getState().updateLastCheckedAt !== before) {
+        notify.info("You're up to date", `Running version ${appVersionLabel}`);
+      } else {
+        notify.error("Couldn't check for updates", "Check your connection and try again.");
+      }
+    } finally {
+      setCheckingUpdate(false);
+    }
+  };
+
 
 
   const handleSaveThreshold = () => {
@@ -1595,6 +1638,54 @@ const SettingsScreen = ({ navigation }: any) => {
                 triggerHaptic();
                 navigation.navigate("Tips");
               }}
+            />
+          </View>
+
+          {/* ── About ── */}
+          <Section title="About" />
+          <View
+            className="rounded-apple-md overflow-hidden"
+            style={{
+              backgroundColor: colors.surface,
+              borderWidth: 1,
+              borderColor: colors.border,
+            }}
+          >
+            <Row
+              icon={<LucideArrowUpCircle color={colors.accent} size={18} />}
+              label="Check for Updates"
+              sub={
+                updateInfo
+                  ? `Version ${updateInfo.versionName || updateInfo.versionCode} is available`
+                  : `Echo Spend ${appVersionLabel}`
+              }
+              onPress={handleCheckForUpdate}
+              right={
+                checkingUpdate ? (
+                  <ActivityIndicator size="small" color={colors.accent} />
+                ) : updateInfo ? (
+                  <View
+                    style={{
+                      paddingHorizontal: 8,
+                      paddingVertical: 3,
+                      borderRadius: 999,
+                      backgroundColor: colors.brandSoft,
+                      borderWidth: 1,
+                      borderColor: `${colors.accent}40`,
+                    }}
+                  >
+                    <ThemedText
+                      style={{
+                        fontFamily: fonts.textSemibold,
+                        fontSize: 11,
+                        color: colors.accent,
+                      }}
+                    >
+                      New
+                    </ThemedText>
+                  </View>
+                ) : undefined
+              }
             />
           </View>
 

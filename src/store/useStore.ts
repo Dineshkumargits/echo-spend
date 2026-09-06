@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import * as SecureStore from 'expo-secure-store';
 import { DEFAULT_THEME_ID } from '../theme/tokens';
+import type { UpdateInfo } from '../services/updateChecker';
 
 
 interface UserPreferences {
@@ -80,6 +81,17 @@ interface AppState {
   aiModelResumeData: string | null;
   aiModelNudgeDismissed: boolean;
 
+  // Serverless update check (see services/updateChecker)
+  /** Newest published build, when it is ahead of this one. null = up to date. */
+  updateInfo: UpdateInfo | null;
+  /** ISO timestamp of the last successful manifest fetch; throttles the check. */
+  updateLastCheckedAt: string | null;
+  /**
+   * versionCode the user dismissed the banner for. Keyed by version rather than
+   * a boolean so dismissing 1.2.8 does not also silence 1.2.9.
+   */
+  updateDismissedVersionCode: number | null;
+
   setTheme: (theme: 'dark' | 'light' | 'system') => void;
   setThemeId: (themeId: string) => void;
   toggleAutoApprove: () => void;
@@ -126,6 +138,12 @@ interface AppState {
   setAiModelError: (error: string | null) => void;
   setAiModelResumeData: (data: string | null) => void;
   setAiModelNudgeDismissed: (dismissed: boolean) => void;
+
+  // Update-check actions
+  setUpdateInfo: (info: UpdateInfo | null) => void;
+  setUpdateLastCheckedAt: (iso: string) => void;
+  /** null clears the dismissal, so a manual check can resurface the banner. */
+  dismissUpdate: (versionCode: number | null) => void;
 }
 
 const secureStorage = {
@@ -176,6 +194,9 @@ export const useStore = create<AppState>()(
       aiModelError: null,
       aiModelResumeData: null,
       aiModelNudgeDismissed: false,
+      updateInfo: null,
+      updateLastCheckedAt: null,
+      updateDismissedVersionCode: null,
       googleUser: null,
       hasHydrated: false,
 
@@ -355,6 +376,10 @@ export const useStore = create<AppState>()(
       setAiModelError: (aiModelError) => set({ aiModelError }),
       setAiModelResumeData: (aiModelResumeData) => set({ aiModelResumeData }),
       setAiModelNudgeDismissed: (aiModelNudgeDismissed) => set({ aiModelNudgeDismissed }),
+
+      setUpdateInfo: (updateInfo) => set({ updateInfo }),
+      setUpdateLastCheckedAt: (updateLastCheckedAt) => set({ updateLastCheckedAt }),
+      dismissUpdate: (updateDismissedVersionCode) => set({ updateDismissedVersionCode }),
 
       resetOnboarding: () =>
         set({

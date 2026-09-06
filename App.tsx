@@ -22,6 +22,7 @@ import { resolveNotificationTarget, navigateWhenReady } from './src/navigation/n
 import { performBackgroundSmsScan } from './src/services/backgroundTasks';
 import { SyncService } from './src/services/sync';
 import { AIModelManager } from './src/services/aiModelManager';
+import { checkForUpdate } from './src/services/updateChecker';
 import { useFonts } from 'expo-font';
 import { fontFiles } from './src/theme/tokens';
 
@@ -337,6 +338,25 @@ function AppContent() {
     const sub = AppState.addEventListener('change', handleAppStateChange);
     return () => sub.remove();
   }, [dbInitialized]);
+
+  // Serverless update check. Gated on hydration because the once-a-day throttle
+  // lives in the persisted store — running before rehydration would read a null
+  // updateLastCheckedAt and hit the network on every cold start.
+  // Failures are swallowed inside checkForUpdate; nothing here can surface an error.
+  useEffect(() => {
+    if (!hasHydrated) return;
+
+    checkForUpdate();
+
+    // Long-running installs may not cold-start for days, so re-check on
+    // foreground too. The throttle inside makes this cheap.
+    const handleAppStateChange = (nextState: AppStateStatus) => {
+      if (nextState === 'active') checkForUpdate();
+    };
+
+    const sub = AppState.addEventListener('change', handleAppStateChange);
+    return () => sub.remove();
+  }, [hasHydrated]);
 
   // Biometric auto-lock on app background
   useEffect(() => {

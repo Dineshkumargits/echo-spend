@@ -69,6 +69,7 @@ import {
 } from "../components/dashboard/Widgets";
 import { EditDashboardSheet } from "../components/dashboard/EditDashboardSheet";
 import { PayBillSheet } from "../components/PayBillSheet";
+import { UpdateBanner } from "../components/UpdateBanner";
 
 import {
   getTransactions,
@@ -1463,6 +1464,11 @@ const DashboardScreen = ({ navigation }: any) => {
             )}
           </MotiView>
         </View>
+
+        {/* App update banner. Above the widgets rather than down with the AI
+            nudge: the widget stack is long and user-reorderable, so anything
+            below it is effectively invisible. Renders null when up to date. */}
+        <UpdateBanner />
 
         {/* Widgets — order and visibility come from the user's saved layout. */}
         {orderedWidgetIds.map((id) => (
