@@ -29,6 +29,7 @@ import {
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { useNavigation, useIsFocused } from "@react-navigation/native";
 import { notify } from "../utils/notify";
+import { useEntitlement } from "../hooks/useEntitlement";
 import {
   getBudgetUtilization,
   getBudgetSummary,
@@ -113,6 +114,7 @@ const PaceGauge: React.FC<{
 
 const BudgetScreen = () => {
   const navigation = useNavigation<any>();
+  const { canAdd } = useEntitlement();
   const isFocused = useIsFocused();
   const { colors, isDark } = useTheme();
   const {
@@ -287,6 +289,10 @@ const BudgetScreen = () => {
 
   // ── Sheet openers ─────────────────────────────────────────────────────────
   const openCreate = () => {
+    if (!canAdd("budgets", rows.length)) {
+      navigation.navigate("Paywall", { trigger: "limit_reached" });
+      return;
+    }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setFormSelections([]);
     setFormName("");

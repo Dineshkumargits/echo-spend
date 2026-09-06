@@ -57,6 +57,7 @@ import {
   SmsAccountMatch,
 } from "../services/smsParserService";
 import { useStore } from "../store/useStore";
+import { useEntitlement } from "../hooks/useEntitlement";
 import {
   setForegroundScanActive,
   handleSalaryCredit,
@@ -116,6 +117,12 @@ const SmartScanScreen = ({ navigation }: any) => {
   const [aiModelDown, setAiModelDown] = useState(false);
   const [offlineTxIds, setOfflineTxIds] = useState<Set<number>>(new Set());
   const [isModelInitializing, setIsModelInitializing] = useState(false);
+  const { limit } = useEntitlement();
+  // Set (not state) inside startScan when the free 90-day scan limit clamps an
+  // account's true cursor — read once, after the scan lands, to decide
+  // whether to nudge toward Echo Pro. A ref because it must survive without
+  // triggering a re-render mid-scan.
+  const historyTruncatedRef = useRef(false);
 
   useEffect(() => {
     const init = async () => {
@@ -151,6 +158,15 @@ const SmartScanScreen = ({ navigation }: any) => {
       setQueue(all);
       setPhase("review");
     }
+    // Nudge after the destination has taken over, never blocking the scan
+    // result itself — Echo Pro is a follow-up screen, not a wall in front of
+    // the transactions the user just waited for.
+    if (historyTruncatedRef.current) {
+      setTimeout(
+        () => navigation.navigate("Paywall", { trigger: "scan_history_wall" }),
+        500,
+      );
+    }
   }, [navigation]);
 
   const startScan = useCallback(
@@ -178,11 +194,27 @@ const SmartScanScreen = ({ navigation }: any) => {
         const cats = preloadedCategories ?? categories;
 
         // Only bank + credit_card accounts produce SMS; cash/wallet accounts are excluded
-        const trackableRanges = ranges.filter(
-          (r) =>
-            r.account.accountType === "bank" ||
-            r.account.accountType === "credit_card",
-        );
+        historyTruncatedRef.current = false;
+        const scanHistoryDays = limit("scanHistoryDays");
+        // Infinity for Pro (and always, while ENFORCEMENT_ENABLED is false) —
+        // Number.isFinite guards that rather than special-casing the constant.
+        const freeFloorMs = Number.isFinite(scanHistoryDays)
+          ? Date.now() - scanHistoryDays * 24 * 60 * 60 * 1000
+          : -Infinity;
+        const trackableRanges = ranges
+          .filter(
+            (r) =>
+              r.account.accountType === "bank" ||
+              r.account.accountType === "credit_card",
+          )
+          .map((r) => {
+            // The account's true cursor already reaches further back than the
+            // free window allows — clamp it, and remember that real history is
+            // being left unread so finishScanOrRedirect can offer Echo Pro.
+            if (r.fromMs >= freeFloorMs) return r;
+            historyTruncatedRef.current = true;
+            return { ...r, fromMs: freeFloorMs };
+          });
 
         if (accs.length === 0) {
           Alert.alert(

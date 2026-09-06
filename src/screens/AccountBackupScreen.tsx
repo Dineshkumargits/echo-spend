@@ -31,6 +31,7 @@ import Constants from "expo-constants";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { notify } from "../utils/notify";
 import { useStore } from "../store/useStore";
+import { useEntitlement } from "../hooks/useEntitlement";
 import { SyncService } from "../services/sync";
 import {
   resetAllData,
@@ -64,6 +65,7 @@ const AccountBackupScreen = ({ navigation }: any) => {
   } = useStore();
 
   const { colors, isDark } = useTheme();
+  const { locked } = useEntitlement();
   const { BackgroundOptimizationModule } = NativeModules;
 
   const [showTimePicker, setShowTimePicker] = useState(false);
@@ -166,6 +168,10 @@ const AccountBackupScreen = ({ navigation }: any) => {
     if (schedule === "none") {
       setSyncSchedule("none");
       setTimeout(() => registerBackgroundTasks(), 0);
+      return;
+    }
+    if (locked("scheduledBackup")) {
+      navigation.navigate("Paywall", { trigger: "automation_toggle" });
       return;
     }
 

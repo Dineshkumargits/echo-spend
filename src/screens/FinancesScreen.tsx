@@ -23,6 +23,7 @@ import {
 } from '../services/database';
 import { useTheme } from '../theme/ThemeProvider';
 import { useStore } from '../store/useStore';
+import { useEntitlement } from '../hooks/useEntitlement';
 import * as Haptics from 'expo-haptics';
 import { notify } from '../utils/notify';
 import { SectionLabel } from '../components/Signal';
@@ -198,6 +199,7 @@ const QuickActionModal = ({
 export const FinancesScreen = ({ navigation, route }: any) => {
   const { colors, isDark } = useTheme();
   const { preferences } = useStore();
+  const { canAdd } = useEntitlement();
   const isFocused = useIsFocused();
 
   const pagerRef = React.useRef<PagerView>(null);
@@ -1294,6 +1296,12 @@ export const FinancesScreen = ({ navigation, route }: any) => {
           <TouchableOpacity
             style={styles.fab}
             onPress={() => {
+              const limitKey = activeTab === 'subs' ? 'subscriptions' : activeTab === 'goals' ? 'goals' : 'loans';
+              const currentCount = activeTab === 'subs' ? subscriptions.length : activeTab === 'goals' ? goals.length : loans.length;
+              if (!canAdd(limitKey, currentCount)) {
+                navigation.navigate('Paywall', { trigger: 'limit_reached' });
+                return;
+              }
               const screen = activeTab === 'subs' ? 'AddSubscription' : activeTab === 'goals' ? 'AddGoal' : 'AddLoan';
               navigation.navigate(screen);
             }}

@@ -103,7 +103,7 @@ const SettingsScreen = ({ navigation }: any) => {
   } = useStore();
 
   const aiModelStatus = useStore((s) => s.aiModelStatus);
-  const { isPro, onGrace, entitlement } = useEntitlement();
+  const { isPro, onGrace, entitlement, trialDaysLeft, locked } = useEntitlement();
   const aiModelProgress = useStore((s) => s.aiModelProgress);
   const aiModelError = useStore((s) => s.aiModelError);
 
@@ -230,6 +230,10 @@ const SettingsScreen = ({ navigation }: any) => {
     if (!value) {
       toggleAutoSmsScan();
       setTimeout(() => registerBackgroundTasks(), 0);
+      return;
+    }
+    if (locked("backgroundSmsScan")) {
+      navigation.navigate("Paywall", { trigger: "automation_toggle" });
       return;
     }
 
@@ -410,6 +414,10 @@ const SettingsScreen = ({ navigation }: any) => {
       toggleBudgetAlerts();
       return;
     }
+    if (locked("budgetAlerts")) {
+      navigation.navigate("Paywall", { trigger: "automation_toggle" });
+      return;
+    }
 
     const hasPerm = await checkNotificationPermission("budget alerts");
     if (!hasPerm) return;
@@ -423,6 +431,10 @@ const SettingsScreen = ({ navigation }: any) => {
       toggleRecurringAlerts();
       return;
     }
+    if (locked("billReminders")) {
+      navigation.navigate("Paywall", { trigger: "automation_toggle" });
+      return;
+    }
 
     const hasPerm = await checkNotificationPermission("bill reminders");
     if (!hasPerm) return;
@@ -434,6 +446,10 @@ const SettingsScreen = ({ navigation }: any) => {
     triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
     if (!value) {
       toggleWeeklyDigest();
+      return;
+    }
+    if (locked("weeklyDigest")) {
+      navigation.navigate("Paywall", { trigger: "automation_toggle" });
       return;
     }
 
@@ -791,7 +807,13 @@ const SettingsScreen = ({ navigation }: any) => {
           >
             <Row
               icon={<LucideSparkles color={colors.accent} size={20} />}
-              label={isPro ? "Echo Pro is active" : "Upgrade to Echo Pro"}
+              label={
+                isPro
+                  ? entitlement.source === "trial"
+                    ? "Echo Pro trial active"
+                    : "Echo Pro is active"
+                  : "Upgrade to Echo Pro"
+              }
               sub={
                 isPro
                   ? onGrace
@@ -800,7 +822,11 @@ const SettingsScreen = ({ navigation }: any) => {
                       ? "Lifetime — thank you"
                       : entitlement.source === "founder"
                         ? "Founder access — thank you"
-                        : "Subscription active"
+                        : entitlement.source === "trial"
+                          ? trialDaysLeft === 0
+                            ? "Ends today"
+                            : `${trialDaysLeft} day${trialDaysLeft === 1 ? "" : "s"} left`
+                          : "Subscription active"
                   : "Full history, deeper analysis and automation"
               }
               onPress={() =>

@@ -2836,6 +2836,92 @@ export const clearPendingSalaryDate = async (): Promise<void> => {
   await db.runAsync('DELETE FROM app_settings WHERE key = ?', PENDING_SALARY_KEY);
 };
 
+// ─── Echo Pro lifecycle stamps ──────────────────────────────────────────────
+// Two timestamps the entitlement resolver (services/entitlements) needs and
+// nothing else does. Both live in app_settings — not zustand/SecureStore —
+// specifically so they travel with a Google Drive restore: a device that
+// reinstalls and restores a backup must not get a second free trial, and a
+// device that restores an old backup must not lose its founder grant.
+const FIRST_SEEN_AT_KEY = 'first_seen_at';
+const TRIAL_STARTED_AT_KEY = 'trial_started_at';
+
+export const getFirstSeenAt = async (): Promise<string | null> => {
+  const row = await db.getFirstAsync<{ value: string }>(
+    'SELECT value FROM app_settings WHERE key = ?', FIRST_SEEN_AT_KEY,
+  );
+  return row?.value ?? null;
+};
+
+/**
+ * Oldest real evidence already in this database — the earliest transaction,
+ * account, or recorded salary date. Existing users have months of this by the
+ * time Echo Pro ships; a genuinely fresh install has none.
+ *
+ * The only reason this exists: ensureFirstSeenAt() runs for the first time on
+ * every install the moment this code ships, including installs that have been
+ * in daily use for months. Stamping "now" for all of them would make an
+ * existing user indistinguishable from someone installing today, which is
+ * exactly the distinction the founder grant depends on. Backdating to the
+ * oldest evidence already on record fixes that without needing an OS-level
+ * install date (which does not survive a restore to a new device anyway).
+ */
+export const getEarliestActivityDate = async (): Promise<string | null> => {
+  const row = await db.getFirstAsync<{ earliest: string | null }>(`
+    SELECT MIN(d) as earliest FROM (
+      SELECT MIN(date) as d FROM transactions
+      UNION ALL SELECT MIN(startDate) FROM accounts
+      UNION ALL SELECT MIN(occurredAt) FROM salary_dates
+    )
+  `);
+  return row?.earliest ?? null;
+};
+
+/**
+ * The first moment this install's data existed, stamped once and never again.
+ * A no-op once the row exists, so a restored backup keeps whatever it already
+ * has rather than being overwritten by this device's "now".
+ */
+export const ensureFirstSeenAt = async (nowIso: string): Promise<string> => {
+  const existing = await getFirstSeenAt();
+  if (existing) return existing;
+
+  const earliest = await getEarliestActivityDate();
+  const stamp = earliest && earliest < nowIso ? earliest : nowIso;
+
+  await db.runAsync(
+    'INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)',
+    FIRST_SEEN_AT_KEY, stamp,
+  );
+  return stamp;
+};
+
+export const getTrialStartedAt = async (): Promise<string | null> => {
+  const row = await db.getFirstAsync<{ value: string }>(
+    'SELECT value FROM app_settings WHERE key = ?', TRIAL_STARTED_AT_KEY,
+  );
+  return row?.value ?? null;
+};
+
+/**
+ * Starts the local trial clock, once. `INSERT OR IGNORE` for the same reason
+ * as ensureFirstSeenAt: a restored backup must not restart a trial that was
+ * already running or already spent on the device it came from.
+ *
+ * Callers are expected to only invoke this for installs that are not on the
+ * founder grant — see services/entitlements — so a founder's app_settings
+ * table does not accumulate a trial stamp that will never be read.
+ */
+export const ensureTrialStarted = async (nowIso: string): Promise<string> => {
+  await db.runAsync(
+    'INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)',
+    TRIAL_STARTED_AT_KEY, nowIso,
+  );
+  const row = await db.getFirstAsync<{ value: string }>(
+    'SELECT value FROM app_settings WHERE key = ?', TRIAL_STARTED_AT_KEY,
+  );
+  return row?.value ?? nowIso;
+};
+
 /**
  * The budget cycle window, resolved from recorded salary dates (falling back to
  * the recurring anchor until the first one is recorded).

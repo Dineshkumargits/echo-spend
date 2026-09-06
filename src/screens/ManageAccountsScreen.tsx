@@ -30,6 +30,7 @@ import {
 } from '../services/database';
 import { useTheme } from '../theme/ThemeProvider';
 import { MotiView, AnimatePresence } from 'moti';
+import { useEntitlement } from '../hooks/useEntitlement';
 import { useStore } from '../store/useStore';
 
 export const ManageAccountsScreen = () => {
@@ -39,6 +40,7 @@ export const ManageAccountsScreen = () => {
   const navigation = useNavigation<any>();
   const isFocused = useIsFocused();
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const { canAdd } = useEntitlement();
   const [loading, setLoading] = useState(true);
 
   const loadAccounts = useCallback(async () => {
@@ -212,7 +214,13 @@ export const ManageAccountsScreen = () => {
           ))}
 
           <TouchableOpacity
-            onPress={() => navigation.navigate('AddAccount')}
+            onPress={() => {
+              if (!canAdd('accounts', accounts.length)) {
+                navigation.navigate('Paywall', { trigger: 'limit_reached' });
+                return;
+              }
+              navigation.navigate('AddAccount');
+            }}
             style={[styles.addCard, { borderColor: colors.accent, backgroundColor: `${colors.accent}05` }]}
           >
             <View style={[styles.plusCircle, { backgroundColor: colors.accent }]}>

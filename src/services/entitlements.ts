@@ -1,5 +1,8 @@
+import * as Application from 'expo-application';
+import { Platform } from 'react-native';
 import { useStore } from '../store/useStore';
 import { queryOwned, type OwnedState } from './billing';
+import { ensureFirstSeenAt, ensureTrialStarted, getTrialStartedAt } from './database';
 
 /**
  * Entitlement — the single source of truth for "is this install Pro?".
@@ -9,14 +12,18 @@ import { queryOwned, type OwnedState } from './billing';
  * it ever touches a billing API.
  *
  * ── Status ───────────────────────────────────────────────────────────────────
- * Steps 1-2 of 4 are in. `ENFORCEMENT_ENABLED` is still false, so
+ * Steps 1-3 of 4 are in. `ENFORCEMENT_ENABLED` is still false, so
  * `deriveEntitlement()` reports Pro for everyone and behaviour is unchanged.
- * Step 3 adds the founder grant and the trial clock; only then does step 4 flip
- * the flag, so no existing user is downgraded by a release that merely lands
- * the code.
+ * `bootstrapLocalEntitlement()` (step 3) already runs on every cold start and
+ * establishes founder/trial status from real history now, on purpose — by the
+ * time step 4 flips the flag, every install's status is already settled from
+ * genuine historical data rather than computed fresh at flip time.
  *
  * ── Precedence ───────────────────────────────────────────────────────────────
- * lifetime > founder > play_sub > trial > free.
+ * lifetime > founder > play_sub > trial > free. Ranked in RANK below; the
+ * winner is whichever of the Play-verified and local grants outranks the
+ * other, so a founder who also happens to buy lifetime is simply lifetime, and
+ * a subscriber who was also grandfathered keeps Pro if either one lapses.
  *
  * ── Two kinds of grant ───────────────────────────────────────────────────────
  * `lifetime` and `founder` are **permanent**: no clock, no verification needed.
@@ -30,6 +37,13 @@ import { queryOwned, type OwnedState } from './billing';
  *
  * `trial` is **time-boxed** and carries its own deadline.
  *
+ * ── Founder grant ────────────────────────────────────────────────────────────
+ * Anyone whose install predates FOUNDER_CUTOFF_ISO gets Pro, permanently, free.
+ * Existing users have real usage history — see getEarliestActivityDate() in
+ * services/database — which is what "predates" is measured against, backdating
+ * first_seen_at rather than trusting "now" the first time this code runs on an
+ * install that has been in daily use for months. See bootstrapLocalEntitlement.
+ *
  * ── Degradation contract ─────────────────────────────────────────────────────
  * A lapse must never destroy or hide anything. A user who drops to free with
  * twelve accounts still sees all twelve; they simply cannot add a thirteenth,
@@ -40,13 +54,13 @@ import { queryOwned, type OwnedState } from './billing';
 export type EntitlementTier = 'free' | 'pro';
 
 export type EntitlementSource =
-  /** Local 14-day trial from first install; no card. Step 3. */
+  /** Local 14-day trial from first install; no card. */
   | 'trial'
   /** Active Play subscription (monthly or annual base plan). */
   | 'play_sub'
   /** One-time `echo_pro_lifetime` purchase. */
   | 'lifetime'
-  /** Installed before the paywall shipped — permanent thank-you grant. Step 3. */
+  /** Installed before the paywall shipped — permanent thank-you grant. */
   | 'founder'
   | 'none';
 
@@ -60,11 +74,21 @@ export interface Entitlement {
 /**
  * Master switch for the paywall.
  *
- * Stays false until steps 3-4 have shipped and every existing install has been
- * stamped with its founder grant. Flipping this is a deliberate, separate
- * release — never a side effect of landing gating code.
+ * Stays false until every existing install has had a chance to run
+ * bootstrapLocalEntitlement() and pick up its founder grant. Flipping this is a
+ * deliberate, separate release — never a side effect of landing gating code.
  */
 export const ENFORCEMENT_ENABLED = false;
+
+/**
+ * Installs that predate this are grandfathered permanently, free.
+ *
+ * MUST be pinned to the actual release date of the build this ships in before
+ * ENFORCEMENT_ENABLED is ever flipped to true — and must never move backward
+ * afterward, or someone who already earned a trial could be reclassified.
+ * Placeholder is today; update it if the real rollout lands later.
+ */
+export const FOUNDER_CUTOFF_ISO = '2026-09-06T00:00:00.000Z';
 
 /**
  * How long a subscription keeps working while Play cannot be reached.
@@ -75,7 +99,7 @@ export const ENFORCEMENT_ENABLED = false;
  */
 export const GRACE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
-/** Length of the no-card local trial. Consumed in step 3. */
+/** Length of the no-card local trial. */
 export const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
 
 /** Minimum gap between Play round trips, outside of explicit user actions. */
@@ -84,74 +108,192 @@ export const REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const FREE: Entitlement = { tier: 'free', source: 'none', expiresAt: null };
 const UNGATED: Entitlement = { tier: 'pro', source: 'founder', expiresAt: null };
 
+const RANK: Record<EntitlementSource, number> = {
+  lifetime: 4,
+  founder: 3,
+  play_sub: 2,
+  trial: 1,
+  none: 0,
+};
+
 export const isProEntitlement = (e: Entitlement): boolean => e.tier === 'pro';
 
 /** Permanent grants need no clock and no network. */
 const isPermanent = (source: EntitlementSource): boolean =>
   source === 'lifetime' || source === 'founder';
 
-/**
- * The current entitlement, derived purely from persisted state.
- *
- * Pure and synchronous on purpose: gating decisions happen during render, so
- * this never touches Play. `refreshEntitlement()` is what talks to the store
- * and writes the state this reads.
- *
- * Returns the SAME object identity as `stored` whenever the grant still
- * stands, so React memoisation downstream holds.
- */
-export const deriveEntitlement = (
+/** The Play-derived half of the merge: lifetime/play_sub, clocked by grace. */
+const derivePlayEntitlement = (
   stored: Entitlement | null,
   verifiedAt: string | null,
-  now: number = Date.now(),
+  now: number,
 ): Entitlement => {
-  if (!ENFORCEMENT_ENABLED) return UNGATED;
   if (!stored || stored.tier !== 'pro') return FREE;
-
-  if (isPermanent(stored.source)) return stored;
-
-  // Time-boxed: the trial carries its own deadline.
-  if (stored.expiresAt) {
-    const deadline = new Date(stored.expiresAt).getTime();
-    return Number.isFinite(deadline) && now <= deadline ? stored : FREE;
-  }
+  if (stored.source === 'lifetime') return stored;
+  if (stored.source !== 'play_sub') return FREE;
 
   // Presence-based: good only as long as Play's last confirmation is fresh
-  // enough. No verification stamp at all means we have never confirmed it, so
-  // it cannot be honoured.
+  // enough. No verification stamp at all means we have never confirmed it.
   if (!verifiedAt) return FREE;
   const graceDeadline = new Date(verifiedAt).getTime() + GRACE_WINDOW_MS;
 
   // A future-dated stamp (clock change, restored backup) would otherwise extend
   // grace indefinitely, so treat an implausible deadline as expired.
   if (!Number.isFinite(graceDeadline) || now > graceDeadline) return FREE;
-
   return stored;
 };
 
+/** The local half of the merge: founder (permanent) or trial (clocked). */
+const deriveLocalEntitlement = (
+  local: Entitlement | null,
+  now: number,
+): Entitlement => {
+  if (!local || local.tier !== 'pro') return FREE;
+  if (local.source === 'founder') return local;
+  if (local.source !== 'trial') return FREE;
+
+  if (!local.expiresAt) return FREE;
+  const deadline = new Date(local.expiresAt).getTime();
+  return Number.isFinite(deadline) && now <= deadline ? local : FREE;
+};
+
+/** Whichever entitlement outranks the other. Ties are impossible: distinct sources. */
+const pickBest = (a: Entitlement, b: Entitlement): Entitlement =>
+  RANK[a.source] >= RANK[b.source] ? a : b;
+
 /**
- * True when Pro is currently being honoured from a cached answer rather than a
- * fresh one — i.e. we are inside the grace window but overdue for a check.
- * Purely for UI ("Offline — Pro active until …"); it never gates anything.
+ * The current entitlement, derived purely from persisted state.
+ *
+ * Pure and synchronous on purpose: gating decisions happen during render, so
+ * this never touches Play or SQLite. `refreshEntitlement()` writes the Play
+ * half of the state this reads; `bootstrapLocalEntitlement()` writes the local
+ * (founder/trial) half, once, at cold start.
+ */
+export const deriveEntitlement = (
+  stored: Entitlement | null,
+  verifiedAt: string | null,
+  local: Entitlement | null = null,
+  now: number = Date.now(),
+): Entitlement => {
+  if (!ENFORCEMENT_ENABLED) return UNGATED;
+
+  const playSide = derivePlayEntitlement(stored, verifiedAt, now);
+  const localSide = deriveLocalEntitlement(local, now);
+  return pickBest(playSide, localSide);
+};
+
+/**
+ * True when Pro is currently being honoured from a cached Play answer rather
+ * than a fresh one — i.e. we are inside the grace window but overdue for a
+ * check. Purely for UI ("Offline — Pro active until …"); never gates anything.
+ * A local grant (founder/trial) is never "on grace" — there is nothing to
+ * re-verify for either.
  */
 export const isOnGrace = (
   stored: Entitlement | null,
   verifiedAt: string | null,
+  local: Entitlement | null = null,
   now: number = Date.now(),
 ): boolean => {
-  if (!stored || stored.tier !== 'pro' || isPermanent(stored.source)) return false;
-  if (stored.expiresAt || !verifiedAt) return false;
+  if (isProEntitlement(deriveLocalEntitlement(local, now))) return false;
+  if (!stored || stored.tier !== 'pro' || stored.source !== 'play_sub' || !verifiedAt) {
+    return false;
+  }
   const age = now - new Date(verifiedAt).getTime();
   return age > REFRESH_INTERVAL_MS && age < GRACE_WINDOW_MS;
 };
 
 /** Convenience read of the live store, for non-React callers. */
 export const currentEntitlement = (): Entitlement => {
-  const { proEntitlement, entitlementVerifiedAt } = useStore.getState();
-  return deriveEntitlement(proEntitlement, entitlementVerifiedAt);
+  const { proEntitlement, entitlementVerifiedAt, localEntitlement } = useStore.getState();
+  return deriveEntitlement(proEntitlement, entitlementVerifiedAt, localEntitlement);
 };
 
 export const isPro = (): boolean => isProEntitlement(currentEntitlement());
+
+/**
+ * Days remaining in the trial, for display only ("3 days left in your trial").
+ * null when there is no running trial (founder, already resolved, or expired).
+ */
+export const trialDaysRemaining = (
+  local: Entitlement | null,
+  now: number = Date.now(),
+): number | null => {
+  if (!local || local.source !== 'trial' || !local.expiresAt) return null;
+  const deadline = new Date(local.expiresAt).getTime();
+  if (!Number.isFinite(deadline)) return null;
+  const msLeft = deadline - now;
+  return msLeft > 0 ? Math.ceil(msLeft / (24 * 60 * 60 * 1000)) : 0;
+};
+
+/**
+ * Establishes founder/trial status from real history. Runs once per cold
+ * start (idempotent underneath — the SQLite writes it triggers are no-ops
+ * after the first ever call), and is safe to call before ENFORCEMENT_ENABLED
+ * is ever flipped: doing it now means every install's status is settled from
+ * genuine history rather than "whatever the clock happened to read on the day
+ * enforcement turned on".
+ *
+ * Requires the database to be initialized and the store to be hydrated —
+ * call this alongside the other post-hydration bootstrap work in App.tsx, the
+ * same place refreshEntitlement() and checkForUpdate() are gated.
+ */
+export const bootstrapLocalEntitlement = async (): Promise<void> => {
+  const { localEntitlement, setLocalEntitlement } = useStore.getState();
+  const nowIso = new Date().toISOString();
+
+  // getEarliestActivityDate() backdates first_seen_at using real transaction/
+  // account/salary history already on this device — see services/database —
+  // so an existing install with months of usage is not mistaken for a fresh
+  // one just because this is the first release that ever wrote the row.
+  const firstSeenAt = await ensureFirstSeenAt(nowIso);
+
+  // A second signal, independent of app data: the OS's own record of when this
+  // package was first installed. It does not survive an uninstall or a Drive
+  // restore to a new device, which is exactly why it is a fallback rather than
+  // the primary signal — but it covers an existing install that happens to
+  // have no transactions/accounts recorded yet (e.g. onboarding was completed
+  // but Smart Scan never run).
+  let installedAt: string | null = null;
+  if (Platform.OS === 'android') {
+    try {
+      installedAt = (await Application.getInstallationTimeAsync())?.toISOString() ?? null;
+    } catch {
+      installedAt = null;
+    }
+  }
+
+  const cutoff = new Date(FOUNDER_CUTOFF_ISO).getTime();
+  const isFounder =
+    (Number.isFinite(new Date(firstSeenAt).getTime()) && new Date(firstSeenAt).getTime() < cutoff) ||
+    (installedAt !== null && new Date(installedAt).getTime() < cutoff);
+
+  let next: Entitlement;
+  if (isFounder) {
+    next = { tier: 'pro', source: 'founder', expiresAt: null };
+  } else {
+    // Not founder: this is either a genuinely new install (first_seen_at is
+    // "now", no earlier evidence existed) or an existing-but-unused install
+    // that neither signal could vouch for. Either way it gets the standard
+    // trial, timed from whichever came first — an already-running trial, or a
+    // fresh one starting now.
+    const existingTrialStart = await getTrialStartedAt();
+    const trialStart = existingTrialStart ?? (await ensureTrialStarted(nowIso));
+    const expiresAt = new Date(
+      new Date(trialStart).getTime() + TRIAL_DURATION_MS,
+    ).toISOString();
+    next = { tier: 'pro', source: 'trial', expiresAt };
+  }
+
+  // Cheap, stable identity check avoids a redundant store write (and the
+  // re-renders it would cause) on every cold start once status is settled.
+  if (
+    localEntitlement?.source !== next.source ||
+    localEntitlement?.expiresAt !== next.expiresAt
+  ) {
+    setLocalEntitlement(next);
+  }
+};
 
 /**
  * Ask Play what this account owns and persist the answer.
@@ -193,5 +335,8 @@ export const refreshEntitlement = async (
 
   const verifiedAt = new Date().toISOString();
   setProEntitlement(next, verifiedAt);
-  return { entitlement: deriveEntitlement(next, verifiedAt), owned };
+  return {
+    entitlement: deriveEntitlement(next, verifiedAt, useStore.getState().localEntitlement),
+    owned,
+  };
 };

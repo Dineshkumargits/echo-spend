@@ -107,6 +107,14 @@ interface AppState {
    * Play, never on a failed check.
    */
   entitlementVerifiedAt: string | null;
+  /**
+   * Founder or trial status (see services/entitlements), established once at
+   * cold start by bootstrapLocalEntitlement and re-read on every render after
+   * that. Persisted here so deriveEntitlement stays synchronous — it never
+   * touches SQLite — even though the source of truth for *establishing* this
+   * value lives in app_settings, not here.
+   */
+  localEntitlement: Entitlement | null;
 
   setTheme: (theme: 'dark' | 'light' | 'system') => void;
   setThemeId: (themeId: string) => void;
@@ -163,6 +171,8 @@ interface AppState {
 
   /** Written only by services/entitlements after Play answers. */
   setProEntitlement: (entitlement: Entitlement | null, verifiedAt: string | null) => void;
+  /** Written only by services/entitlements' bootstrapLocalEntitlement. */
+  setLocalEntitlement: (entitlement: Entitlement | null) => void;
 }
 
 const secureStorage = {
@@ -218,6 +228,7 @@ export const useStore = create<AppState>()(
       updateDismissedVersionCode: null,
       proEntitlement: null,
       entitlementVerifiedAt: null,
+      localEntitlement: null,
       googleUser: null,
       hasHydrated: false,
 
@@ -405,6 +416,8 @@ export const useStore = create<AppState>()(
       setProEntitlement: (proEntitlement, entitlementVerifiedAt) =>
         set({ proEntitlement, entitlementVerifiedAt }),
 
+      setLocalEntitlement: (localEntitlement) => set({ localEntitlement }),
+
       resetOnboarding: () =>
         set({
           isOnboarded: false,
@@ -415,9 +428,11 @@ export const useStore = create<AppState>()(
 
       fullLogout: async () => {
         // The Play entitlement belongs to the device's Google Play account,
-        // not the Drive sign-in this clears — a paying user must not read as
-        // free just because they logged out of backup/sync.
-        const { proEntitlement, entitlementVerifiedAt } = get();
+        // and founder/trial status belongs to the device's install history —
+        // neither has anything to do with the Drive sign-in this clears. A
+        // paying (or grandfathered, or mid-trial) user must not read as free
+        // just because they logged out of backup/sync.
+        const { proEntitlement, entitlementVerifiedAt, localEntitlement } = get();
 
         // 1. Clear Zustand state in memory
         set({
@@ -433,7 +448,7 @@ export const useStore = create<AppState>()(
         // set() call is what actually writes to SecureStore again (via the
         // persist middleware), so without this the purchase would sit
         // unpersisted until the next Play round trip re-populates it.
-        set({ proEntitlement, entitlementVerifiedAt });
+        set({ proEntitlement, entitlementVerifiedAt, localEntitlement });
       },
     }),
     {

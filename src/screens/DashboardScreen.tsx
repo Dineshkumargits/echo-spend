@@ -33,6 +33,7 @@ import {
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { useStore } from "../store/useStore";
+import { useEntitlement } from "../hooks/useEntitlement";
 import { useIsFocused } from "@react-navigation/native";
 import { useTheme } from "../theme/ThemeProvider";
 import { AIModelManager } from "../services/aiModelManager";
@@ -151,6 +152,7 @@ const DashboardScreen = ({ navigation }: any) => {
   // ── Existing state ──────────────────────────────────────────────────────────
   const [transactions, setTransactions] = React.useState<Transaction[]>([]);
   const [accounts, setAccounts] = React.useState<Account[]>([]);
+  const { canAdd } = useEntitlement();
   const [categories, setCategories] = React.useState<Category[]>([]);
   const [monthlySpend, setMonthlySpend] = useState(0);
   const [unconfirmedCount, setUnconfirmedCount] = useState(0);
@@ -598,6 +600,10 @@ const DashboardScreen = ({ navigation }: any) => {
         }}
         onAddCard={() => {
           triggerHaptic();
+          if (!canAdd("accounts", accounts.length)) {
+            navigation.navigate("Paywall", { trigger: "limit_reached" });
+            return;
+          }
           navigation.navigate("AddAccount");
         }}
         onPayBill={(card: CardHealth) => {
@@ -899,6 +905,10 @@ const DashboardScreen = ({ navigation }: any) => {
             <TouchableOpacity
               onPress={() => {
                 triggerHaptic();
+                if (!canAdd("accounts", accounts.length)) {
+                  navigation.navigate("Paywall", { trigger: "limit_reached" });
+                  return;
+                }
                 navigation.navigate("AddAccount");
               }}
               style={{

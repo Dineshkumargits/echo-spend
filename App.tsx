@@ -23,7 +23,7 @@ import { performBackgroundSmsScan } from './src/services/backgroundTasks';
 import { SyncService } from './src/services/sync';
 import { AIModelManager } from './src/services/aiModelManager';
 import { checkForUpdate } from './src/services/updateChecker';
-import { refreshEntitlement } from './src/services/entitlements';
+import { bootstrapLocalEntitlement, refreshEntitlement } from './src/services/entitlements';
 import { addPurchaseListeners } from './src/services/billing';
 import { notify } from './src/utils/notify';
 import { useFonts } from 'expo-font';
@@ -360,6 +360,17 @@ function AppContent() {
     const sub = AppState.addEventListener('change', handleAppStateChange);
     return () => sub.remove();
   }, [hasHydrated]);
+
+  // Establish founder/trial status once, from real history. Gated on both the
+  // database (it reads transactions/accounts/salary_dates for the founder
+  // backdating in services/database) and hydration (it writes through the
+  // persisted store) — unlike the Play check below, this never needs to
+  // repeat on foreground, so it is a separate effect that only depends on
+  // those two readiness flags.
+  useEffect(() => {
+    if (!hasHydrated || !dbInitialized) return;
+    bootstrapLocalEntitlement();
+  }, [hasHydrated, dbInitialized]);
 
   // Ask Google Play what this account owns. Gated on hydration for the same
   // reason as the update check: the throttle and the last-verified stamp that

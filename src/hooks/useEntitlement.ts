@@ -5,6 +5,7 @@ import {
   deriveEntitlement,
   isOnGrace,
   isProEntitlement,
+  trialDaysRemaining,
 } from '../services/entitlements';
 import {
   FeatureKey,
@@ -26,8 +27,10 @@ import {
 export interface EntitlementApi {
   entitlement: Entitlement;
   isPro: boolean;
-  /** Pro is being honoured from a cached answer. Display only; gates nothing. */
+  /** Pro is being honoured from a cached Play answer. Display only; gates nothing. */
   onGrace: boolean;
+  /** Days left in a running local trial; null outside of one. Display only. */
+  trialDaysLeft: number | null;
   /** True when this capability is locked for the current user. */
   locked: (key: FeatureKey) => boolean;
   /** The user's ceiling for a countable thing; Infinity for Pro. */
@@ -38,22 +41,25 @@ export interface EntitlementApi {
 
 export const useEntitlement = (): EntitlementApi => {
   // Subscribed to the persisted values rather than a derived object, so this
-  // re-renders exactly when Play's answer changes and not on every store write.
+  // re-renders exactly when Play's answer or the local grant changes, not on
+  // every unrelated store write.
   const stored = useStore((s) => s.proEntitlement);
   const verifiedAt = useStore((s) => s.entitlementVerifiedAt);
+  const local = useStore((s) => s.localEntitlement);
 
   return useMemo(() => {
-    const entitlement = deriveEntitlement(stored, verifiedAt);
+    const entitlement = deriveEntitlement(stored, verifiedAt, local);
     const pro = isProEntitlement(entitlement);
 
     return {
       entitlement,
       isPro: pro,
-      onGrace: isOnGrace(stored, verifiedAt),
+      onGrace: isOnGrace(stored, verifiedAt, local),
+      trialDaysLeft: trialDaysRemaining(local),
       locked: (key: FeatureKey) => isGated(key, pro),
       limit: (key: LimitKey) => limitFor(key, pro),
       canAdd: (key: LimitKey, currentCount: number) =>
         canAddMore(key, currentCount, pro),
     };
-  }, [stored, verifiedAt]);
+  }, [stored, verifiedAt, local]);
 };
