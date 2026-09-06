@@ -61,6 +61,13 @@ export interface Subscription {
   /** JSON array of { name: string } objects — each person sharing this sub */
   splitMembers?: string;
   notes?: string;
+  /**
+   * The transaction that last advanced this subscription. Makes settling
+   * idempotent: the same payment seen again on a later edit is a no-op.
+   */
+  lastPaidTxId?: number;
+  /** Day of month the bill falls on, so short months don't move it for good. */
+  billingDay?: number;
 }
 
 export interface Goal {
@@ -515,6 +522,8 @@ const runMigrations = async () => {
     // figure already includes payments we may have matched ourselves, so adding
     // them would double count.
     'ALTER TABLE card_statements ADD COLUMN reportedPaid REAL NOT NULL DEFAULT 0',
+    'ALTER TABLE subscriptions ADD COLUMN lastPaidTxId INTEGER REFERENCES transactions(id) ON DELETE SET NULL',
+    'ALTER TABLE subscriptions ADD COLUMN billingDay INTEGER',
     'ALTER TABLE transactions ADD COLUMN isRecurring INTEGER DEFAULT 0',
     'ALTER TABLE transactions ADD COLUMN recurrenceRule TEXT',
     'ALTER TABLE transactions ADD COLUMN notes TEXT',
@@ -1103,7 +1112,15 @@ export const getTransactions = async (opts?: {
     conditions.push('date < ?');
     params.push(d.toISOString().split('T')[0] + 'T00:00:00.000Z');
   }
-  if (opts?.isRecurring !== undefined) { conditions.push('isRecurring = ?'); params.push(opts.isRecurring ? 1 : 0); }
+  // "Recurring" now means "belongs to a subscription" — the subscription owns the
+  // schedule, and the flag survives only for rows written before that was true.
+  if (opts?.isRecurring !== undefined) {
+    conditions.push(
+      opts.isRecurring
+        ? '(isRecurring = 1 OR subscriptionId IS NOT NULL)'
+        : '(isRecurring = 0 AND subscriptionId IS NULL)',
+    );
+  }
   if (opts?.confirmedOnly) { conditions.push('isConfirmed = 1'); }
   if (opts?.accountId !== undefined) { 
     // If we didn't apply the special account-specific type filter, apply generic account filter
@@ -1227,23 +1244,14 @@ const applyTransactionImpact = async (tx: Omit<Transaction, 'id'> | Transaction,
     }
   }
 
-  // 4. Subscription — record payment and advance next due date
-  if (tx.subscriptionId && type === 'debit') {
-    const sub = await db.getFirstAsync<Subscription>(
-      'SELECT * FROM subscriptions WHERE id = ?', tx.subscriptionId
-    );
-    if (sub) {
-      const paidAt = (tx as any).date ?? new Date().toISOString();
-      const next = new Date(sub.nextDueDate);
-      if (sub.frequency === 'monthly') next.setMonth(next.getMonth() + 1);
-      else if (sub.frequency === 'yearly') next.setFullYear(next.getFullYear() + 1);
-      else if (sub.frequency === 'weekly') next.setDate(next.getDate() + 7);
-      await db.runAsync(
-        'UPDATE subscriptions SET lastPaidDate = ?, nextDueDate = ? WHERE id = ?',
-        paidAt, next.toISOString(), tx.subscriptionId
-      );
-    }
-  }
+  // 4. Subscription cycles are NOT advanced here.
+  //
+  // This ran on every apply with no record of which payment caused it and no
+  // counterpart in revertTransactionImpact, so an edit that re-applied a linked
+  // charge skipped the schedule forward another month, and deleting the payment
+  // left the subscription believing it was paid. advanceSubscriptionCycle owns
+  // it now, keyed to the transaction id, and every write path calls it through
+  // syncSubscriptionFromTransaction.
 
   // 5. Split Repayment — update split member status if linked
   if ((tx as any).splitMemberId) {
@@ -1414,6 +1422,9 @@ export const confirmTransaction = async (id: number) => {
   if (tx && !tx.isConfirmed) {
     await db.runAsync('UPDATE transactions SET isConfirmed = 1 WHERE id = ?', id);
     await applyTransactionImpact({ ...tx, isConfirmed: true });
+    // Confirming is what makes a linked charge count — an unconfirmed row must
+    // never move a subscription's schedule.
+    await syncSubscriptionFromTransaction(id);
   }
 };
 
@@ -1424,6 +1435,9 @@ export const deleteTransaction = async (id: number) => {
   }
   // Statements this transaction was settling go back to owing the money.
   await clearCardPaymentForTransaction(id);
+  // Same for a subscription cycle this payment advanced: without this the
+  // schedule keeps a lastPaidDate for a payment that no longer exists.
+  await revertSubscriptionCycleFor(id);
   await db.runAsync('DELETE FROM transactions WHERE id = ?', id);
 };
 
@@ -3375,22 +3389,87 @@ export const addSubscription = async (sub: Omit<Subscription, 'id'>) => {
     sub.splitEnabled ? 1 : 0,
     sub.splitMembers ?? null,
     sub.notes ?? null,
+    // The chosen due date defines the billing day.
+    sub.billingDay ?? new Date(sub.nextDueDate).getDate(),
   );
+};
+
+/**
+ * Advance an ISO date by one billing cycle.
+ *
+ * `anchorDay` is the day of the month the bill really falls on. Without it a
+ * 31st bill clamps to the 28th in February and then chains from 28 forever —
+ * the same compounding drift salaryCycle's addMonthsClamped exists to prevent.
+ * Passing the anchor restores the 31st in every month long enough to have one.
+ */
+export const nextBillingDate = (
+  from: string,
+  frequency: Subscription['frequency'],
+  anchorDay?: number,
+): string => {
+  const d = new Date(from);
+  if (frequency === 'weekly') {
+    d.setDate(d.getDate() + 7);
+    return d.toISOString();
+  }
+  const months = frequency === 'yearly' ? 12 : 1;
+  const target = new Date(d.getFullYear(), d.getMonth() + months, 1);
+  const daysInTarget = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+  const day = Math.min(anchorDay ?? d.getDate(), daysInTarget);
+  return new Date(
+    target.getFullYear(), target.getMonth(), day,
+    d.getHours(), d.getMinutes(), d.getSeconds(), d.getMilliseconds(),
+  ).toISOString();
+};
+
+/** One billing cycle earlier — the start of the period `from` closes. */
+const previousBillingDate = (from: string, frequency: Subscription['frequency']): string => {
+  const d = new Date(from);
+  if (frequency === 'weekly') d.setDate(d.getDate() - 7);
+  else if (frequency === 'yearly') d.setFullYear(d.getFullYear() - 1);
+  else d.setMonth(d.getMonth() - 1);
+  return d.toISOString();
 };
 
 /**
  * Record a subscription payment: creates a confirmed debit transaction from the
  * linked account, auto-creates a split if the subscription is shared, and
  * advances the nextDueDate by one billing cycle.
+ *
+ * `amount` and `date` are honoured when given — the pay sheet lets the user edit
+ * the amount, and it used to be validated and then thrown away, so a changed
+ * subscription price was silently recorded at the old one.
  */
-export const paySubscription = async (id: number): Promise<{ txId: number; splitId?: number }> => {
+export const paySubscription = async (
+  id: number,
+  opts?: { amount?: number; date?: string },
+): Promise<{ txId: number; splitId?: number }> => {
   const sub = await db.getFirstAsync<Subscription>('SELECT * FROM subscriptions WHERE id = ?', id);
   if (!sub) throw new Error('Subscription not found');
 
-  const now = new Date().toISOString();
+  const now = opts?.date ?? new Date().toISOString();
+  const amount = opts?.amount && opts.amount > 0 ? opts.amount : sub.amount;
+
+  // The bank's own SMS for this charge may already be in the ledger — an autopaid
+  // subscription always is. Recording a second transaction for the same charge
+  // double-counts the spend, so adopt the existing row instead and just settle
+  // the cycle. Matched on the link plus the current period.
+  // Window: since the last settled payment, or one cycle back when nothing has
+  // been recorded yet. An open-ended search would adopt a charge from months ago.
+  const cycleStart = sub.lastPaidDate ?? previousBillingDate(sub.nextDueDate, sub.frequency);
+  const existing = await db.getFirstAsync<{ id: number }>(
+    `SELECT id FROM transactions
+      WHERE subscriptionId = ? AND type = 'debit' AND isConfirmed = 1 AND date > ?
+      ORDER BY date DESC LIMIT 1`,
+    id, cycleStart,
+  );
+  if (existing) {
+    await advanceSubscriptionCycle(id, now, existing.id);
+    return { txId: existing.id };
+  }
 
   const txId = await addTransaction({
-    amount: sub.amount,
+    amount,
     category: sub.category,
     merchant: sub.name,
     type: 'debit',
@@ -3410,13 +3489,13 @@ export const paySubscription = async (id: number): Promise<{ txId: number; split
       const members = JSON.parse(sub.splitMembers) as { name: string }[];
       if (members.length > 0) {
         const totalPeople = members.length + 1; // +1 for me
-        const perShare = Math.round((sub.amount / totalPeople) * 100) / 100;
-        const myShare = Math.round((sub.amount - perShare * members.length) * 100) / 100;
+        const perShare = Math.round((amount / totalPeople) * 100) / 100;
+        const myShare = Math.round((amount - perShare * members.length) * 100) / 100;
         splitId = await createSplit(
           {
             transactionId: txId,
             title: sub.name,
-            totalAmount: sub.amount,
+            totalAmount: amount,
             paidByAccountId: sub.debitAccountId ?? undefined,
             receiveToAccountId: sub.debitAccountId ?? undefined,
             date: now,
@@ -3431,14 +3510,95 @@ export const paySubscription = async (id: number): Promise<{ txId: number; split
     } catch (_) { /* ignore JSON parse errors */ }
   }
 
-  // Advance next due date
-  const next = new Date(sub.nextDueDate);
-  if (sub.frequency === 'monthly') next.setMonth(next.getMonth() + 1);
-  else if (sub.frequency === 'yearly') next.setFullYear(next.getFullYear() + 1);
-  else if (sub.frequency === 'weekly') next.setDate(next.getDate() + 7);
-
-  await updateSubscription(id, { lastPaidDate: now, nextDueDate: next.toISOString() });
+  await advanceSubscriptionCycle(id, now, txId);
   return { txId, splitId };
+};
+
+/**
+ * Move a subscription on by one cycle, recording which transaction did it.
+ *
+ * `lastPaidTxId` is what makes this safe to call from every write path: the same
+ * payment re-examined on a later edit is recognised and ignored, instead of
+ * skipping the schedule forward another month each time.
+ *
+ * The next due date is computed from the date already scheduled, not from the
+ * payment — paying rent three days late must not move rent to the 4th forever.
+ * It rolls forward until it is in the future, so a subscription that went unpaid
+ * for months catches up in one step rather than staying stuck in the past.
+ */
+export const advanceSubscriptionCycle = async (
+  id: number,
+  paidAt: string,
+  transactionId: number,
+): Promise<void> => {
+  const sub = await db.getFirstAsync<Subscription>('SELECT * FROM subscriptions WHERE id = ?', id);
+  if (!sub) return;
+  if (sub.lastPaidTxId === transactionId) return;
+
+  // The day the bill truly falls on, so months shorter than it don't move it
+  // permanently. Older rows have no stored anchor and keep their current day.
+  const anchor = sub.billingDay ?? new Date(sub.nextDueDate).getDate();
+
+  let next = nextBillingDate(sub.nextDueDate, sub.frequency, anchor);
+  const paidMs = new Date(paidAt).getTime();
+  // Guard against a runaway loop on a corrupt date.
+  for (let i = 0; i < 60 && new Date(next).getTime() <= paidMs; i++) {
+    next = nextBillingDate(next, sub.frequency, anchor);
+  }
+
+  await updateSubscription(id, {
+    lastPaidDate: paidAt,
+    nextDueDate: next,
+    lastPaidTxId: transactionId,
+  });
+};
+
+/**
+ * Undo the advance a now-deleted transaction caused.
+ *
+ * Steps the due date back one cycle and clears the marker, so the subscription
+ * is owed again rather than silently skipping a month.
+ */
+export const revertSubscriptionCycleFor = async (transactionId: number): Promise<void> => {
+  const sub = await db.getFirstAsync<Subscription>(
+    'SELECT * FROM subscriptions WHERE lastPaidTxId = ?', transactionId,
+  );
+  if (!sub) return;
+
+  const back = new Date(sub.nextDueDate);
+  if (sub.frequency === 'weekly') back.setDate(back.getDate() - 7);
+  else if (sub.frequency === 'yearly') back.setFullYear(back.getFullYear() - 1);
+  else back.setMonth(back.getMonth() - 1);
+
+  await db.runAsync(
+    'UPDATE subscriptions SET nextDueDate = ?, lastPaidDate = NULL, lastPaidTxId = NULL WHERE id = ?',
+    back.toISOString(), sub.id,
+  );
+};
+
+/**
+ * Settle a subscription from a transaction linked to it.
+ *
+ * The link is usually made long after the charge is saved — the SMS parser or
+ * the user picks the subscription in review — and until now nothing acted on it,
+ * so the only way to advance an autopaid subscription was the Pay button, which
+ * duplicated the charge. Safe to call on any transaction, as often as you like.
+ */
+export const syncSubscriptionFromTransaction = async (transactionId: number): Promise<void> => {
+  const tx = await getTransactionById(transactionId);
+  if (!tx?.subscriptionId || tx.type !== 'debit' || !tx.isConfirmed) return;
+
+  const sub = await db.getFirstAsync<Subscription>(
+    'SELECT * FROM subscriptions WHERE id = ?', tx.subscriptionId,
+  );
+  if (!sub || !sub.isActive) return;
+
+  // Only a charge at or after the period we are waiting on settles it. An older
+  // transaction being edited is history, not a new payment.
+  const paidMs = new Date(tx.date).getTime();
+  if (sub.lastPaidDate && paidMs <= new Date(sub.lastPaidDate).getTime()) return;
+
+  await advanceSubscriptionCycle(sub.id, tx.date, transactionId);
 };
 
 export const updateSubscription = async (id: number, fields: Partial<Omit<Subscription, 'id'>>) => {

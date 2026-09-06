@@ -34,6 +34,9 @@ import {
   clearPendingSalaryDate,
   upsertCardStatement,
   syncCardPaymentForTransaction,
+  syncSubscriptionFromTransaction,
+  getSubscriptions,
+  getLoans,
   getOpenStatements,
   getAccounts,
 } from './database';
@@ -417,6 +420,7 @@ const _doProcessIncomingSms = async (body: string, date: number) => {
       const savedId = await addTransaction(txData);
       await handleSalaryCredit(txData);
       await applyCardPaymentForTransaction(savedId);
+      await settleSubscriptionForTransaction(savedId);
       const nowStr = new Date().toISOString();
       await updateAccountLastScanned(accountId, nowStr);
 
@@ -686,6 +690,14 @@ export const captureCardStatement = async (body: string): Promise<boolean> => {
  * account — not that a card was paid. The destination card is chosen by the user
  * in review, which is the moment the payment actually becomes identifiable.
  */
+export const settleSubscriptionForTransaction = async (transactionId: number) => {
+  try {
+    await syncSubscriptionFromTransaction(transactionId);
+  } catch (e) {
+    console.warn('[Subscription] Failed to settle from transaction', transactionId, e);
+  }
+};
+
 export const applyCardPaymentForTransaction = async (transactionId: number) => {
   try {
     const applied = await syncCardPaymentForTransaction(transactionId);
@@ -754,6 +766,71 @@ export const runCardDueReminders = async () => {
 };
 
 
+
+/**
+ * Reminder ladder for recurring bills, mirroring the card one. Overdue is its
+ * own step so a missed bill keeps nagging once, not every pass.
+ */
+const BILL_REMINDER_DAYS = [7, 3, 1, 0, -1];
+
+/**
+ * Remind about subscriptions and loan EMIs coming due.
+ *
+ * The Settings toggle has always been called "Bill Reminders", but the only
+ * thing it drove was credit-card statements: a rent subscription or an EMI due
+ * tomorrow produced nothing at all. Same ladder, same dedup map, namespaced so
+ * the keys cannot collide with budget ids (positive) or statements (-1000-).
+ */
+export const runBillReminders = async () => {
+  try {
+    await waitForHydration();
+    const { preferences } = useStore.getState();
+    if (!preferences.recurringAlerts) return;
+
+    const [subs, loans] = await Promise.all([getSubscriptions(true), getLoans(true)]);
+    const now = new Date();
+    const history = (preferences.budgetNotificationHistory ?? {}) as Record<string, number>;
+    const { updateBudgetNotificationHistory } = useStore.getState();
+
+    const due: { key: number; name: string; amount: number; date: string; tab: 'subs' | 'loans' }[] = [
+      ...subs.map((s) => ({
+        key: -(2000 + s.id),
+        name: s.name,
+        amount: s.amount,
+        date: s.nextDueDate,
+        tab: 'subs' as const,
+      })),
+      // Borrowed only: a lent loan's due date is money coming back, not a bill.
+      ...loans
+        .filter((l) => l.type === 'borrowed' && l.emiAmount > 0)
+        .map((l) => ({
+          key: -(3000 + l.id),
+          name: `${l.lender} EMI`,
+          amount: l.emiAmount,
+          date: l.nextDueDate,
+          tab: 'loans' as const,
+        })),
+    ];
+
+    for (const bill of due) {
+      const daysLeft = daysUntil(bill.date, now);
+      // Nothing beyond a week out, and nothing more than a month stale — an
+      // abandoned bill should not nag forever.
+      if (daysLeft > 7 || daysLeft < -30) continue;
+
+      const threshold = BILL_REMINDER_DAYS.find((d) => daysLeft <= d);
+      if (threshold === undefined) continue;
+      if (history[String(bill.key)] === threshold) continue;
+
+      await NotificationService.notifyBillDue(
+        bill.name, bill.amount, daysLeft, preferences.currency, bill.tab,
+      );
+      updateBudgetNotificationHistory(bill.key, threshold);
+    }
+  } catch (e) {
+    console.warn('[BillDue] Reminder pass failed:', e);
+  }
+};
 
 /** Utilization at or above this is worth acting on before the statement closes. */
 const HIGH_UTILIZATION_PCT = 30;
@@ -985,6 +1062,7 @@ const _doSmsScan = async (silent = false): Promise<BackgroundFetch.BackgroundFet
       const savedId = await addTransaction(txData);
       await handleSalaryCredit(txData);
       await applyCardPaymentForTransaction(savedId);
+      await settleSubscriptionForTransaction(savedId);
       newTxCount++;
       totalAmount += txData.amount ?? 0;
       if (!topMerchant && txData.merchant) topMerchant = txData.merchant;
@@ -1081,6 +1159,7 @@ TaskManager.defineTask(BACKGROUND_ALERTS_TASK, async () => {
     if (preferences.budgetAlerts) {
       await runCategoryBudgetAlerts();
       await runCardDueReminders();
+      await runBillReminders();
       await runUtilizationNudges();
     }
 

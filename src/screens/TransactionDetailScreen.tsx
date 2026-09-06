@@ -266,7 +266,7 @@ const TransactionDetailScreen = () => {
             <ThemedText type="secondary" style={{ fontSize: 13 }}>
               {formatDate(transaction.date)}
             </ThemedText>
-            {!!transaction.isRecurring && (
+            {(!!transaction.isRecurring || !!transaction.subscriptionId) && (
               <>
                 <LucideRepeat color={colors.accent} size={13} />
                 <ThemedText style={{ color: colors.accent, fontSize: 12, fontWeight: '600' }}>

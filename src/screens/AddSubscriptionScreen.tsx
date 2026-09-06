@@ -68,6 +68,10 @@ export const AddSubscriptionScreen = () => {
 
   // Split
   const [splitEnabled, setSplitEnabled] = useState(subscriptionToEdit?.splitEnabled ?? false);
+  // Paused subscriptions keep their history and stop appearing in bills. Saving
+  // used to hardcode isActive: true, so editing a paused one silently revived it
+  // — and deleting was the only way to stop one, which orphaned its payments.
+  const [isActive, setIsActive] = useState(subscriptionToEdit?.isActive ?? true);
   const [splitMemberNames, setSplitMemberNames] = useState<string[]>(
     subscriptionToEdit?.splitMembers 
       ? JSON.parse(subscriptionToEdit.splitMembers).map((m: any) => m.name)
@@ -140,7 +144,10 @@ export const AddSubscriptionScreen = () => {
       category,
       frequency,
       nextDueDate: nextDueDate.toISOString(),
-      isActive: true,
+      // Re-anchored on every save, so changing the due date changes the day the
+      // bill is considered to fall on.
+      billingDay: nextDueDate.getDate(),
+      isActive,
       debitAccountId,
       splitEnabled: splitEnabled && validMembers.length > 0,
       splitMembers: splitEnabled && validMembers.length > 0 ? JSON.stringify(validMembers) : undefined,
@@ -356,6 +363,33 @@ export const AddSubscriptionScreen = () => {
             </View>
 
 
+
+            {/* Pause — only meaningful for something that already exists */}
+            {isEditing && (
+              <View style={[s.field, { backgroundColor: colors.surface, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: isActive ? colors.border : `${colors.debit}50` }]}>
+                <View style={s.switchRow}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                    <LucideRepeat color={isActive ? colors.accent : colors.debit} size={20} />
+                    <View>
+                      <ThemedText style={{ fontWeight: 'bold', fontSize: 15 }}>
+                        {isActive ? 'Active' : 'Paused'}
+                      </ThemedText>
+                      <ThemedText style={{ fontSize: 11, color: colors.secondary }}>
+                        {isActive
+                          ? 'Counts in bills, reminders and monthly burn'
+                          : 'Hidden from bills and reminders — history is kept'}
+                      </ThemedText>
+                    </View>
+                  </View>
+                  <Switch
+                    value={isActive}
+                    onValueChange={v => { setIsActive(v); Haptics.selectionAsync(); }}
+                    trackColor={{ false: colors.border, true: `${colors.accent}80` }}
+                    thumbColor={isActive ? colors.accent : colors.secondary}
+                  />
+                </View>
+              </View>
+            )}
 
             {/* Split */}
             <View style={[s.field, { backgroundColor: colors.surface, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: splitEnabled ? `${colors.accent}50` : colors.border }]}>

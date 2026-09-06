@@ -61,6 +61,7 @@ import {
   setForegroundScanActive,
   handleSalaryCredit,
   applyCardPaymentForTransaction,
+  settleSubscriptionForTransaction,
 } from "../services/backgroundTasks";
 import { MotiView, AnimatePresence } from "moti";
 import { notify } from "../utils/notify";
@@ -535,6 +536,7 @@ const SmartScanScreen = ({ navigation }: any) => {
                 // foreground scan is the same event and must react the same way.
                 await handleSalaryCredit(txData);
                 await applyCardPaymentForTransaction(newId);
+                await settleSubscriptionForTransaction(newId);
                 await markSmsProcessed(hashSms(sms.body));
                 newlySavedIds.push(newId);
                 if (parsed.parsedOffline) offlineSavedIds.push(newId);

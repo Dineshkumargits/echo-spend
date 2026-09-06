@@ -772,7 +772,7 @@ const TransactionsScreen = () => {
         badges={
           <>
             {sourceGlyph(tx.source)}
-            {tx.isRecurring ? (
+            {tx.isRecurring || tx.subscriptionId ? (
               <LucideRepeat color={colors.ai} size={11} />
             ) : null}
             {!tx.isConfirmed ? <PulseDot size={6} /> : null}

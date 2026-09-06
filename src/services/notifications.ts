@@ -277,6 +277,56 @@ export const NotificationService = {
   },
 
   /**
+   * A recurring bill coming due — a subscription or a loan EMI.
+   *
+   * The counterpart to notifyCardDue, which was the only "bill" reminder the app
+   * had despite the setting being called Bill Reminders. Routes to Finances, on
+   * the tab that owns the thing due.
+   */
+  async notifyBillDue(
+    name: string,
+    amount: number,
+    daysLeft: number,
+    currency: string,
+    tab: 'subs' | 'loans',
+  ) {
+    try {
+      const when =
+        daysLeft < 0
+          ? `${Math.abs(daysLeft)} days overdue`
+          : daysLeft === 0
+            ? 'due today'
+            : daysLeft === 1
+              ? 'due tomorrow'
+              : `due in ${daysLeft} days`;
+      const title = `${name} ${when}`;
+      const body = `${currency}${Math.round(amount).toLocaleString('en-IN')}${
+        tab === 'loans' ? ' EMI' : ''
+      } — tap to record the payment.`;
+
+      if (canShowInAppToast()) {
+        notify.info(title, body);
+        return;
+      }
+
+      await ensureAndroidChannels();
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title,
+          body,
+          data: { screen: 'Finances', initialTab: tab },
+          sound: 'default',
+          ...(Platform.OS === 'android' && {
+            channelId: 'alerts',
+            priority: Notifications.AndroidNotificationPriority.HIGH,
+          }),
+        },
+        trigger: null,
+      });
+    } catch { /* notification failure is non-fatal */ }
+  },
+
+  /**
    * Credit bureaus snapshot utilization on the STATEMENT date, not the due date.
    * So the moment worth nudging is a few days before the statement closes —
    * paying down then lowers the reported figure. Paying after the statement is

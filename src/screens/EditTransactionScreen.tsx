@@ -29,6 +29,7 @@ import {
   deleteSplit,
   getPendingSplitMembers,
   PendingSplitMember,
+  syncSubscriptionFromTransaction,
 } from '../services/database';
 import {
   handleSalaryCreditById,
@@ -506,6 +507,7 @@ export const EditTransactionScreen = () => {
       // Amount, date and destination all change what this settles — and an edit
       // that stops it being a payment hands the statement its money back.
       await applyCardPaymentForTransaction(transaction.id);
+      await syncSubscriptionFromTransaction(transaction.id);
 
       if (shouldDeleteSplit && existingSplitId !== null) {
         await deleteSplit(existingSplitId);

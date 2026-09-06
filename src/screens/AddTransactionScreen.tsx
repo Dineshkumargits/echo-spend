@@ -55,6 +55,7 @@ import {
   getLoans,
   Loan,
   getSubscriptions,
+  syncSubscriptionFromTransaction,
   Subscription,
   getPendingSplitMembers,
   PendingSplitMember,
@@ -807,7 +808,6 @@ export const AddTransactionScreen = ({ navigation: navProp, route }: any) => {
   );
   const [notes, setNotes] = useState(prefill.notes ?? "");
   const [tags, setTags] = useState<string[]>(prefill.tags ?? []);
-  const [isRecurring, setIsRecurring] = useState(prefill.isRecurring ?? false);
   const [date, setDate] = useState<Date>(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [pickerMode, setPickerMode] = useState<"date" | "time">("date");
@@ -1018,7 +1018,6 @@ export const AddTransactionScreen = ({ navigation: navProp, route }: any) => {
     if (!merchant) setMerchant(sub.name);
     if (sub.amount && !amount) setAmount(String(sub.amount));
     setCategory(sub.category);
-    setIsRecurring(true);
 
     // Auto-prefill split from subscription if enabled
     if (sub.splitEnabled && sub.splitMembers) {
@@ -1323,7 +1322,9 @@ export const AddTransactionScreen = ({ navigation: navProp, route }: any) => {
       toAccountId:
         type === "transfer" ? selectedToAccount || undefined : undefined,
       rawSms: "Manual Entry",
-      isRecurring,
+      // Recurrence is expressed by linking the transaction to a subscription,
+      // which owns the schedule. Flagged automatically below when one is linked.
+      isRecurring: !!selectedSub,
       isConfirmed: true,
       isTransfer: type === "transfer",
       notes: notes.trim() || undefined,
@@ -1339,6 +1340,10 @@ export const AddTransactionScreen = ({ navigation: navProp, route }: any) => {
     await handleSalaryCreditById(txId);
     // A transfer into a card is a bill payment, whatever the amount.
     await applyCardPaymentForTransaction(txId);
+    // Linking a charge to a subscription advances its cycle — the screen has
+    // always promised this ("Payment will advance next due date") and nothing
+    // did it.
+    await syncSubscriptionFromTransaction(txId);
 
     if (splitEnabled && type === "debit") {
       const allMembers = [
@@ -2137,53 +2142,7 @@ export const AddTransactionScreen = ({ navigation: navProp, route }: any) => {
               </View>
             )}
 
-            {/* 7. Recurring */}
-            <View
-              style={[
-                themedStyles.field,
-                {
-                  flexDirection: "row",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  marginBottom: 26,
-                },
-              ]}
-            >
-              <View>
-                <ThemedText
-                  type="secondary"
-                  style={[themedStyles.label, { marginBottom: 4 }]}
-                >
-                  Recurring Bill
-                </ThemedText>
-                <ThemedText type="secondary" className="text-xs">
-                  Check if this repeats monthly
-                </ThemedText>
-              </View>
-              <TouchableOpacity
-                onPress={() => setIsRecurring(!isRecurring)}
-                style={{
-                  width: 50,
-                  height: 30,
-                  borderRadius: 15,
-                  backgroundColor: isRecurring ? colors.success : colors.muted,
-                  justifyContent: "center",
-                  paddingHorizontal: 2,
-                }}
-              >
-                <View
-                  style={{
-                    width: 26,
-                    height: 26,
-                    borderRadius: 13,
-                    backgroundColor: "#FFFFFF",
-                    transform: [{ translateX: isRecurring ? 20 : 0 }],
-                  }}
-                />
-              </TouchableOpacity>
-            </View>
-
-            {/* 8. Notes */}
+            {/* 7. Notes */}
             <View style={themedStyles.field}>
               <ThemedText type="secondary" style={themedStyles.label}>
                 Notes (optional)

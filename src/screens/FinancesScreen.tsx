@@ -72,7 +72,9 @@ const QuickActionModal = ({
     setLoading(true);
     try {
       if (state.type === 'paySubscription') {
-        const result = await paySubscription(state.id);
+        // The amount field is editable — a subscription price can change, and
+        // the user may be recording a different figure than the one on file.
+        const result = await paySubscription(state.id, { amount: amt });
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         notify.success('Payment recorded!');
         onDone();
@@ -249,7 +251,9 @@ export const FinancesScreen = ({ navigation, route }: any) => {
     const [gs, ls, ss, accs, sps] = await Promise.all([
       getGoals(true),
       getLoans(true),
-      getSubscriptions(true),
+      // Paused ones included: the Subs tab is the only place to un-pause, so
+      // hiding them would make pausing a one-way trip.
+      getSubscriptions(false),
       getAccounts(),
       getSplits(),
     ]);
@@ -330,7 +334,8 @@ export const FinancesScreen = ({ navigation, route }: any) => {
   // ─── Tab renders ──────────────────────────────────────────────────────────
 
   const renderSubscriptionsTab = () => {
-    const totalMonthly = subscriptions.reduce((s, sub) => {
+    const activeSubs = subscriptions.filter((sub) => sub.isActive);
+    const totalMonthly = activeSubs.reduce((s, sub) => {
       if (sub.frequency === 'monthly') return s + sub.amount;
       if (sub.frequency === 'yearly') return s + sub.amount / 12;
       if (sub.frequency === 'weekly') return s + sub.amount * 4.33;
@@ -350,40 +355,17 @@ export const FinancesScreen = ({ navigation, route }: any) => {
                 </ThemedText>
               </View>
               <View style={{ marginLeft: 'auto', alignItems: 'flex-end' }}>
-                <ThemedText style={{ fontSize: 10, color: colors.secondary }}>{subscriptions.length} active</ThemedText>
+                <ThemedText style={{ fontSize: 10, color: colors.secondary }}>{activeSubs.length} active</ThemedText>
               </View>
             </View>
           </View>
         )}
 
-        <TouchableOpacity
-          onPress={() => navigation.navigate('Subscriptions')}
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            backgroundColor: colors.surface,
-            borderColor: colors.border,
-            borderWidth: 1,
-            borderRadius: 14,
-            padding: 14,
-            marginBottom: 16,
-            gap: 12,
-          }}
-          activeOpacity={0.8}
-        >
-          <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: `${colors.accent}15`, alignItems: 'center', justifyContent: 'center' }}>
-            <LucideRepeat color={colors.accent} size={18} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <ThemedText style={{ fontWeight: 'bold', fontSize: 14 }}>Tracked Recurring Bills</ThemedText>
-            <ThemedText type="secondary" style={{ fontSize: 11, marginTop: 2 }}>View auto-detected ledger bills & upcoming cycles</ThemedText>
-          </View>
-          <LucideChevronRight color={colors.secondary} size={16} />
-        </TouchableOpacity>
-
         {subscriptions.length === 0 ? renderEmpty('subscriptions') : subscriptions.map(sub => {
           const days = daysUntilDate(sub.nextDueDate);
-          const isUrgent = days <= 3;
+          // A paused subscription is not due — never mark it urgent, and dim it
+          // so it reads as parked rather than merely quiet.
+          const isUrgent = sub.isActive && days <= 3;
           const splitMembers = sub.splitEnabled && sub.splitMembers
             ? (() => { try { return JSON.parse(sub.splitMembers); } catch { return []; } })()
             : [];
@@ -406,7 +388,7 @@ export const FinancesScreen = ({ navigation, route }: any) => {
               onPress={() => navigation.navigate('AddSubscription', { subscriptionToEdit: sub })}
               activeOpacity={0.8}
             >
-              <View style={styles.cardHeader}>
+              <View style={[styles.cardHeader, !sub.isActive && { opacity: 0.55 }]}>
                 <View style={[styles.iconContainer, { backgroundColor: `${colors.debit}15` }]}>
                   <LucideRepeat color={colors.debit} size={20} />
                 </View>
@@ -440,8 +422,10 @@ export const FinancesScreen = ({ navigation, route }: any) => {
               <View style={[styles.cardFooter, { marginTop: 12 }]}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                   <LucideCalendar color={isUrgent ? colors.danger : colors.secondary} size={12} />
-                  <ThemedText style={{ fontSize: 11, color: isUrgent ? colors.danger : colors.secondary, fontWeight: isUrgent ? 'bold' : 'normal' }}>
-                    {days === 0 ? 'Due today!' : days === 1 ? 'Due tomorrow' : days < 0 ? 'Overdue' : `Due in ${days}d`}
+                  <ThemedText style={{ fontSize: 11, color: !sub.isActive ? colors.muted : isUrgent ? colors.danger : colors.secondary, fontWeight: isUrgent ? 'bold' : 'normal' }}>
+                    {!sub.isActive
+                      ? 'Paused'
+                      : days === 0 ? 'Due today!' : days === 1 ? 'Due tomorrow' : days < 0 ? 'Overdue' : `Due in ${days}d`}
                     {' · '}
                     {new Date(sub.nextDueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
                   </ThemedText>
@@ -454,8 +438,8 @@ export const FinancesScreen = ({ navigation, route }: any) => {
                   )}
                 </View>
 
-                {/* Pay Now button */}
-                <TouchableOpacity
+                {/* Pay Now — nothing to pay while paused */}
+                {sub.isActive && <TouchableOpacity
                   style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: `${colors.debit}20`, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 }}
                   onPress={() => {
                     Haptics.selectionAsync();
@@ -471,7 +455,7 @@ export const FinancesScreen = ({ navigation, route }: any) => {
                 >
                   <LucideZap color={colors.debit} size={12} />
                   <ThemedText style={{ color: colors.debit, fontWeight: 'bold', fontSize: 11 }}>Pay Now</ThemedText>
-                </TouchableOpacity>
+                </TouchableOpacity>}
               </View>
 
               {sub.notes && (

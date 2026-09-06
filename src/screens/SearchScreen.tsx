@@ -115,7 +115,7 @@ const SearchScreen = () => {
                 {new Date(item.date).toLocaleDateString('en-IN', {
                   day: 'numeric', month: 'short', year: 'numeric',
                 })} · {item.category}
-                {item.isRecurring ? ' · 🔁' : ''}
+                {item.isRecurring || item.subscriptionId ? ' · 🔁' : ''}
                 {item.tags && item.tags.length > 0 ? ` · ${item.tags.map((t: string) => '#' + t).join(' ')}` : ''}
               </ThemedText>
             </View>
