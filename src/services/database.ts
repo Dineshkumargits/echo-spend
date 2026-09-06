@@ -2608,7 +2608,12 @@ const coveredCategoryNames = (
 const sumCovered = (names: string[], byCategory: Map<string, number>): number =>
   names.reduce((acc, n) => acc + (byCategory.get(n) ?? 0), 0);
 
-export type BudgetPace = 'under' | 'on_track' | 'risk' | 'over';
+/**
+ * `reached` sits deliberately between `risk` and `over`: spending exactly the
+ * limit is not overspending. It earns a warning, not the red an actual breach
+ * gets — the last rupee of a budget is still inside it.
+ */
+export type BudgetPace = 'under' | 'on_track' | 'risk' | 'reached' | 'over';
 
 export interface BudgetUtilization {
   budget: Budget;
@@ -2695,11 +2700,18 @@ export const getBudgetUtilization = async (
     const elapsedPct = Math.round((elapsedDays / daysTotal) * 100);
     const projectedSpend = Math.round((spent / elapsedDays) * daysTotal);
 
+    // Floored, not rounded: a displayed 100% has to mean the limit is genuinely
+    // gone. Rounding showed 100% (and, downstream, red and an "exceeded" alert)
+    // from 99.5% — with money still left in the budget.
     const percentage =
-      effectiveLimit > 0 ? Math.round((spent / effectiveLimit) * 100) : spent > 0 ? 100 : 0;
+      effectiveLimit > 0 ? Math.floor((spent / effectiveLimit) * 100) : spent > 0 ? 100 : 0;
 
+    // A rupee of tolerance: spend that lands on the limit to within a minor
+    // unit is "reached", not "over". Only a real breach is over.
+    const overspend = spent - effectiveLimit;
     let pace: BudgetPace;
-    if (spent >= effectiveLimit && spent > 0) pace = 'over';
+    if (overspend >= 1) pace = 'over';
+    else if (spent > 0 && overspend >= 0) pace = 'reached';
     else if (projectedSpend > effectiveLimit) pace = 'risk';
     else if (percentage + 10 <= elapsedPct) pace = 'under';
     else pace = 'on_track';
@@ -2729,7 +2741,10 @@ export const getBudgetUtilization = async (
 
   // Urgency first: blown budgets, then at-risk pace, then the rest by usage.
   // Orphaned budgets sink to the bottom for cleanup.
-  const paceRank: Record<BudgetPace, number> = { over: 0, risk: 1, on_track: 2, under: 3 };
+  // Urgency order: a budget with nothing left outranks one merely pacing badly.
+  const paceRank: Record<BudgetPace, number> = {
+    over: 0, reached: 1, risk: 2, on_track: 3, under: 4,
+  };
   return results.sort((a, b) => {
     if (a.orphaned !== b.orphaned) return a.orphaned ? 1 : -1;
     if (paceRank[a.pace] !== paceRank[b.pace]) return paceRank[a.pace] - paceRank[b.pace];

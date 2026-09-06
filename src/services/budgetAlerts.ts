@@ -22,6 +22,11 @@ export const showBudgetImpactToast = async (categoryName: string) => {
         `${name} budget exceeded`,
         `${fmt(-u.remaining)} over · ${u.daysLeft}d left this ${window}`,
       );
+    } else if (u.pace === 'reached') {
+      notify.info(
+        `${name} · limit reached`,
+        `${fmt(u.effectiveLimit)} spent · ${u.daysLeft}d left this ${window}`,
+      );
     } else if (u.pace === 'risk' || u.percentage >= 80) {
       notify.info(
         `${name} · ${u.percentage}% used`,
@@ -42,8 +47,8 @@ export const showBudgetImpactToast = async (categoryName: string) => {
  *
  * History milestones per budget id (fires once each per cycle):
  *   50  → pace warning ("on pace to exceed") while usage is still < 80%
- *   80/90 → threshold warnings
- *   100 → exceeded
+ *   80/90 → threshold warnings (100% used but not over lands here, as 90)
+ *   100 → exceeded — pace 'over' only, i.e. genuinely past the limit
  */
 export const runCategoryBudgetAlerts = async () => {
   const prefs = useStore.getState().preferences;
@@ -59,7 +64,10 @@ export const runCategoryBudgetAlerts = async () => {
     const name = u.displayName;
     const lastPct = budgetNotificationHistory[u.budget.id] || 0;
 
-    if (u.percentage >= 100) {
+    // Gated on the pace state, not on a percentage that rounds up: "exceeded"
+    // must mean actually past the limit. Sitting exactly on it falls through to
+    // the threshold branch below, which reports it honestly.
+    if (u.pace === 'over') {
       if (lastPct < 100) {
         await NotificationService.scheduleLocalNotification(
           `Budget exceeded: ${name}`,
@@ -70,7 +78,9 @@ export const runCategoryBudgetAlerts = async () => {
         updateBudgetNotificationHistory(u.budget.id, 100);
       }
     } else if (u.percentage >= 80) {
-      const pct = Math.floor(u.percentage / 10) * 10; // 80 or 90
+      // Capped at 90 so a budget spent exactly to its limit (100%, but not
+      // over) doesn't consume the 100 milestone and mute the real breach alert.
+      const pct = Math.min(Math.floor(u.percentage / 10) * 10, 90);
       if (pct > lastPct) {
         await NotificationService.scheduleLocalNotification(
           `Budget alert: ${name}`,

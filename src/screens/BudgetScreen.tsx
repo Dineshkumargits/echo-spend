@@ -67,7 +67,7 @@ import {
 import { SectionLabel } from "../components/Signal";
 import { CategoryPicker } from "../components/CategoryPicker";
 import { cycleAnchorFrom } from "../services/salaryCycle";
-import { fonts } from "../theme/tokens";
+import { fonts, budgetPaceColor } from "../theme/tokens";
 
 // ─── Pace gauge — usage fill + "where you should be" tick ────────────────────
 
@@ -487,23 +487,21 @@ const BudgetScreen = () => {
   };
 
   // ── Row visuals ───────────────────────────────────────────────────────────
-  const paceColor = (pace: BudgetPace, pct: number): string => {
-    if (pct >= 100 || pace === "over") return colors.danger;
-    if (pace === "risk") return colors.warning;
-    if (pace === "under") return colors.credit;
-    return colors.accent;
-  };
+  const paceColor = (pace: BudgetPace): string => budgetPaceColor(pace, colors);
 
   const paceLabel = (u: BudgetUtilization): { text: string; color: string } => {
     if (u.orphaned)
       return { text: "category removed — tap to clean up", color: colors.danger };
-    if (u.spent >= u.effectiveLimit && u.spent > 0)
+    if (u.pace === "over")
       return {
-        text:
-          u.spent - u.effectiveLimit < 1
-            ? `limit reached · ${u.daysLeft}d left`
-            : `over by ${fmt(u.spent - u.effectiveLimit)}`,
+        text: `over by ${fmt(u.spent - u.effectiveLimit)}`,
         color: colors.danger,
+      };
+    // Spent to the rupee, not past it — amber, and never phrased as a breach.
+    if (u.pace === "reached")
+      return {
+        text: `limit reached · ${u.daysLeft}d left`,
+        color: colors.warning,
       };
     if (u.pace === "risk")
       return {
@@ -615,7 +613,7 @@ const BudgetScreen = () => {
               </SectionLabel>
               {rows.map((u) => {
                 const cat = catFor(u.budget.categoryName);
-                const color = paceColor(u.pace, u.percentage);
+                const color = paceColor(u.pace);
                 const label = paceLabel(u);
                 const prevDelta = u.budget.amount - u.prevSpent;
                 return (

@@ -13,6 +13,9 @@
  * destructive actions) so it never gets confused with a debit amount.
  */
 
+// Type-only: erased at compile time, so no runtime dependency on services.
+import type { BudgetPace } from '../services/database';
+
 // ─── Palette shape ───────────────────────────────────────────────────────────
 // Every theme pack provides one of these per mode (dark + light). buildColors()
 // maps the raw palette to the semantic keys the whole app consumes, so adding a
@@ -473,4 +476,35 @@ export const formatINR = (n: number, opts?: { decimals?: number }): string => {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   }).format(n);
+};
+
+// ─── Budget pace → colour ────────────────────────────────────────────────────
+
+/**
+ * The one mapping every budget gauge reads from — screen, dashboard card and
+ * analytics all used to inline their own ternary, and they disagreed: each
+ * treated a *rounded* 100% as a breach, so a budget with money still in it went
+ * red. Colour follows the pace state alone.
+ *
+ *   over    → danger  (past the limit)
+ *   reached → warning (exactly on it — spent, not overspent)
+ *   risk    → warning (pacing to blow it)
+ *   under   → credit  (comfortably behind pace)
+ *   on_track→ accent
+ */
+export const budgetPaceColor = (
+  pace: BudgetPace,
+  colors: Pick<ThemeColors, 'danger' | 'warning' | 'credit' | 'accent'>,
+): string => {
+  switch (pace) {
+    case 'over':
+      return colors.danger;
+    case 'reached':
+    case 'risk':
+      return colors.warning;
+    case 'under':
+      return colors.credit;
+    default:
+      return colors.accent;
+  }
 };

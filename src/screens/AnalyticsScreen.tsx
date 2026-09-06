@@ -39,7 +39,7 @@ import {
   PremiumGate,
   DonutSegment,
 } from "../components/AnalyticsKit";
-import { fonts } from "../theme/tokens";
+import { fonts, budgetPaceColor } from "../theme/tokens";
 import {
   getSpendTrend,
   getCategoryBreakdownForRange,
@@ -766,11 +766,7 @@ const AnalyticsScreen = () => {
                         budgetSelections(u.budget).some((n) => groupNames.has(n)),
                     );
                     const budgetColor = budgetRow
-                      ? budgetRow.pace === "over" || budgetRow.percentage >= 100
-                        ? colors.danger
-                        : budgetRow.pace === "risk"
-                          ? colors.warning
-                          : colors.credit
+                      ? budgetPaceColor(budgetRow.pace, colors)
                       : colors.muted;
                     const totalPct =
                       Math.round((data.total / (monthTotalSpend || 1)) * 100) ||
@@ -1136,12 +1132,7 @@ const AnalyticsScreen = () => {
                 .filter((u) => !u.orphaned)
                 .map((u, i) => {
                   const { budget, spent, percentage } = u;
-                  const barColor =
-                    u.pace === "over" || percentage >= 100
-                      ? colors.danger
-                      : u.pace === "risk"
-                        ? colors.warning
-                        : colors.credit;
+                  const barColor = budgetPaceColor(u.pace, colors);
                   return (
                     <View key={budget.id} className={i > 0 ? "mt-4" : ""}>
                       <View className="flex-row justify-between items-center mb-1.5">
@@ -1159,7 +1150,9 @@ const AnalyticsScreen = () => {
                           {fmtShort(spent)} / {fmtShort(u.effectiveLimit)} ·{" "}
                           {u.pace === "risk"
                             ? `${percentage}% · pacing over`
-                            : `${percentage}%`}
+                            : u.pace === "reached"
+                              ? `${percentage}% · limit reached`
+                              : `${percentage}%`}
                         </ThemedText>
                       </View>
                       <View

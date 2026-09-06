@@ -47,7 +47,7 @@ import {
   WavePoint,
   ResonanceRings,
 } from "../components/Signal";
-import { fonts, formatINR } from "../theme/tokens";
+import { fonts, formatINR, budgetPaceColor } from "../theme/tokens";
 import { SignalRow, IconTile, Card } from "../components/Kit";
 import { useAIInsights } from "../hooks/useAIInsights";
 import { WidgetId, visibleWidgetIds } from "../components/dashboard/registry";
@@ -1018,12 +1018,7 @@ const DashboardScreen = ({ navigation }: any) => {
               </TouchableOpacity>
             </View>
             {budgetWatchFiltered.map((item) => {
-              const barColor =
-                item.pace === "over" || item.percentage >= 100
-                  ? colors.danger
-                  : item.pace === "risk"
-                    ? colors.warning
-                    : colors.credit;
+              const barColor = budgetPaceColor(item.pace, colors);
               return (
                 <Pressable
                   key={item.budget.id}
@@ -1059,7 +1054,9 @@ const DashboardScreen = ({ navigation }: any) => {
                     >
                       {item.pace === "risk"
                         ? `${item.percentage}% · pacing over`
-                        : `${item.percentage}%`}
+                        : item.pace === "reached"
+                          ? `${item.percentage}% · limit reached`
+                          : `${item.percentage}%`}
                     </ThemedText>
                   </View>
                   <View>
