@@ -115,6 +115,11 @@ export interface Account {
 
 export interface Budget {
   id: number;
+  /**
+   * User-given label for the budget. Absent (older rows, or a user who cleared
+   * the field) → the label falls back to the category selection.
+   */
+  name?: string;
   /** primary category (first selection) — kept for display and back-compat */
   categoryName: string;
   /**
@@ -477,6 +482,7 @@ const runMigrations = async () => {
   const migrations = [
     'ALTER TABLE budgets ADD COLUMN rollover INTEGER DEFAULT 0',
     'ALTER TABLE budgets ADD COLUMN categoryNames TEXT',
+    'ALTER TABLE budgets ADD COLUMN name TEXT',
     'ALTER TABLE transactions ADD COLUMN isRecurring INTEGER DEFAULT 0',
     'ALTER TABLE transactions ADD COLUMN recurrenceRule TEXT',
     'ALTER TABLE transactions ADD COLUMN notes TEXT',
@@ -2145,20 +2151,33 @@ const mapBudgetRow = (row: any): Budget => {
   } catch {
     categoryNames = undefined;
   }
-  return { ...row, categoryNames, rollover: !!row.rollover };
+  return {
+    ...row,
+    categoryNames,
+    name: row.name ? String(row.name) : undefined,
+    rollover: !!row.rollover,
+  };
 };
 
 /** The category names a budget explicitly targets (multi-select aware). */
 export const budgetSelections = (b: Budget): string[] =>
   b.categoryNames && b.categoryNames.length > 0 ? b.categoryNames : [b.categoryName];
 
-/** Human label: single name, or "First + N more" for bundled budgets. */
-export const budgetDisplayName = (b: Budget): string => {
-  const sel = budgetSelections(b);
-  if (sel.length === 1) return sel[0];
-  if (sel.length === 2) return `${sel[0]} + ${sel[1]}`;
-  return `${sel[0]} + ${sel.length - 1} more`;
+/**
+ * Label derived from the selection: single name, or "First + N more" for
+ * bundled budgets. Used to prefill the name field and as the fallback for
+ * budgets saved before names existed.
+ */
+export const budgetAutoName = (selections: string[]): string => {
+  if (selections.length === 0) return '';
+  if (selections.length === 1) return selections[0];
+  if (selections.length === 2) return `${selections[0]} + ${selections[1]}`;
+  return `${selections[0]} + ${selections.length - 1} more`;
 };
+
+/** Human label: the user's own name when set, else the category-derived one. */
+export const budgetDisplayName = (b: Budget): string =>
+  b.name?.trim() || budgetAutoName(budgetSelections(b));
 
 export const getBudgets = async (): Promise<Budget[]> => {
   const rows = await db.getAllAsync<any>('SELECT * FROM budgets ORDER BY categoryName');
@@ -2172,11 +2191,15 @@ export const upsertBudget = async (budget: Omit<Budget, 'id'> & { id?: number })
       : [budget.categoryName];
   const primary = selections[0];
   const namesJson = JSON.stringify(selections);
+  // Blank (or the untouched auto-label) stays null so the row keeps tracking
+  // its categories instead of freezing a stale name.
+  const trimmed = budget.name?.trim();
+  const name = trimmed && trimmed !== budgetAutoName(selections) ? trimmed : null;
 
   const update = (id: number) =>
     db.runAsync(
-      'UPDATE budgets SET categoryName = ?, categoryNames = ?, amount = ?, period = ?, startDate = ?, rollover = ? WHERE id = ?',
-      primary, namesJson, budget.amount, budget.period, budget.startDate, budget.rollover ? 1 : 0, id
+      'UPDATE budgets SET name = ?, categoryName = ?, categoryNames = ?, amount = ?, period = ?, startDate = ?, rollover = ? WHERE id = ?',
+      name, primary, namesJson, budget.amount, budget.period, budget.startDate, budget.rollover ? 1 : 0, id
     );
 
   if (budget.id != null) {
@@ -2193,8 +2216,8 @@ export const upsertBudget = async (budget: Omit<Budget, 'id'> & { id?: number })
     await update(existing.id);
   } else {
     await db.runAsync(
-      'INSERT INTO budgets (categoryName, categoryNames, amount, period, startDate, rollover) VALUES (?, ?, ?, ?, ?, ?)',
-      primary, namesJson, budget.amount, budget.period, budget.startDate, budget.rollover ? 1 : 0
+      'INSERT INTO budgets (name, categoryName, categoryNames, amount, period, startDate, rollover) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      name, primary, namesJson, budget.amount, budget.period, budget.startDate, budget.rollover ? 1 : 0
     );
   }
 };

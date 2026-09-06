@@ -43,6 +43,7 @@ import {
   deleteBudget,
   getCategories,
   budgetSelections,
+  budgetAutoName,
   BudgetUtilization,
   BudgetSummary,
   BudgetPace,
@@ -139,6 +140,11 @@ const BudgetScreen = () => {
   // Budget editor sheet: null = closed, 'new' = create, otherwise the row edited
   const [editing, setEditing] = useState<BudgetUtilization | "new" | null>(null);
   const [formSelections, setFormSelections] = useState<string[]>([]);
+  const [formName, setFormName] = useState("");
+  // Once the user types their own name, the field stops following the category
+  // selection — otherwise it keeps mirroring it, so a fresh budget always has
+  // a sensible prefilled name.
+  const [nameEdited, setNameEdited] = useState(false);
   const [formAmount, setFormAmount] = useState("");
   const [formPeriod, setFormPeriod] = useState<"monthly" | "weekly">("monthly");
   const [formRollover, setFormRollover] = useState(false);
@@ -255,6 +261,13 @@ const BudgetScreen = () => {
 
   // ── Suggestion: 3-window average for the current selection set ────────────
   const selectionsKey = formSelections.join("|");
+
+  // Prefill/refresh the name from the selection until the user edits it.
+  useEffect(() => {
+    if (editing === null || nameEdited) return;
+    setFormName(budgetAutoName(formSelections));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing, selectionsKey, nameEdited]);
   useEffect(() => {
     if (!editing || formSelections.length === 0) {
       setSuggested(null);
@@ -274,6 +287,8 @@ const BudgetScreen = () => {
   const openCreate = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setFormSelections([]);
+    setFormName("");
+    setNameEdited(false);
     setFormAmount("");
     setFormPeriod("monthly");
     setFormRollover(false);
@@ -282,7 +297,12 @@ const BudgetScreen = () => {
 
   const openEdit = (row: BudgetUtilization) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setFormSelections(budgetSelections(row.budget));
+    const sel = budgetSelections(row.budget);
+    setFormSelections(sel);
+    // A saved custom name is the user's; anything else re-derives from the
+    // categories so editing categories keeps the label honest.
+    setFormName(row.budget.name?.trim() || budgetAutoName(sel));
+    setNameEdited(!!row.budget.name?.trim());
     setFormAmount(String(row.budget.amount));
     setFormPeriod(row.budget.period);
     setFormRollover(!!row.budget.rollover);
@@ -304,6 +324,7 @@ const BudgetScreen = () => {
     }
     await upsertBudget({
       id: editingRow?.budget.id,
+      name: formName.trim() || undefined,
       categoryName: formSelections[0],
       categoryNames: formSelections,
       amount,
@@ -861,6 +882,40 @@ const BudgetScreen = () => {
           <ThemedText style={{ fontSize: 11, color: colors.muted, marginTop: 8 }}>
             One limit across everything selected — a parent covers all its
             subcategories.
+          </ThemedText>
+
+          <FieldLabel style={{ marginTop: 18 }}>Budget name</FieldLabel>
+          <TextField
+            placeholder={
+              formSelections.length > 0
+                ? budgetAutoName(formSelections)
+                : "e.g. Weekend spends"
+            }
+            value={formName}
+            onChangeText={(t) => {
+              setNameEdited(true);
+              setFormName(t);
+            }}
+            autoCorrect={false}
+            maxLength={40}
+            trailing={
+              formName.length > 0 ? (
+                <TouchableOpacity
+                  onPress={() => {
+                    setNameEdited(false);
+                    setFormName(budgetAutoName(formSelections));
+                  }}
+                  hitSlop={8}
+                >
+                  <LucideX color={colors.muted} size={14} />
+                </TouchableOpacity>
+              ) : undefined
+            }
+          />
+          <ThemedText style={{ fontSize: 11, color: colors.muted, marginTop: 6 }}>
+            {nameEdited
+              ? "Your own name for this budget."
+              : "Prefilled from the categories — edit it to name this budget yourself."}
           </ThemedText>
 
           <FieldLabel style={{ marginTop: 18 }}>Period</FieldLabel>
