@@ -220,11 +220,8 @@ interface CreditCardsWidgetProps {
   onPayBill?: (card: CardHealth) => void;
   /** Jump to the full Cards tab in Money. */
   onSeeAll?: () => void;
-  /**
-   * How many cards get the full detail treatment. The rest collapse to one-line
-   * rows so a wallet with 5+ cards doesn't take over the dashboard.
-   */
-  detailLimit?: number;
+  /** Horizontal padding the parent ScrollView applies, so cards can bleed edge-to-edge. */
+  gutter?: number;
 }
 
 export const CreditCardsWidget: React.FC<CreditCardsWidgetProps> = ({
@@ -235,10 +232,24 @@ export const CreditCardsWidget: React.FC<CreditCardsWidgetProps> = ({
   onAddCard,
   onPayBill,
   onSeeAll,
-  detailLimit = 2,
+  gutter = 24,
 }) => {
   const { colors } = useTheme();
-  const [expanded, setExpanded] = useState(false);
+  const { width } = useWindowDimensions();
+  const [page, setPage] = useState(0);
+
+  // Same deck mechanics as InsightCarousel — one card per page, snapped.
+  const GAP = 12;
+  const cardWidth = width - gutter * 2;
+  const interval = cardWidth + GAP;
+
+  const onScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const next = Math.round(e.nativeEvent.contentOffset.x / interval);
+      setPage((prev) => (prev === next ? prev : next));
+    },
+    [interval],
+  );
 
   if (cards.length === 0) {
     return (
@@ -256,15 +267,13 @@ export const CreditCardsWidget: React.FC<CreditCardsWidgetProps> = ({
   const toneFor = (severity: CardHealth['severity']) =>
     severity === 'high' ? colors.danger : severity === 'warn' ? colors.debit : colors.credit;
 
-  // Cards needing attention lead: a bill to pay, or utilization worth acting on.
-  // Everything else collapses, so 5 quiet cards cost 5 lines instead of 5 cards.
+  // Cards needing attention lead, so the deck opens on the one that matters:
+  // a bill to pay first, then utilization worth acting on.
   const ranked = [...cards].sort((a, b) => {
     const score = (c: CardHealth) =>
       ((c.amountDue ?? 0) > 0 ? 2 : 0) + (c.severity === 'high' ? 1 : 0);
     return score(b) - score(a);
   });
-  const detailed = expanded ? ranked : ranked.slice(0, detailLimit);
-  const collapsed = expanded ? [] : ranked.slice(detailLimit);
 
   const totalDue = cards.reduce((sum, c) => sum + (c.amountDue ?? 0), 0);
   const totalOutstanding = cards.reduce((sum, c) => sum + c.outstanding, 0);
@@ -304,8 +313,24 @@ export const CreditCardsWidget: React.FC<CreditCardsWidgetProps> = ({
         </Card>
       )}
 
-      <View style={{ gap: 12 }}>
-        {detailed.map((card, idx) => {
+      {/* One card per page. Every card keeps its full detail — the widget's
+          height stays the same whether the wallet holds one card or seven,
+          which the old stack-plus-"show all" could not do. */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        // Snap, not pagingEnabled: cards are inset by the gutter, so a
+        // full-viewport page width would drift out of alignment as you swipe.
+        snapToInterval={interval}
+        snapToAlignment="start"
+        decelerationRate="fast"
+        disableIntervalMomentum
+        onScroll={onScroll}
+        scrollEventThrottle={16}
+        style={{ marginHorizontal: -gutter }}
+        contentContainerStyle={{ paddingHorizontal: gutter, alignItems: 'stretch' }}
+      >
+        {ranked.map((card, idx) => {
           const tone = toneFor(card.severity);
           return (
             <MotiView
@@ -313,246 +338,224 @@ export const CreditCardsWidget: React.FC<CreditCardsWidgetProps> = ({
               from={{ opacity: 0, translateY: 6 }}
               animate={{ opacity: 1, translateY: 0 }}
               transition={{ type: 'timing', duration: 220, delay: idx * 50 }}
+              style={{
+                width: cardWidth,
+                marginRight: idx === ranked.length - 1 ? 0 : GAP,
+              }}
             >
-              <Card onPress={() => onPressCard(card)}>
-                <View
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    marginBottom: 12,
-                    gap: 12,
-                  }}
-                >
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
-                    <IconTile color={tone} size={34}>
-                      <LucideCreditCard size={15} color={tone} />
-                    </IconTile>
-                    <View style={{ flex: 1 }}>
-                      <ThemedText
-                        numberOfLines={1}
-                        style={{ fontFamily: fonts.textMedium, fontSize: 14, color: colors.primary }}
-                      >
-                        {card.account.name}
-                      </ThemedText>
-                      {card.account.last4Digits && (
+              {/* Pressable wrapper rather than Card's own onPress: only an
+                  element in this chain can carry flex:1, and every face has to
+                  fill the tallest card so the deck's height never jumps. */}
+              <Pressable onPress={() => onPressCard(card)} style={{ flex: 1 }}>
+                <Card style={{ flex: 1 }}>
+                  <View
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      marginBottom: 12,
+                      gap: 12,
+                    }}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                      <IconTile color={tone} size={34}>
+                        <LucideCreditCard size={15} color={tone} />
+                      </IconTile>
+                      <View style={{ flex: 1 }}>
                         <ThemedText
-                          style={{
-                            fontFamily: fonts.signal,
-                            fontSize: 11,
-                            color: colors.secondary,
-                            marginTop: 2,
-                          }}
+                          numberOfLines={1}
+                          style={{ fontFamily: fonts.textMedium, fontSize: 14, color: colors.primary }}
                         >
-                          •••• {card.account.last4Digits}
+                          {card.account.name}
                         </ThemedText>
-                      )}
+                        {card.account.last4Digits && (
+                          <ThemedText
+                            style={{
+                              fontFamily: fonts.signal,
+                              fontSize: 11,
+                              color: colors.secondary,
+                              marginTop: 2,
+                            }}
+                          >
+                            •••• {card.account.last4Digits}
+                          </ThemedText>
+                        )}
+                      </View>
+                    </View>
+
+                    {/* Headline is what must be PAID (statement remaining), not the
+                        running balance — post-statement spend isn't due yet. */}
+                    <View style={{ alignItems: 'flex-end' }}>
+                      <AmountText
+                        value={card.amountDue ?? card.outstanding}
+                        size={17}
+                        currency={currency}
+                        masked={masked}
+                        kind="debit"
+                      />
+                      <ThemedText
+                        style={{ fontFamily: fonts.signal, fontSize: 9, color: colors.secondary, marginTop: 2 }}
+                      >
+                        {card.amountDue !== null ? 'DUE NOW' : 'OUTSTANDING'}
+                      </ThemedText>
                     </View>
                   </View>
 
-                  {/* Headline is what must be PAID (statement remaining), not the
-                      running balance — post-statement spend isn't due yet. */}
-                  <View style={{ alignItems: 'flex-end' }}>
-                    <AmountText
-                      value={card.amountDue ?? card.outstanding}
-                      size={17}
-                      currency={currency}
-                      masked={masked}
-                      kind="debit"
-                    />
-                    <ThemedText
-                      style={{ fontFamily: fonts.signal, fontSize: 9, color: colors.secondary, marginTop: 2 }}
-                    >
-                      {card.amountDue !== null ? 'DUE NOW' : 'OUTSTANDING'}
-                    </ThemedText>
-                  </View>
-                </View>
+                  {card.hasLimit ? (
+                    <>
+                      <CycleBar pct={card.utilizationPct} color={tone} />
+                      <View
+                        style={{
+                          flexDirection: 'row',
+                          justifyContent: 'space-between',
+                          marginTop: 8,
+                        }}
+                      >
+                        <ThemedText
+                          style={{ fontFamily: fonts.signal, fontSize: 11, color: tone }}
+                        >
+                          {`${Math.round(card.utilizationPct)}% used`}
+                        </ThemedText>
+                        <MutedNote>
+                          {masked
+                            ? `${currency}•••• available`
+                            : `${currency}${formatINR(card.available)} available`}
+                        </MutedNote>
+                      </View>
+                    </>
+                  ) : (
+                    // Utilization is meaningless without a limit — prompt for it
+                    // rather than rendering a misleading empty bar.
+                    <MutedNote>Add a credit limit to track utilization.</MutedNote>
+                  )}
 
-                {card.hasLimit ? (
-                  <>
-                    <CycleBar pct={card.utilizationPct} color={tone} />
+                  {card.statement && (
                     <View
                       style={{
                         flexDirection: 'row',
                         justifyContent: 'space-between',
-                        marginTop: 8,
+                        marginTop: 10,
+                        paddingTop: 10,
+                        borderTopWidth: 1,
+                        borderTopColor: colors.border,
+                      }}
+                    >
+                      {card.minimumDue !== null && (
+                        <MutedNote>
+                          {masked
+                            ? `Min ${currency}••••`
+                            : `Min ${currency}${formatINR(card.minimumDue)}`}
+                        </MutedNote>
+                      )}
+                      {card.unbilled !== null && card.unbilled > 0 && (
+                        <MutedNote>
+                          {masked
+                            ? `${currency}•••• unbilled`
+                            : `${currency}${formatINR(card.unbilled)} unbilled`}
+                        </MutedNote>
+                      )}
+                    </View>
+                  )}
+
+                  {onPayBill && (card.amountDue ?? 0) > 0 && (
+                    <Pressable
+                      onPress={() => onPayBill(card)}
+                      style={{
+                        marginTop: 12,
+                        paddingVertical: 10,
+                        borderRadius: 12,
+                        alignItems: 'center',
+                        backgroundColor: colors.accent,
                       }}
                     >
                       <ThemedText
-                        style={{ fontFamily: fonts.signal, fontSize: 11, color: tone }}
+                        style={{ fontFamily: fonts.textSemibold, fontSize: 13, color: colors.onAccent }}
                       >
-                        {`${Math.round(card.utilizationPct)}% used`}
+                        {masked
+                          ? 'Pay bill'
+                          : `Pay ${currency}${formatINR(card.amountDue as number)}`}
                       </ThemedText>
-                      <MutedNote>
-                        {masked
-                          ? `${currency}•••• available`
-                          : `${currency}${formatINR(card.available)} available`}
-                      </MutedNote>
-                    </View>
-                  </>
-                ) : (
-                  // Utilization is meaningless without a limit — prompt for it
-                  // rather than rendering a misleading empty bar.
-                  <MutedNote>Add a credit limit to track utilization.</MutedNote>
-                )}
+                    </Pressable>
+                  )}
 
-                {card.statement && (
-                  <View
-                    style={{
-                      flexDirection: 'row',
-                      justifyContent: 'space-between',
-                      marginTop: 10,
-                      paddingTop: 10,
-                      borderTopWidth: 1,
-                      borderTopColor: colors.border,
-                    }}
-                  >
-                    {card.minimumDue !== null && (
+                  {/* Free-credit window for a purchase made today — the number
+                      people actually plan around. */}
+                  {(() => {
+                    const free = getInterestFreeInfo(card.account);
+                    if (!free) return null;
+                    return (
                       <MutedNote>
-                        {masked
-                          ? `Min ${currency}••••`
-                          : `Min ${currency}${formatINR(card.minimumDue)}`}
+                        {`Buy today → interest-free for ${free.days} days, until ${free.payBy.toLocaleDateString(
+                          'en-IN', { day: 'numeric', month: 'short' },
+                        )}`}
                       </MutedNote>
-                    )}
-                    {card.unbilled !== null && card.unbilled > 0 && (
-                      <MutedNote>
-                        {masked
-                          ? `${currency}•••• unbilled`
-                          : `${currency}${formatINR(card.unbilled)} unbilled`}
-                      </MutedNote>
-                    )}
-                  </View>
-                )}
+                    );
+                  })()}
 
-                {onPayBill && (card.amountDue ?? 0) > 0 && (
-                  <Pressable
-                    onPress={() => onPayBill(card)}
-                    style={{
-                      marginTop: 12,
-                      paddingVertical: 10,
-                      borderRadius: 12,
-                      alignItems: 'center',
-                      backgroundColor: colors.accent,
-                    }}
-                  >
-                    <ThemedText
-                      style={{ fontFamily: fonts.textSemibold, fontSize: 13, color: colors.onAccent }}
+                  {(card.dueInDays !== null || card.statementInDays !== null) && (
+                    <View
+                      style={{
+                        flexDirection: 'row',
+                        gap: 16,
+                        marginTop: 12,
+                        paddingTop: 12,
+                        borderTopWidth: 1,
+                        borderTopColor: colors.border,
+                      }}
                     >
-                      {masked
-                        ? 'Pay bill'
-                        : `Pay ${currency}${formatINR(card.amountDue as number)}`}
-                    </ThemedText>
-                  </Pressable>
-                )}
-
-                {/* Free-credit window for a purchase made today — the number
-                    people actually plan around. */}
-                {(() => {
-                  const free = getInterestFreeInfo(card.account);
-                  if (!free) return null;
-                  return (
-                    <MutedNote>
-                      {`Buy today → interest-free for ${free.days} days, until ${free.payBy.toLocaleDateString(
-                        'en-IN', { day: 'numeric', month: 'short' },
-                      )}`}
-                    </MutedNote>
-                  );
-                })()}
-
-                {(card.dueInDays !== null || card.statementInDays !== null) && (
-                  <View
-                    style={{
-                      flexDirection: 'row',
-                      gap: 16,
-                      marginTop: 12,
-                      paddingTop: 12,
-                      borderTopWidth: 1,
-                      borderTopColor: colors.border,
-                    }}
-                  >
-                    {card.dueInDays !== null && (
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <LucideCalendar size={12} color={colors.secondary} />
-                        <ThemedText
-                          style={{
-                            fontFamily: fonts.text,
-                            fontSize: 12,
-                            color: card.dueInDays <= 3 ? colors.debit : colors.secondary,
-                          }}
-                        >
-                          {`Payment ${formatDueLabel(card.dueInDays).toLowerCase()}`}
-                        </ThemedText>
-                      </View>
-                    )}
-                    {card.statementInDays !== null && (
-                      <MutedNote>
-                        {`Statement ${formatDueLabel(card.statementInDays).toLowerCase()}`}
-                      </MutedNote>
-                    )}
-                  </View>
-                )}
-              </Card>
+                      {card.dueInDays !== null && (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <LucideCalendar size={12} color={colors.secondary} />
+                          <ThemedText
+                            style={{
+                              fontFamily: fonts.text,
+                              fontSize: 12,
+                              color: card.dueInDays <= 3 ? colors.debit : colors.secondary,
+                            }}
+                          >
+                            {`Payment ${formatDueLabel(card.dueInDays).toLowerCase()}`}
+                          </ThemedText>
+                        </View>
+                      )}
+                      {card.statementInDays !== null && (
+                        <MutedNote>
+                          {`Statement ${formatDueLabel(card.statementInDays).toLowerCase()}`}
+                        </MutedNote>
+                      )}
+                    </View>
+                  )}
+                </Card>
+              </Pressable>
             </MotiView>
           );
         })}
+      </ScrollView>
 
-        {/* Quiet cards as one-line rows — still visible and tappable, but they
-            cost a line each instead of a full card. */}
-        {collapsed.map((card) => {
-          const tone = toneFor(card.severity);
-          return (
-            <Pressable
+      {ranked.length > 1 && (
+        <View
+          style={{
+            flexDirection: 'row',
+            justifyContent: 'center',
+            alignItems: 'center',
+            gap: 6,
+            marginTop: 12,
+          }}
+        >
+          {ranked.map((card, idx) => (
+            <View
               key={card.account.id}
-              onPress={() => onPressCard(card)}
               style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 12,
-                paddingVertical: 10,
-                paddingHorizontal: 12,
-                borderRadius: 12,
-                borderWidth: 1,
-                borderColor: colors.border,
+                width: idx === page ? 16 : 6,
+                height: 6,
+                borderRadius: 3,
+                // The dot carries the card's own severity, so a card needing
+                // attention is visible without swiping to it.
+                backgroundColor: idx === page ? toneFor(card.severity) : colors.border,
               }}
-            >
-              <IconTile color={tone} size={28}>
-                <LucideCreditCard size={13} color={tone} />
-              </IconTile>
-              <ThemedText
-                numberOfLines={1}
-                style={{ flex: 1, fontFamily: fonts.textMedium, fontSize: 13, color: colors.primary }}
-              >
-                {card.account.name}
-              </ThemedText>
-              {card.hasLimit && (
-                <ThemedText
-                  style={{ fontFamily: fonts.signal, fontSize: 11, color: tone, marginRight: 10 }}
-                >
-                  {`${Math.round(card.utilizationPct)}%`}
-                </ThemedText>
-              )}
-              <AmountText
-                value={card.amountDue ?? card.outstanding}
-                size={13}
-                currency={currency}
-                masked={masked}
-                kind="debit"
-              />
-            </Pressable>
-          );
-        })}
-
-        {ranked.length > detailLimit && (
-          <Pressable
-            onPress={() => setExpanded((v) => !v)}
-            style={{ paddingVertical: 8, alignItems: 'center' }}
-          >
-            <SectionLabel color={colors.accent}>
-              {expanded ? 'Show less' : `Show all ${ranked.length} cards`}
-            </SectionLabel>
-          </Pressable>
-        )}
-      </View>
+            />
+          ))}
+        </View>
+      )}
     </WidgetSection>
   );
 };
