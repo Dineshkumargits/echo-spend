@@ -6,7 +6,7 @@
  * All of them render an honest empty/setup state rather than disappearing, so a
  * widget the user explicitly enabled never looks broken.
  */
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Pressable,
@@ -22,13 +22,14 @@ import {
   LucideCalendar,
   LucideRepeat,
   LucideLandmark,
+  LucideTarget,
 } from 'lucide-react-native';
 import { ThemedText } from '../ThemedSafeAreaView';
 import { useTheme } from '../../theme/ThemeProvider';
 import { fonts, formatINR } from '../../theme/tokens';
 import { AmountText, SectionLabel, CycleBar } from '../Signal';
 import { Card, IconTile } from '../Kit';
-import type { UpcomingBill, CardHealth } from './derive';
+import type { UpcomingBill, CardHealth, PlannedContribution } from './derive';
 import { formatDueLabel, getInterestFreeInfo } from './derive';
 import type { Insight } from '../../services/database';
 
@@ -78,7 +79,7 @@ const MutedNote: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   );
 };
 
-// ─── Upcoming bills ──────────────────────────────────────────────────────────
+// ─── Upcoming — bills and planned contributions ──────────────────────────────
 
 const BILL_ICON = {
   subscription: LucideRepeat,
@@ -86,31 +87,222 @@ const BILL_ICON = {
   card: LucideCreditCard,
 } as const;
 
-interface UpcomingBillsWidgetProps {
+/**
+ * One line on either face. Both lenses share it so a bill and a contribution
+ * are visually the same object — only the tone and the amount's kind differ.
+ */
+const UpcomingRow: React.FC<{
+  icon: React.ReactNode;
+  tone: string;
+  label: string;
+  sub: string;
+  amount: number;
+  currency: string;
+  masked: boolean;
+  kind: 'debit' | 'neutral';
+  first: boolean;
+  onPress: () => void;
+}> = ({ icon, tone, label, sub, amount, currency, masked, kind, first, onPress }) => {
+  const { colors } = useTheme();
+  return (
+    <Pressable
+      onPress={onPress}
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        paddingVertical: 10,
+        borderTopWidth: first ? 0 : 1,
+        borderTopColor: colors.border,
+      }}
+    >
+      <IconTile color={tone} size={32}>
+        {icon}
+      </IconTile>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <ThemedText
+          numberOfLines={1}
+          style={{ fontFamily: fonts.textMedium, fontSize: 13.5, color: colors.primary }}
+        >
+          {label}
+        </ThemedText>
+        <ThemedText
+          numberOfLines={1}
+          style={{ fontFamily: fonts.signal, fontSize: 10.5, color: tone, marginTop: 2 }}
+        >
+          {sub}
+        </ThemedText>
+      </View>
+      <AmountText value={amount} size={14} currency={currency} masked={masked} kind={kind} />
+    </Pressable>
+  );
+};
+
+/** The shared frame both lenses render into, so the deck never changes shape. */
+const LensFace: React.FC<{
+  eyebrow: string;
+  total: number;
+  /** Item count beside the total. Omitted on an empty face, where the note says it. */
+  caption?: string;
+  action?: { label: string; onPress: () => void };
+  currency: string;
+  masked: boolean;
+  totalKind: 'debit' | 'neutral';
+  empty?: string;
+  children?: React.ReactNode;
+  more?: number;
+}> = ({
+  eyebrow, total, caption, action, currency, masked, totalKind, empty, children, more = 0,
+}) => {
+  const { colors } = useTheme();
+  return (
+    <Card style={{ flex: 1, paddingVertical: 16 }}>
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+        }}
+      >
+        <SectionLabel>{eyebrow}</SectionLabel>
+        {action && (
+          <Pressable
+            onPress={action.onPress}
+            hitSlop={10}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}
+          >
+            <SectionLabel color={colors.accent}>{action.label}</SectionLabel>
+            <LucideChevronRight size={12} color={colors.accent} />
+          </Pressable>
+        )}
+      </View>
+
+      {/* flex-end, not baseline: RN's baseline alignment is inconsistent across
+          platforms with mixed font families, and this row mixes the signal face
+          with the text one. The nudge below matches the optical baseline. */}
+      <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginTop: 6 }}>
+        <AmountText
+          value={total}
+          size={24}
+          currency={currency}
+          masked={masked}
+          kind={totalKind}
+        />
+        {!!caption && (
+          <ThemedText
+            style={{
+              fontFamily: fonts.text,
+              fontSize: 12,
+              color: colors.secondary,
+              paddingBottom: 3,
+            }}
+            numberOfLines={1}
+          >
+            {caption}
+          </ThemedText>
+        )}
+      </View>
+
+      {empty ? (
+        <View style={{ marginTop: 12 }}>
+          <MutedNote>{empty}</MutedNote>
+        </View>
+      ) : (
+        <View style={{ marginTop: 10 }}>
+          {children}
+          {more > 0 && (
+            <ThemedText
+              style={{
+                fontFamily: fonts.signal,
+                fontSize: 10.5,
+                color: colors.muted,
+                marginTop: 10,
+              }}
+            >
+              {`+${more} more`}
+            </ThemedText>
+          )}
+        </View>
+      )}
+    </Card>
+  );
+};
+
+interface UpcomingWidgetProps {
   bills: UpcomingBill[];
+  planned: PlannedContribution[];
   currency: string;
   masked: boolean;
   onPressBill: (bill: UpcomingBill) => void;
-  onSeeAll: () => void;
-  /** Rows to show before collapsing behind "See all". */
-  limit?: number;
+  onPressPlanned: (item: PlannedContribution) => void;
+  onSeeAllBills: () => void;
+  onSeeAllGoals: () => void;
+  /** Rows on a face before the "+N more" line. */
+  rowsPerFace?: number;
+  /** Horizontal padding the parent ScrollView applies, so faces bleed edge-to-edge. */
+  gutter?: number;
 }
 
-export const UpcomingBillsWidget: React.FC<UpcomingBillsWidgetProps> = ({
+/**
+ * Two lenses on the same cycle, one swipe apart:
+ *
+ *   Due     — bills that leave your account whether you act or not.
+ *   Planned — what you have chosen to set aside.
+ *
+ * They share a widget and never a total. Swiping replaces a segmented control,
+ * so there is no lens preference to persist and no extra chrome; the page dot
+ * turns red when its lens holds something overdue, so switching away can never
+ * hide a missed bill. A fixed row count keeps both faces the same height
+ * whether you have two bills or twelve.
+ */
+export const UpcomingWidget: React.FC<UpcomingWidgetProps> = ({
   bills,
+  planned,
   currency,
   masked,
   onPressBill,
-  onSeeAll,
-  limit = 4,
+  onPressPlanned,
+  onSeeAllBills,
+  onSeeAllGoals,
+  rowsPerFace = 3,
+  gutter = 24,
 }) => {
   const { colors } = useTheme();
-  const shown = bills.slice(0, limit);
-  const total = bills.reduce((sum, b) => sum + b.amount, 0);
+  const { width } = useWindowDimensions();
+  const [page, setPage] = useState(0);
 
-  if (bills.length === 0) {
+  const GAP = 12;
+  const faceWidth = width - gutter * 2;
+  const interval = faceWidth + GAP;
+
+  const onScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const next = Math.round(e.nativeEvent.contentOffset.x / interval);
+      setPage((prev) => (prev === next ? prev : next));
+    },
+    [interval],
+  );
+
+  // The Planned face can disappear between loads (last goal completed). Without
+  // this the dot indicator stays stuck on a page that no longer exists.
+  const faceCount = planned.length > 0 ? 2 : 1;
+  useEffect(() => {
+    if (page > faceCount - 1) setPage(0);
+  }, [faceCount, page]);
+
+  const billsTotal = bills.reduce((sum, b) => sum + b.amount, 0);
+  const plannedTotal = planned.reduce((sum, p) => sum + p.amount, 0);
+  const hasOverdueBill = bills.some((b) => b.daysLeft < 0);
+  const hasOverdueGoal = planned.some((p) => p.daysLeft !== null && p.daysLeft < 0);
+
+  // The Planned face only exists once there is something planned — with no
+  // goals the widget is exactly the bills list it replaced, dots and all gone.
+  const showPlanned = faceCount > 1;
+
+  if (bills.length === 0 && !showPlanned) {
     return (
-      <WidgetSection label="Upcoming bills">
+      <WidgetSection label="Upcoming">
         <Card>
           <MutedNote>
             Nothing left to pay this cycle. Subscriptions, EMIs and card
@@ -121,89 +313,144 @@ export const UpcomingBillsWidget: React.FC<UpcomingBillsWidgetProps> = ({
     );
   }
 
-  return (
-    <WidgetSection
-      label="Upcoming bills"
-      action={bills.length > limit ? { label: `All ${bills.length}`, onPress: onSeeAll } : undefined}
+  const faces = [
+    <LensFace
+      key="due"
+      eyebrow="Due this cycle"
+      total={billsTotal}
+      caption={bills.length === 0 ? undefined : bills.length === 1 ? '1 bill' : `${bills.length} bills`}
+      action={bills.length > 0 ? { label: `All ${bills.length}`, onPress: onSeeAllBills } : undefined}
+      currency={currency}
+      masked={masked}
+      totalKind="debit"
+      empty={bills.length === 0 ? 'Nothing left to pay this cycle.' : undefined}
+      more={Math.max(bills.length - rowsPerFace, 0)}
     >
-      <Card padded={false}>
-        {shown.map((bill, idx) => {
-          const Icon = BILL_ICON[bill.kind];
-          const overdue = bill.daysLeft < 0;
-          const urgent = bill.daysLeft >= 0 && bill.daysLeft <= 3;
-          const dueColor = overdue ? colors.danger : urgent ? colors.debit : colors.secondary;
-
-          return (
-            <MotiView
-              key={bill.key}
-              from={{ opacity: 0, translateY: 6 }}
-              animate={{ opacity: 1, translateY: 0 }}
-              transition={{ type: 'timing', duration: 220, delay: idx * 40 }}
-            >
-              <Pressable
-                onPress={() => onPressBill(bill)}
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  paddingHorizontal: 16,
-                  paddingVertical: 14,
-                  borderTopWidth: idx === 0 ? 0 : 1,
-                  borderTopColor: colors.border,
-                  gap: 12,
-                }}
-              >
-                <IconTile color={dueColor} size={36}>
-                  <Icon size={16} color={dueColor} />
-                </IconTile>
-
-                <View style={{ flex: 1 }}>
-                  <ThemedText
-                    numberOfLines={1}
-                    style={{ fontFamily: fonts.textMedium, fontSize: 14, color: colors.primary }}
-                  >
-                    {bill.label}
-                  </ThemedText>
-                  <ThemedText
-                    style={{ fontFamily: fonts.signal, fontSize: 11, color: dueColor, marginTop: 3 }}
-                  >
-                    {formatDueLabel(bill.daysLeft)}
-                  </ThemedText>
-                </View>
-
-                <AmountText
-                  value={bill.amount}
-                  size={14}
-                  currency={currency}
-                  masked={masked}
-                  kind="debit"
-                />
-              </Pressable>
-            </MotiView>
-          );
-        })}
-
-        <View
-          style={{
-            flexDirection: 'row',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            paddingHorizontal: 16,
-            paddingVertical: 12,
-            borderTopWidth: 1,
-            borderTopColor: colors.border,
-            backgroundColor: colors.surfaceElevated,
-          }}
-        >
-          <SectionLabel>Due this cycle</SectionLabel>
-          <AmountText
-            value={total}
-            size={14}
+      {bills.slice(0, rowsPerFace).map((bill, idx) => {
+        const Icon = BILL_ICON[bill.kind];
+        const overdue = bill.daysLeft < 0;
+        const urgent = bill.daysLeft >= 0 && bill.daysLeft <= 3;
+        const tone = overdue ? colors.danger : urgent ? colors.debit : colors.secondary;
+        return (
+          <UpcomingRow
+            key={bill.key}
+            icon={<Icon size={15} color={tone} />}
+            tone={tone}
+            label={bill.label}
+            sub={formatDueLabel(bill.daysLeft)}
+            amount={bill.amount}
             currency={currency}
             masked={masked}
             kind="debit"
+            first={idx === 0}
+            onPress={() => onPressBill(bill)}
           />
+        );
+      })}
+    </LensFace>,
+  ];
+
+  if (showPlanned) {
+    faces.push(
+      <LensFace
+        key="planned"
+        eyebrow="To set aside"
+        total={plannedTotal}
+        caption={planned.length === 1 ? '1 goal' : `${planned.length} goals`}
+        action={{ label: `All ${planned.length}`, onPress: onSeeAllGoals }}
+        currency={currency}
+        masked={masked}
+        // Never debit-toned: this money has not left, and colouring it like a
+        // bill is what made the old carousel read as an obligation.
+        totalKind="neutral"
+        more={Math.max(planned.length - rowsPerFace, 0)}
+      >
+        {planned.slice(0, rowsPerFace).map((item, idx) => {
+          const overdue = item.daysLeft !== null && item.daysLeft < 0;
+          const tone = overdue ? colors.danger : colors.credit;
+          const parts = [
+            item.daysLeft !== null ? formatDueLabel(item.daysLeft) : null,
+            `${item.progressPct}% saved`,
+          ].filter(Boolean);
+          return (
+            <UpcomingRow
+              key={item.key}
+              icon={<LucideTarget size={15} color={tone} />}
+              tone={tone}
+              label={item.label}
+              sub={parts.join(' · ')}
+              amount={item.amount}
+              currency={currency}
+              masked={masked}
+              kind="neutral"
+              first={idx === 0}
+              onPress={() => onPressPlanned(item)}
+            />
+          );
+        })}
+      </LensFace>,
+    );
+  }
+
+  const dotTone = (idx: number) =>
+    (idx === 0 ? hasOverdueBill : hasOverdueGoal) ? colors.danger : colors.accent;
+
+  return (
+    <WidgetSection label="Upcoming">
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        scrollEnabled={faces.length > 1}
+        // Snap, not pagingEnabled: faces are inset by the gutter, so a
+        // full-viewport page width would drift out of alignment as you swipe.
+        snapToInterval={interval}
+        snapToAlignment="start"
+        decelerationRate="fast"
+        disableIntervalMomentum
+        onScroll={onScroll}
+        scrollEventThrottle={16}
+        style={{ marginHorizontal: -gutter }}
+        contentContainerStyle={{ paddingHorizontal: gutter, alignItems: 'stretch' }}
+      >
+        {faces.map((face, idx) => (
+          <MotiView
+            key={idx}
+            from={{ opacity: 0, translateY: 6 }}
+            animate={{ opacity: 1, translateY: 0 }}
+            transition={{ type: 'timing', duration: 220, delay: idx * 50 }}
+            style={{
+              width: faceWidth,
+              marginRight: idx === faces.length - 1 ? 0 : GAP,
+            }}
+          >
+            {face}
+          </MotiView>
+        ))}
+      </ScrollView>
+
+      {faces.length > 1 && (
+        <View
+          style={{
+            flexDirection: 'row',
+            justifyContent: 'center',
+            alignItems: 'center',
+            gap: 6,
+            marginTop: 12,
+          }}
+        >
+          {faces.map((_, idx) => (
+            <View
+              key={idx}
+              style={{
+                width: idx === page ? 16 : 6,
+                height: 6,
+                borderRadius: 3,
+                backgroundColor: idx === page ? dotTone(idx) : colors.border,
+              }}
+            />
+          ))}
         </View>
-      </Card>
+      )}
     </WidgetSection>
   );
 };

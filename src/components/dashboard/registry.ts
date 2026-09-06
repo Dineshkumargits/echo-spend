@@ -17,7 +17,6 @@ export type WidgetId =
   | 'inboxPulse'
   | 'budgetWatch'
   | 'owed'
-  | 'upcomingCarousel'
   | 'pulseStrip'
   | 'waveform'
   | 'insight'
@@ -76,8 +75,9 @@ export const WIDGET_REGISTRY: WidgetMeta[] = [
   },
   {
     id: 'upcomingBills',
-    title: 'Upcoming bills',
-    description: 'Subscriptions, EMIs and card payments still due this cycle.',
+    title: 'Upcoming',
+    description:
+      'Bills due this cycle, and one swipe away, what you plan to set aside.',
     emoji: '📅',
     defaultEnabled: true,
   },
@@ -124,15 +124,6 @@ export const WIDGET_REGISTRY: WidgetMeta[] = [
     defaultEnabled: true,
     core: true,
   },
-  {
-    id: 'upcomingCarousel',
-    title: 'Commitments carousel',
-    description: 'Swipeable cards for goals, loans and subscriptions.',
-    // Superseded by the denser "Upcoming bills" list, which covers the same
-    // data plus card due dates — off by default, but one tap to bring back.
-    emoji: '🎞️',
-    defaultEnabled: false,
-  },
 ];
 
 export const WIDGET_BY_ID: Record<string, WidgetMeta> = Object.fromEntries(
@@ -149,7 +140,9 @@ export const defaultDashboardLayout = (): DashboardLayoutEntry[] =>
  *
  *  - `undefined` (every install that predates this feature) yields the defaults.
  *  - Widgets removed from the registry are dropped, so a stale id can't render
- *    as a gap or crash the renderer lookup.
+ *    as a gap or crash the renderer lookup. This is how the retired
+ *    'upcomingCarousel' disappears from layouts that still list it — its goals
+ *    now live in the 'upcomingBills' widget's second face.
  *  - Widgets added in a newer app version are appended with their default
  *    enabled state, so an upgrade never hides new work behind a reset.
  *

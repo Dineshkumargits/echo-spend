@@ -6,7 +6,7 @@
  * queries. Keeping them pure also makes the money math testable in isolation
  * from the screen.
  */
-import type { Account, Subscription, Loan, CardStatement } from '../../services/database';
+import type { Account, Subscription, Loan, CardStatement, Goal } from '../../services/database';
 
 import {
   DAY_MS,
@@ -151,6 +151,78 @@ export const getUpcomingBills = (
     .filter((b) => b.daysLeft < 0 || new Date(b.dueDate) < cycleEnd)
     .sort((a, b) => a.daysLeft - b.daysLeft);
 };
+
+// ─── Planned contributions ───────────────────────────────────────────────────
+
+export interface PlannedContribution {
+  key: string;
+  label: string;
+  /** What to set aside this cycle. */
+  amount: number;
+  /** True when derived from the deadline rather than taken from the goal. */
+  derived: boolean;
+  /** Days until the deadline; null when the goal has none. */
+  daysLeft: number | null;
+  /** Share of the target already saved, 0–100. */
+  progressPct: number;
+  refId: number;
+}
+
+/**
+ * What the user intends to set aside this cycle, per goal.
+ *
+ * Deliberately separate from getUpcomingBills and never added to it: a bill
+ * leaves your account whether you act or not, a contribution is a choice. The
+ * two share a widget but never a total, and only bills reach safe-to-spend.
+ *
+ * Keyed on the monthly contribution rather than the deadline. Goal deadlines
+ * usually sit months out, so a cycle-scoped deadline filter would show almost
+ * nothing; "what I put aside each month" is a real number every cycle.
+ */
+export const getPlannedContributions = (
+  goals: Goal[],
+  now = new Date(),
+): PlannedContribution[] =>
+  goals
+    .filter((g) => g.currentAmount < g.targetAmount)
+    .map((g) => {
+      const remaining = Math.max(g.targetAmount - g.currentAmount, 0);
+      const daysLeft = g.deadline ? daysUntil(g.deadline, now) : null;
+
+      // No contribution recorded: spread what is left over the months still
+      // available, so a goal with a deadline still shows an honest figure
+      // instead of nothing. Overdue or inside a month → the whole remainder.
+      const monthsLeft = daysLeft === null ? null : Math.max(Math.ceil(daysLeft / 30), 1);
+      const amount =
+        g.monthlyContribution && g.monthlyContribution > 0
+          ? g.monthlyContribution
+          : monthsLeft !== null
+            ? Math.ceil(remaining / monthsLeft)
+            : 0;
+
+      return {
+        key: `goal-${g.id}`,
+        label: g.name,
+        amount,
+        derived: !(g.monthlyContribution && g.monthlyContribution > 0),
+        daysLeft,
+        progressPct:
+          g.targetAmount > 0
+            ? Math.min(Math.round((g.currentAmount / g.targetAmount) * 100), 100)
+            : 0,
+        refId: g.id,
+      };
+    })
+    // Nothing to set aside (no plan, no deadline) is not a commitment.
+    .filter((p) => p.amount > 0)
+    // Deadline pressure first; goals without one sort last, largest first.
+    .sort((a, b) => {
+      if (a.daysLeft === null || b.daysLeft === null) {
+        if (a.daysLeft === b.daysLeft) return b.amount - a.amount;
+        return a.daysLeft === null ? 1 : -1;
+      }
+      return a.daysLeft - b.daysLeft;
+    });
 
 // ─── Safe to spend ───────────────────────────────────────────────────────────
 

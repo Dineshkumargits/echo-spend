@@ -51,18 +51,19 @@ import { fonts, formatINR, budgetPaceColor } from "../theme/tokens";
 import { SignalRow, IconTile, Card } from "../components/Kit";
 import { useAIInsights } from "../hooks/useAIInsights";
 import { WidgetId, visibleWidgetIds } from "../components/dashboard/registry";
-import { daysUntil, formatDueLabelLong } from "../utils/dateUtils";
 import { cycleAnchorFrom, type CycleWindow } from "../services/salaryCycle";
 import {
   toCycle,
   getUpcomingBills,
+  getPlannedContributions,
   getSafeToSpend,
   getCardHealth,
   UpcomingBill,
+  PlannedContribution,
   CardHealth,
 } from "../components/dashboard/derive";
 import {
-  UpcomingBillsWidget,
+  UpcomingWidget,
   CreditCardsWidget,
   InsightCarousel,
 } from "../components/dashboard/Widgets";
@@ -150,7 +151,6 @@ const DashboardScreen = ({ navigation }: any) => {
   const [transactions, setTransactions] = React.useState<Transaction[]>([]);
   const [accounts, setAccounts] = React.useState<Account[]>([]);
   const [categories, setCategories] = React.useState<Category[]>([]);
-  const [upcoming, setUpcoming] = React.useState<any[]>([]);
   const [monthlySpend, setMonthlySpend] = useState(0);
   const [unconfirmedCount, setUnconfirmedCount] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
@@ -258,6 +258,12 @@ const DashboardScreen = ({ navigation }: any) => {
     [subscriptions, loans, accounts, statements, cycle],
   );
 
+  // Intentions, not obligations — kept out of safeToSpendData on purpose.
+  const plannedContributions = useMemo(
+    () => getPlannedContributions(goals),
+    [goals],
+  );
+
   const safeToSpendData = useMemo(
     () => getSafeToSpend(preferences.monthlyBudget, monthlySpend, upcomingBills, cycle),
     [preferences.monthlyBudget, monthlySpend, upcomingBills, cycle],
@@ -294,20 +300,6 @@ const DashboardScreen = ({ navigation }: any) => {
     },
     [preferences.hideAmounts, currency],
   );
-
-  /**
-   * Calendar days, not a raw millisecond diff.
-   *
-   * The old version did Math.ceil((due - now) / DAY) against the current time.
-   * Stored due dates carry a time-of-day (a subscription keeps whatever time it
-   * was created or last paid), so a bill due at 12:30 today read as "Tomorrow"
-   * all morning and only flipped to "Today" after 12:30.
-   */
-  const getDaysLeft = (date: string) => {
-    const days = daysUntil(date);
-    if (days < 0) return "Overdue";
-    return formatDueLabelLong(days);
-  };
 
   // ── Data loading (§4) ───────────────────────────────────────────────────────
   const loadData = useCallback(async () => {
@@ -364,31 +356,6 @@ const DashboardScreen = ({ navigation }: any) => {
     setSubscriptions(ss);
     setCycleWindow(resolvedCycle);
     setStatements(openStatements);
-
-    const now = new Date();
-    const tenDays = new Date(now.getTime() + 10 * 24 * 60 * 60 * 1000);
-
-    const up: any[] = [
-      ...gs
-        .filter((g: Goal) => g.deadline && new Date(g.deadline) <= tenDays)
-        .map((g: Goal) => ({ ...g, type: "goal", date: g.deadline })),
-      ...ls
-        .filter((l: Loan) => new Date(l.nextDueDate) <= tenDays)
-        .map((l: Loan) => ({
-          ...l,
-          type: "loan",
-          date: l.nextDueDate,
-          name: l.lender,
-        })),
-      ...ss
-        .filter((s: Subscription) => new Date(s.nextDueDate) <= tenDays)
-        .map((s: Subscription) => ({ ...s, type: "sub", date: s.nextDueDate })),
-    ].sort(
-      (a, b) =>
-        new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime(),
-    );
-
-    setUpcoming(up);
 
     // §3.6 Insight freshness: generate once per mount if stale.
     // Keyed on the last GENERATION date (dismissed rows included) rather than on
@@ -582,10 +549,11 @@ const DashboardScreen = ({ navigation }: any) => {
   // fixed order — it walks the user's resolved layout and looks each id up
   // here, so reordering and hiding are pure data changes.
   const widgetSections: Partial<Record<WidgetId, React.ReactNode>> = {
-    // Upcoming bills — subscriptions, EMIs and card payments in the next 30d.
+    // Upcoming — bills due this cycle, and one swipe away, what to set aside.
     upcomingBills: (
-      <UpcomingBillsWidget
+      <UpcomingWidget
         bills={upcomingBills}
+        planned={plannedContributions}
         currency={currency}
         masked={preferences.hideAmounts}
         onPressBill={(bill: UpcomingBill) => {
@@ -599,9 +567,20 @@ const DashboardScreen = ({ navigation }: any) => {
             });
           }
         }}
-        onSeeAll={() => {
+        onPressPlanned={(item: PlannedContribution) => {
+          triggerHaptic();
+          navigation.navigate("Finances", {
+            initialTab: "goals",
+            highlightId: item.refId,
+          });
+        }}
+        onSeeAllBills={() => {
           triggerHaptic();
           navigation.navigate("Finances", { initialTab: "subs" });
+        }}
+        onSeeAllGoals={() => {
+          triggerHaptic();
+          navigation.navigate("Finances", { initialTab: "goals" });
         }}
       />
     ),
@@ -1122,174 +1101,6 @@ const DashboardScreen = ({ navigation }: any) => {
           </Card>
         )
     ),
-    // §3.11 Upcoming Section — restyled
-    upcomingCarousel: (
-         upcoming.length > 0 && (
-          <View style={{ marginBottom: 24 }}>
-            <SectionLabel style={{ marginBottom: 14 }}>
-              Upcoming commitments
-            </SectionLabel>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={{ marginHorizontal: -24 }}
-              contentContainerStyle={{
-                paddingHorizontal: 24,
-                paddingRight: 64,
-              }}
-            >
-              {upcoming.map((item, idx) => {
-                const color =
-                  item.type === "goal"
-                    ? colors.credit
-                    : colors.debit;
-                const daysLeft = getDaysLeft(item.date);
-                const isOverdue = daysLeft === "Overdue";
-
-                return (
-                  <MotiView
-                    key={idx}
-                    from={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    transition={{
-                      type: "timing",
-                      duration: 240,
-                      delay: idx * 40,
-                    }}
-                    style={{ marginRight: 12, width: 240 }}
-                  >
-                    <Card
-                      onPress={() => {
-                        triggerHaptic();
-                        navigation.navigate("Finances", {
-                          initialTab:
-                            item.type === "goal"
-                              ? "goals"
-                              : item.type === "loan"
-                                ? "loans"
-                                : "subs",
-                          highlightId: item.id,
-                        });
-                      }}
-                      style={{ padding: 16 }}
-                    >
-                      {/* Top row: IconTile + type badge + days pill */}
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          marginBottom: 12,
-                        }}
-                      >
-                        <View
-                          style={{
-                            flexDirection: "row",
-                            alignItems: "center",
-                            gap: 8,
-                          }}
-                        >
-                          <IconTile color={color} size={28}>
-                            {item.type === "goal" ? (
-                              <LucideTarget color={color} size={14} />
-                            ) : item.type === "loan" ? (
-                              <LucideLandmark color={color} size={14} />
-                            ) : (
-                              <LucideRepeat color={color} size={14} />
-                            )}
-                          </IconTile>
-                          <ThemedText
-                            font="signal"
-                            type="secondary"
-                            style={{
-                              fontSize: 9,
-                              textTransform: "uppercase",
-                              letterSpacing: 1,
-                            }}
-                          >
-                            {item.type === "goal"
-                              ? "Goal"
-                              : item.type === "loan"
-                                ? "EMI"
-                                : "Sub"}
-                          </ThemedText>
-                        </View>
-                        <View
-                          style={{
-                            paddingHorizontal: 8,
-                            paddingVertical: 2,
-                            borderRadius: 99,
-                            backgroundColor: isOverdue
-                              ? colors.alertSoft
-                              : colors.translucent,
-                          }}
-                        >
-                          <ThemedText
-                            font="signal"
-                            style={{
-                              fontSize: 9,
-                              fontFamily: fonts.signalBold,
-                              color: isOverdue
-                                ? colors.danger
-                                : colors.secondary,
-                            }}
-                          >
-                            {daysLeft}
-                          </ThemedText>
-                        </View>
-                      </View>
-                      <ThemedText
-                        style={{ fontFamily: fonts.textSemibold, fontSize: 14 }}
-                        numberOfLines={1}
-                      >
-                        {item.name}
-                      </ThemedText>
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          justifyContent: "space-between",
-                          alignItems: "flex-end",
-                          marginTop: 12,
-                        }}
-                      >
-                        <ThemedText
-                          font="signal"
-                          type="secondary"
-                          style={{ fontSize: 11 }}
-                        >
-                          {new Date(item.date).toLocaleDateString("en-IN", {
-                            day: "numeric",
-                            month: "short",
-                          })}
-                        </ThemedText>
-                        <ThemedText
-                          style={{
-                            fontFamily: fonts.signalBold,
-                            fontSize: 16,
-                            color: colors.primary,
-                            fontVariant: ["tabular-nums"],
-                          }}
-                        >
-                          {formatAmount(item.amount || item.emiAmount || 0)}
-                        </ThemedText>
-                      </View>
-                    </Card>
-                  </MotiView>
-                );
-              })}
-            </ScrollView>
-            {/* §3.13 Celebration overlay */}
-            {celebrationTrigger > 0 && (
-              <ResonanceRings
-                trigger={celebrationTrigger}
-                color={colors.success}
-                size={120}
-                style={{ alignSelf: "center", marginTop: -60 }}
-              />
-            )}
-          </View>
-        )
-    ),
     // §3.5 Pulse strip — 3 stat tiles
     pulseStrip: (
         <View style={{ flexDirection: "row", gap: 10, marginBottom: 24 }}>
@@ -1657,6 +1468,19 @@ const DashboardScreen = ({ navigation }: any) => {
         {orderedWidgetIds.map((id) => (
           <React.Fragment key={id}>{widgetSections[id]}</React.Fragment>
         ))}
+
+        {/* §3.13 Goal-completion celebration. Rendered at the screen level
+            rather than inside a widget: it used to live in the commitments
+            carousel, which is off by default, so finishing a goal celebrated
+            into a hidden widget. */}
+        {celebrationTrigger > 0 && (
+          <ResonanceRings
+            trigger={celebrationTrigger}
+            color={colors.success}
+            size={120}
+            style={{ alignSelf: "center", marginBottom: 24 }}
+          />
+        )}
 
         {/* AI Setup Nudge Card */}
         {((!aiModelNudgeDismissed && aiModelStatus === "not_downloaded") ||
