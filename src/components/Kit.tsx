@@ -330,7 +330,7 @@ export const EmptyState: React.FC<{ icon?: React.ReactNode; title: string; subti
       {icon}
       <ThemedText style={{ fontFamily: fonts.displayBold, fontSize: 18, marginTop: 18, textAlign: 'center' }}>{title}</ThemedText>
       {subtitle && <ThemedText type="secondary" style={{ textAlign: 'center', marginTop: 8, fontSize: 14, lineHeight: 20 }}>{subtitle}</ThemedText>}
-      {action && <View style={{ marginTop: 22 }}>{action}</View>}
+      {action && <View style={{ marginTop: 24 }}>{action}</View>}
     </MotiView>
   );
 };
@@ -424,22 +424,34 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({ visible, onClose, titl
 
 // ─── PrimaryButton — filled amber/aqua action with mono label ───────────────
 
-export const PrimaryButton: React.FC<{ label: string; onPress: () => void; tone?: 'pulse' | 'echo' | 'danger'; disabled?: boolean; icon?: React.ReactNode; style?: StyleProp<ViewStyle> }> = ({ label, onPress, tone = 'pulse', disabled, icon, style }) => {
+/**
+ * `size` exists because this button is used two very different ways. Stretched
+ * across a sheet, 16pt of vertical padding reads as a solid, tappable bar. Sized
+ * to a short label in the middle of an empty screen, that same padding makes a
+ * squat slab — a 13pt line floating in a box twice its height. `compact` keeps
+ * the tap target honest (~40pt) and takes the pill radius the app's other
+ * inline actions use.
+ */
+export const PrimaryButton: React.FC<{ label: string; onPress: () => void; tone?: 'pulse' | 'echo' | 'danger'; disabled?: boolean; icon?: React.ReactNode; size?: 'default' | 'compact'; style?: StyleProp<ViewStyle> }> = ({ label, onPress, tone = 'pulse', disabled, icon, size = 'default', style }) => {
   const { colors, isDark } = useTheme();
   const bg = tone === 'echo' ? colors.success : tone === 'danger' ? colors.danger : colors.accent;
   const fg = colors.onAccent;
+  const compact = size === 'compact';
   return (
     <Pressable
       onPress={() => { if (!disabled) { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); onPress(); } }}
       disabled={disabled}
       style={[{
         flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-        backgroundColor: bg, borderRadius: radius.md, paddingVertical: 16, paddingHorizontal: 28,
+        backgroundColor: bg,
+        borderRadius: compact ? radius.pill : radius.md,
+        paddingVertical: compact ? 12 : 16,
+        paddingHorizontal: compact ? 24 : 28,
         opacity: disabled ? 0.4 : 1,
       }, style]}
     >
       {icon}
-      <Text style={{ fontFamily: fonts.signalBold, fontSize: 13, letterSpacing: 1, textTransform: 'uppercase', color: fg }}>{label}</Text>
+      <Text style={{ fontFamily: fonts.signalBold, fontSize: compact ? 12 : 13, letterSpacing: 1, textTransform: 'uppercase', color: fg }}>{label}</Text>
     </Pressable>
   );
 };

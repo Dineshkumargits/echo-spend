@@ -1000,7 +1000,7 @@ const SmartScanScreen = ({ navigation }: any) => {
                     ? `${newFoundCount} transaction${newFoundCount !== 1 ? "s" : ""} were auto-approved. New transactions land here as they arrive.`
                     : "No new transactions found since your last scan. New transactions land here as they arrive."
                 }
-                action={<PrimaryButton label="Back home" onPress={() => navigation.goBack()} tone="pulse" />}
+                action={<PrimaryButton label="Back home" onPress={() => navigation.goBack()} tone="pulse" size="compact" />}
               />
 
               <View

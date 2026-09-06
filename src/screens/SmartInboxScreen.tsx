@@ -462,7 +462,7 @@ const SmartInboxScreen = ({ navigation }: any) => {
           icon={<LucideInbox color={colors.muted} size={56} />}
           title="All quiet."
           subtitle="Every signal has been reviewed. New transactions land here as they arrive."
-          action={<PrimaryButton label="Back home" onPress={() => navigation.goBack()} tone="pulse" />}
+          action={<PrimaryButton label="Back home" onPress={() => navigation.goBack()} tone="pulse" size="compact" />}
         />
       ) : (
         <ScrollView

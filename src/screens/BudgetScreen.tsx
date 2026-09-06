@@ -603,7 +603,7 @@ const BudgetScreen = () => {
               title="No budgets yet"
               subtitle="Set a limit for one category or a bundle — a parent category covers all its subcategories."
               action={
-                <PrimaryButton label="Set first budget" onPress={openCreate} />
+                <PrimaryButton label="Set first budget" onPress={openCreate} size="compact" />
               }
             />
           ) : (
