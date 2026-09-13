@@ -30,6 +30,9 @@ import {
   LucideEyeOff,
   LucideChevronRight,
   LucideLayoutGrid,
+  LucideZap,
+  LucideLock,
+  LucideCrown,
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { useStore } from "../store/useStore";
@@ -48,7 +51,7 @@ import {
   WavePoint,
   ResonanceRings,
 } from "../components/Signal";
-import { fonts, formatINR, budgetPaceColor } from "../theme/tokens";
+import { fonts, formatINR, budgetPaceColor, withAlpha } from "../theme/tokens";
 import { SignalRow, IconTile, Card } from "../components/Kit";
 import { useAIInsights } from "../hooks/useAIInsights";
 import { WidgetId, visibleWidgetIds } from "../components/dashboard/registry";
@@ -152,7 +155,7 @@ const DashboardScreen = ({ navigation }: any) => {
   // ── Existing state ──────────────────────────────────────────────────────────
   const [transactions, setTransactions] = React.useState<Transaction[]>([]);
   const [accounts, setAccounts] = React.useState<Account[]>([]);
-  const { canAdd } = useEntitlement();
+  const { canAdd, entitlement, isPro, trialDaysLeft } = useEntitlement();
   const [categories, setCategories] = React.useState<Category[]>([]);
   const [monthlySpend, setMonthlySpend] = useState(0);
   const [unconfirmedCount, setUnconfirmedCount] = useState(0);
@@ -1378,7 +1381,117 @@ const DashboardScreen = ({ navigation }: any) => {
               alignItems: "center",
             }}
           >
-            <SectionLabel>Echo Spend</SectionLabel>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <SectionLabel>Echo Spend</SectionLabel>
+              {isPro && entitlement.source === "trial" && (
+                <TouchableOpacity
+                  onPress={() => {
+                    triggerHaptic();
+                    navigation.navigate("Paywall", { trigger: "trial_ended" });
+                  }}
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 4,
+                    paddingHorizontal: 8,
+                    paddingVertical: 3,
+                    borderRadius: 99,
+                    backgroundColor: withAlpha(colors.accent, "18"),
+                    borderWidth: 1,
+                    borderColor: withAlpha(colors.accent, "35"),
+                  }}
+                >
+                  <LucideZap color={colors.accent} size={11} />
+                  <ThemedText style={{ fontSize: 10, fontWeight: "700", color: colors.accent }}>
+                    {trialDaysLeft === 0 ? "Trial ends today" : `${trialDaysLeft}d trial left`}
+                  </ThemedText>
+                </TouchableOpacity>
+              )}
+              {isPro && entitlement.source === "founder" && (
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 4,
+                    paddingHorizontal: 8,
+                    paddingVertical: 3,
+                    borderRadius: 99,
+                    backgroundColor: "rgba(245, 158, 11, 0.15)",
+                    borderWidth: 1,
+                    borderColor: "rgba(245, 158, 11, 0.35)",
+                  }}
+                >
+                  <LucideCrown color="#F59E0B" size={11} />
+                  <ThemedText style={{ fontSize: 10, fontWeight: "700", color: "#F59E0B" }}>
+                    Founder
+                  </ThemedText>
+                </View>
+              )}
+              {isPro && entitlement.source === "lifetime" && (
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 4,
+                    paddingHorizontal: 8,
+                    paddingVertical: 3,
+                    borderRadius: 99,
+                    backgroundColor: withAlpha(colors.accent, "18"),
+                    borderWidth: 1,
+                    borderColor: withAlpha(colors.accent, "35"),
+                  }}
+                >
+                  <LucideSparkles color={colors.accent} size={11} />
+                  <ThemedText style={{ fontSize: 10, fontWeight: "700", color: colors.accent }}>
+                    Lifetime Pro
+                  </ThemedText>
+                </View>
+              )}
+              {isPro && entitlement.source === "play_sub" && (
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 4,
+                    paddingHorizontal: 8,
+                    paddingVertical: 3,
+                    borderRadius: 99,
+                    backgroundColor: withAlpha(colors.accent, "18"),
+                    borderWidth: 1,
+                    borderColor: withAlpha(colors.accent, "35"),
+                  }}
+                >
+                  <LucideSparkles color={colors.accent} size={11} />
+                  <ThemedText style={{ fontSize: 10, fontWeight: "700", color: colors.accent }}>
+                    Echo Pro
+                  </ThemedText>
+                </View>
+              )}
+              {!isPro && (
+                <TouchableOpacity
+                  onPress={() => {
+                    triggerHaptic();
+                    navigation.navigate("Paywall", { trigger: "trial_ended" });
+                  }}
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 4,
+                    paddingHorizontal: 8,
+                    paddingVertical: 3,
+                    borderRadius: 99,
+                    backgroundColor: withAlpha(colors.secondary, "14"),
+                    borderWidth: 1,
+                    borderColor: withAlpha(colors.secondary, "30"),
+                  }}
+                >
+                  <LucideLock color={colors.accent} size={10} />
+                  <ThemedText style={{ fontSize: 10, fontWeight: "700", color: colors.primary }}>
+                    Free Plan · Upgrade
+                  </ThemedText>
+                </TouchableOpacity>
+              )}
+            </View>
             <View style={{ flexDirection: "row", gap: 6 }}>
               <TouchableOpacity
                 onPress={() => {

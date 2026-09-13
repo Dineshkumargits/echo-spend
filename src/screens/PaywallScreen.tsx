@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
 import { View, ScrollView, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
@@ -111,10 +111,35 @@ const VALUE_ROWS = [
 
 const PLAN_ORDER: BillingPlanId[] = ['annual', 'lifetime', 'monthly'];
 
-const PLAN_META: Record<BillingPlanId, { label: string; note: string; badge?: string }> = {
-  annual: { label: 'Yearly', note: 'Billed once a year', badge: 'Best value' },
-  lifetime: { label: 'Lifetime', note: 'Pay once. No renewal, ever.', badge: 'No subscription' },
-  monthly: { label: 'Monthly', note: 'Cancel any time', badge: undefined },
+const PLAN_META: Record<
+  BillingPlanId,
+  {
+    label: string;
+    note: string;
+    badge?: string;
+    savingsBadge?: string;
+    anchorPrice?: string;
+    monthlyEquivalent?: string;
+  }
+> = {
+  annual: {
+    label: 'Yearly',
+    note: 'Billed once a year · Less than ₹1.5/day',
+    badge: 'BEST VALUE',
+    savingsBadge: 'SAVE 58%',
+    monthlyEquivalent: '₹41/mo',
+  },
+  lifetime: {
+    label: 'Lifetime',
+    note: 'Pay once. Forever Pro access. No renewal, ever.',
+    badge: 'SPECIAL OFFER',
+    anchorPrice: '₹2,499',
+  },
+  monthly: {
+    label: 'Monthly',
+    note: 'Cancel any time in Google Play',
+    badge: undefined,
+  },
 };
 
 export const PaywallScreen = () => {
@@ -123,7 +148,9 @@ export const PaywallScreen = () => {
   const route = useRoute<any>();
   const trigger: PaywallTrigger = route.params?.trigger ?? 'settings';
   const hapticsEnabled = useStore((s) => s.preferences.hapticsEnabled);
-  const { isPro } = useEntitlement();
+  const { isPro, entitlement, trialDaysLeft } = useEntitlement();
+  const initialIsPro = useRef(isPro);
+  const initialSource = useRef(entitlement.source);
 
   const [offerings, setOfferings] = useState<Offerings>({});
   const [loading, setLoading] = useState(true);
@@ -145,9 +172,13 @@ export const PaywallScreen = () => {
     loadOfferings()
       .then((o) => {
         if (!alive) return;
-        setOfferings(o);
-        // Never leave a plan selected that the store did not return.
-        if (!o.annual) setSelected(o.lifetime ? 'lifetime' : 'monthly');
+        const completeOfferings: Offerings = {
+          annual: (o.annual && o.annual.displayPrice) ? o.annual : (__DEV__ ? { planId: 'annual', displayPrice: '₹799/yr', sku: 'echo_pro_sub' } : o.annual),
+          monthly: (o.monthly && o.monthly.displayPrice) ? o.monthly : (__DEV__ ? { planId: 'monthly', displayPrice: '₹99/mo', sku: 'echo_pro_sub' } : o.monthly),
+          lifetime: (o.lifetime && o.lifetime.displayPrice) ? o.lifetime : (__DEV__ ? { planId: 'lifetime', displayPrice: '₹2,499', sku: 'lifetime' } : o.lifetime),
+        };
+        setOfferings(completeOfferings);
+        if (!completeOfferings.annual) setSelected(completeOfferings.lifetime ? 'lifetime' : 'monthly');
       })
       .finally(() => alive && setLoading(false));
     return () => {
@@ -173,11 +204,17 @@ export const PaywallScreen = () => {
     return unsubscribe;
   }, []);
 
-  // Dismiss once the entitlement actually flips, wherever the grant came from —
-  // this purchase, a restore, or one that cleared in the background.
+  // Dismiss once the entitlement actually flips from free/trial to paid,
+  // wherever the grant came from — this purchase, a restore, or one that cleared in the background.
   useEffect(() => {
-    if (isPro && navigation.canGoBack()) navigation.goBack();
-  }, [isPro, navigation]);
+    const becamePro = !initialIsPro.current && isPro;
+    const upgradedFromTrial = initialSource.current === 'trial' && entitlement.source === 'play_sub';
+    const upgradedToLifetime = entitlement.source === 'lifetime' && initialSource.current !== 'lifetime';
+
+    if (becamePro || upgradedFromTrial || upgradedToLifetime) {
+      if (navigation.canGoBack()) navigation.goBack();
+    }
+  }, [isPro, entitlement.source, navigation]);
 
   const handleBuy = async () => {
     const offer: BillingOffer | undefined = offerings[selected];
@@ -185,6 +222,19 @@ export const PaywallScreen = () => {
     tap(Haptics.ImpactFeedbackStyle.Medium);
     setBusy(true);
     try {
+      if (__DEV__ && !offer.offerToken) {
+        // Fallback for simulation / emulator testing
+        if (selected === 'lifetime') {
+          useStore.getState().setProEntitlement({ tier: 'pro', source: 'lifetime', expiresAt: null }, new Date().toISOString());
+          notify.success('Unlocked!', 'Echo Pro lifetime access activated');
+        } else {
+          useStore.getState().setProEntitlement({ tier: 'pro', source: 'play_sub', expiresAt: null }, new Date().toISOString());
+          notify.success('Subscribed!', 'Echo Pro active');
+        }
+        setBusy(false);
+        if (navigation.canGoBack()) navigation.goBack();
+        return;
+      }
       await startPurchase(offer);
     } catch (e: any) {
       setBusy(false);
@@ -243,6 +293,19 @@ export const PaywallScreen = () => {
           ))}
         </View>
 
+        {isPro && entitlement.source === 'trial' && (
+          <View style={[styles.notice, { borderColor: colors.accent, backgroundColor: withAlpha(colors.accent, '10'), marginTop: 20 }]}>
+            <ThemedText style={[styles.valueTitle, { color: colors.accent }]}>
+              {trialDaysLeft != null && trialDaysLeft > 0
+                ? `${trialDaysLeft} Day${trialDaysLeft === 1 ? '' : 's'} Remaining in Free Trial`
+                : 'Free Trial Active'}
+            </ThemedText>
+            <ThemedText type="secondary" style={styles.noticeText}>
+              Upgrading now extends your Echo Pro access seamlessly after your free trial finishes.
+            </ThemedText>
+          </View>
+        )}
+
         {loading ? (
           <View style={styles.loading}>
             <ActivityIndicator color={colors.accent} />
@@ -273,6 +336,13 @@ export const PaywallScreen = () => {
               const meta = PLAN_META[planId];
               const active = selected === planId;
 
+              let priceDisplay = offer.displayPrice || (planId === 'lifetime' ? '₹1,499.00' : planId === 'annual' ? '₹499.00' : '₹99.00');
+              if (planId === 'annual' && !priceDisplay.includes('/')) {
+                priceDisplay = `${priceDisplay}/yr`;
+              } else if (planId === 'monthly' && !priceDisplay.includes('/')) {
+                priceDisplay = `${priceDisplay}/mo`;
+              }
+
               return (
                 <Pressable
                   key={planId}
@@ -291,18 +361,39 @@ export const PaywallScreen = () => {
                       {meta.label}
                     </ThemedText>
                     {!!meta.badge && (
-                      <View style={[styles.badge, { backgroundColor: withAlpha(colors.accent, '1F') }]}>
-                        <ThemedText style={[styles.badgeText, { color: colors.accent }]}>
+                      <View style={[styles.badge, { backgroundColor: withAlpha(meta.badge === 'BEST VALUE' ? colors.accent : '#FFD700', '1F') }]}>
+                        <ThemedText style={[styles.badgeText, { color: meta.badge === 'BEST VALUE' ? colors.accent : '#FFD700' }]}>
                           {meta.badge}
+                        </ThemedText>
+                      </View>
+                    )}
+                    {!!meta.savingsBadge && (
+                      <View style={[styles.badge, { backgroundColor: withAlpha(colors.accent, '18') }]}>
+                        <ThemedText style={[styles.badgeText, { color: colors.accent }]}>
+                          {meta.savingsBadge}
                         </ThemedText>
                       </View>
                     )}
                     <View style={styles.flex} />
                     {active && <LucideCheck color={colors.accent} size={18} />}
                   </View>
-                  <ThemedText style={[styles.planPrice, { color: colors.primary }]}>
-                    {offer.displayPrice}
-                  </ThemedText>
+
+                  <View style={styles.planPriceRow}>
+                    <ThemedText style={[styles.planPrice, { color: colors.primary }]}>
+                      {priceDisplay}
+                    </ThemedText>
+                    {!!meta.anchorPrice && (
+                      <ThemedText style={[styles.planAnchor, { color: colors.muted }]}>
+                        {meta.anchorPrice}
+                      </ThemedText>
+                    )}
+                    {!!meta.monthlyEquivalent && (
+                      <ThemedText style={[styles.planEquivalent, { color: colors.accent }]}>
+                        ({meta.monthlyEquivalent})
+                      </ThemedText>
+                    )}
+                  </View>
+
                   <ThemedText type="muted" style={styles.planNote}>
                     {meta.note}
                   </ThemedText>
@@ -311,6 +402,42 @@ export const PaywallScreen = () => {
             })}
           </View>
         )}
+
+        {/* Free vs Pro Comparison Matrix */}
+        <View style={{ marginTop: 28 }}>
+          <ThemedText style={[styles.valueTitle, { color: colors.primary, marginBottom: 12 }]}>
+            Free vs. Echo Pro Comparison
+          </ThemedText>
+          <View style={{ borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, overflow: 'hidden', backgroundColor: colors.surface }}>
+            {[
+              { label: 'Real-time SMS Capture', free: 'Free', pro: 'Free' },
+              { label: 'SMS Archive Depth', free: '90 Days', pro: 'Full Archive' },
+              { label: 'Analytics & Trends', free: '30 Days', pro: 'Unlimited' },
+              { label: 'Accounts & Budgets', free: '3 Max', pro: 'Unlimited' },
+              { label: 'Background Backups', free: 'Manual', pro: 'Automated' },
+              { label: 'Offline Data Privacy', free: '100% Local', pro: '100% Local' },
+            ].map((row, idx) => (
+              <View
+                key={row.label}
+                style={{
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  paddingHorizontal: 14,
+                  paddingVertical: 10,
+                  borderTopWidth: idx > 0 ? 1 : 0,
+                  borderTopColor: colors.border,
+                }}
+              >
+                <ThemedText style={{ fontSize: 12.5, color: colors.primary, flex: 1 }}>{row.label}</ThemedText>
+                <View style={{ flexDirection: 'row', gap: 16, alignItems: 'center' }}>
+                  <ThemedText style={{ fontSize: 11.5, color: colors.secondary, width: 60, textAlign: 'right' }}>{row.free}</ThemedText>
+                  <ThemedText style={{ fontSize: 11.5, fontWeight: '700', color: colors.accent, width: 75, textAlign: 'right' }}>{row.pro}</ThemedText>
+                </View>
+              </View>
+            ))}
+          </View>
+        </View>
       </ScrollView>
 
       <View style={styles.footer}>
@@ -356,8 +483,11 @@ const styles = StyleSheet.create({
   planLabel: { fontFamily: fonts.textSemibold, fontSize: 14 },
   badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.pill },
   badgeText: { fontFamily: fonts.signal, fontSize: 9, letterSpacing: 0.4, textTransform: 'uppercase' },
-  planPrice: { fontFamily: fonts.displayBold, fontSize: 22, marginTop: 8, fontVariant: ['tabular-nums'] },
-  planNote: { fontSize: 11.5, marginTop: 2 },
+  planPriceRow: { flexDirection: 'row', alignItems: 'baseline', marginTop: 8, gap: 4 },
+  planPrice: { fontFamily: fonts.displayBold, fontSize: 22, fontVariant: ['tabular-nums'] },
+  planAnchor: { fontFamily: fonts.textMedium, fontSize: 15, textDecorationLine: 'line-through', marginLeft: 6 },
+  planEquivalent: { fontFamily: fonts.signal, fontSize: 12, fontWeight: '700', marginLeft: 6 },
+  planNote: { fontSize: 11.5, marginTop: 4 },
   footer: { paddingHorizontal: 24, paddingBottom: 20, paddingTop: 8, gap: 10 },
   restore: { alignItems: 'center', paddingVertical: 6 },
   restoreText: { fontSize: 13, fontFamily: fonts.textSemibold },

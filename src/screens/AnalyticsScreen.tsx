@@ -24,8 +24,11 @@ import {
   LucideRefreshCw,
   LucideFlame,
   LucideChevronRight,
+  LucideLock,
 } from "lucide-react-native";
 import { useNavigation } from "@react-navigation/native";
+import * as Haptics from "expo-haptics";
+import { useEntitlement } from "../hooks/useEntitlement";
 import { renderCategoryIcon } from "../components/CategoryManager";
 import { notify } from "../utils/notify";
 import { SectionLabel, AmountText } from "../components/Signal";
@@ -39,6 +42,7 @@ import {
   DonutSegment,
 } from "../components/AnalyticsKit";
 import { Gate } from "../components/Gate";
+import ProBadge from "../components/ProBadge";
 import { fonts, budgetPaceColor } from "../theme/tokens";
 import {
   getSpendTrend,
@@ -115,8 +119,15 @@ const AnalyticsScreen = () => {
   const [loadingTxns, setLoadingTxns] = useState(false);
   const { getInsights, generateInsights } = useAIInsights();
   const { preferences } = useStore();
+  const { isPro, locked } = useEntitlement();
   const currency = preferences?.currency ?? "₹";
   const onFill = colors.onAccent;
+
+  const triggerHaptic = useCallback(() => {
+    if (preferences.hapticsEnabled) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    }
+  }, [preferences.hapticsEnabled]);
 
 
   const INSIGHT_COLORS: Record<string, string> = {
@@ -460,31 +471,45 @@ const AnalyticsScreen = () => {
             className="flex-row p-1 rounded-full"
             style={{ backgroundColor: colors.translucent }}
           >
-            {TREND_PERIODS.map((d) => (
-              <TouchableOpacity
-                key={d}
-                onPress={() => setTrendDays(d)}
-                className="px-3.5 py-1.5 rounded-full"
-                style={{
-                  backgroundColor:
-                    trendDays === d ? colors.accent : "transparent",
-                  ...(trendDays === d && {
-                    shadowColor: "#000",
-                    shadowOffset: { width: 0, height: 1 },
-                    shadowOpacity: 0.15,
-                    shadowRadius: 2,
-                    elevation: 1,
-                  }),
-                }}
-              >
-                <ThemedText
-                  className="text-xs font-bold"
-                  style={{ color: trendDays === d ? onFill : colors.secondary }}
+            {TREND_PERIODS.map((d) => {
+              const isPeriodGated = d > 30 && !isPro;
+              return (
+                <TouchableOpacity
+                  key={d}
+                  onPress={() => {
+                    triggerHaptic();
+                    if (isPeriodGated) {
+                      navigation.navigate("Paywall", { trigger: "analytics_gate" });
+                      return;
+                    }
+                    setTrendDays(d);
+                  }}
+                  className="px-3.5 py-1.5 rounded-full flex-row items-center"
+                  style={{
+                    backgroundColor:
+                      trendDays === d ? colors.accent : "transparent",
+                    ...(trendDays === d && {
+                      shadowColor: "#000",
+                      shadowOffset: { width: 0, height: 1 },
+                      shadowOpacity: 0.15,
+                      shadowRadius: 2,
+                      elevation: 1,
+                    }),
+                    gap: 3,
+                  }}
                 >
-                  {d}D
-                </ThemedText>
-              </TouchableOpacity>
-            ))}
+                  <ThemedText
+                    className="text-xs font-bold"
+                    style={{ color: trendDays === d ? onFill : colors.secondary }}
+                  >
+                    {d}D
+                  </ThemedText>
+                  {isPeriodGated && (
+                    <LucideLock color={colors.secondary} size={10} />
+                  )}
+                </TouchableOpacity>
+              );
+            })}
           </View>
           <View
             className="flex-row p-1 rounded-full"
@@ -807,7 +832,14 @@ const AnalyticsScreen = () => {
                       >
                         <TouchableOpacity
                           activeOpacity={0.7}
-                          onPress={() => drillCategory(parentName)}
+                          onPress={() => {
+                            if (locked("categoryDrilldown")) {
+                              triggerHaptic();
+                              navigation.navigate("Paywall", { trigger: "analytics_gate" });
+                              return;
+                            }
+                            drillCategory(parentName);
+                          }}
                           className="flex-row justify-between items-center mb-2"
                         >
                           <View className="flex-row items-center flex-1">
@@ -949,12 +981,15 @@ const AnalyticsScreen = () => {
 
         {/* Weekly rhythm — premium */}
         <View className="mb-6">
-          <ThemedText
-            className="text-lg mb-3"
-            style={{ fontFamily: fonts.displayBold }}
-          >
-            When you spend
-          </ThemedText>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+            <ThemedText
+              className="text-lg"
+              style={{ fontFamily: fonts.displayBold }}
+            >
+              When you spend
+            </ThemedText>
+            <ProBadge trigger="analytics_gate" />
+          </View>
           <Gate
             feature="spendingPatterns"
             title="Unlock spending patterns"
@@ -970,12 +1005,15 @@ const AnalyticsScreen = () => {
         {/* Top merchants — premium */}
         {merchants.length > 0 && (
           <View className="mb-6">
-            <ThemedText
-              className="text-lg mb-3"
-              style={{ fontFamily: fonts.displayBold }}
-            >
-              Top merchants · {trendDays}d
-            </ThemedText>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <ThemedText
+                className="text-lg"
+                style={{ fontFamily: fonts.displayBold }}
+              >
+                Top merchants · {trendDays}d
+              </ThemedText>
+              <ProBadge trigger="analytics_gate" />
+            </View>
             <Gate
               feature="merchantAnalytics"
               title="Unlock merchant analytics"
@@ -1019,109 +1057,122 @@ const AnalyticsScreen = () => {
 
         {/* Monthly income vs expense — mirrored signal bars */}
         {monthlyTotals.length > 0 && (
-          <View className="p-4 rounded-apple-md border mb-6" style={cardStyle}>
-            <SectionLabel>
-              In vs out · last {monthlyTotals.length} cycles
-            </SectionLabel>
-            <View className="flex-row justify-between mt-3 mb-2">
+          <View className="mb-6">
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
               <ThemedText
-                font="signal"
-                style={{ fontSize: 9, color: colors.debit }}
+                className="text-lg"
+                style={{ fontFamily: fonts.displayBold }}
               >
-                ◀ OUT
+                In vs out · cycles
               </ThemedText>
-              <ThemedText
-                font="signal"
-                style={{ fontSize: 9, color: colors.credit }}
-              >
-                IN ▶
-              </ThemedText>
+              <ProBadge trigger="analytics_gate" />
             </View>
-            {monthlyTotals.map((row, i) => {
-              const expW = Math.max(
-                2,
-                (Number(row.expense) / monthlyMax) * 100,
-              );
-              const incW = Math.max(2, (Number(row.income) / monthlyMax) * 100);
-              const net = Number(row.income) - Number(row.expense);
-              return (
-                <MotiView
-                  key={row.start ?? row.month}
-                  from={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: i * 60 }}
-                  className="mb-3"
-                >
-                  <View className="flex-row items-center" style={{ gap: 8 }}>
-                    <View
-                      className="flex-1 flex-row justify-end items-center"
-                      style={{ gap: 6 }}
-                    >
-                      <ThemedText
-                        font="signal"
-                        style={{ fontSize: 9, color: colors.secondary }}
-                      >
-                        {fmtShort(Number(row.expense))}
-                      </ThemedText>
-                      <View
-                        style={{
-                          width: `${expW * 0.6}%`,
-                          height: 10,
-                          borderRadius: 5,
-                          backgroundColor: colors.debit,
-                          opacity: 0.9,
-                        }}
-                      />
-                    </View>
-                    <ThemedText
-                      font="signal"
-                      style={{
-                        fontSize: 9,
-                        color: colors.primary,
-                        width: 32,
-                        textAlign: "center",
-                      }}
-                    >
-                      {new Date(row.month + "-01").toLocaleDateString("en-IN", {
-                        month: "short",
-                      })}
-                    </ThemedText>
-                    <View
-                      className="flex-1 flex-row justify-start items-center"
-                      style={{ gap: 6 }}
-                    >
-                      <View
-                        style={{
-                          width: `${incW * 0.6}%`,
-                          height: 10,
-                          borderRadius: 5,
-                          backgroundColor: colors.credit,
-                          opacity: 0.9,
-                        }}
-                      />
-                      <ThemedText
-                        font="signal"
-                        style={{ fontSize: 9, color: colors.secondary }}
-                      >
-                        {fmtShort(Number(row.income))}
-                      </ThemedText>
-                    </View>
-                  </View>
+            <Gate feature="cycleComparison" title="Unlock cycle comparison">
+              <View className="p-4 rounded-apple-md border" style={cardStyle}>
+                <SectionLabel>
+                  In vs out · last {monthlyTotals.length} cycles
+                </SectionLabel>
+                <View className="flex-row justify-between mt-3 mb-2">
                   <ThemedText
                     font="signal"
-                    style={{
-                      fontSize: 8,
-                      color: net >= 0 ? colors.credit : colors.danger,
-                      textAlign: "center",
-                      marginTop: 2,
-                    }}
+                    style={{ fontSize: 9, color: colors.debit }}
                   >
-                    net {net >= 0 ? "+" : "−"}
-                    {fmtShort(Math.abs(net))}
+                    ◀ OUT
                   </ThemedText>
-                </MotiView>
-              );
-            })}
+                  <ThemedText
+                    font="signal"
+                    style={{ fontSize: 9, color: colors.credit }}
+                  >
+                    IN ▶
+                  </ThemedText>
+                </View>
+                {monthlyTotals.map((row, i) => {
+                  const expW = Math.max(
+                    2,
+                    (Number(row.expense) / monthlyMax) * 100,
+                  );
+                  const incW = Math.max(2, (Number(row.income) / monthlyMax) * 100);
+                  const net = Number(row.income) - Number(row.expense);
+                  return (
+                    <MotiView
+                      key={row.start ?? row.month}
+                      from={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ delay: i * 60 }}
+                      className="mb-3"
+                    >
+                      <View className="flex-row items-center" style={{ gap: 8 }}>
+                        <View
+                          className="flex-1 flex-row justify-end items-center"
+                          style={{ gap: 6 }}
+                        >
+                          <ThemedText
+                            font="signal"
+                            style={{ fontSize: 9, color: colors.secondary }}
+                          >
+                            {fmtShort(Number(row.expense))}
+                          </ThemedText>
+                          <View
+                            style={{
+                              width: `${expW * 0.6}%`,
+                              height: 10,
+                              borderRadius: 5,
+                              backgroundColor: colors.debit,
+                              opacity: 0.9,
+                            }}
+                          />
+                        </View>
+                        <ThemedText
+                          font="signal"
+                          style={{
+                            fontSize: 9,
+                            color: colors.primary,
+                            width: 32,
+                            textAlign: "center",
+                          }}
+                        >
+                          {new Date(row.month + "-01").toLocaleDateString("en-IN", {
+                            month: "short",
+                          })}
+                        </ThemedText>
+                        <View
+                          className="flex-1 flex-row justify-start items-center"
+                          style={{ gap: 6 }}
+                        >
+                          <View
+                            style={{
+                              width: `${incW * 0.6}%`,
+                              height: 10,
+                              borderRadius: 5,
+                              backgroundColor: colors.credit,
+                              opacity: 0.9,
+                            }}
+                          />
+                          <ThemedText
+                            font="signal"
+                            style={{ fontSize: 9, color: colors.secondary }}
+                          >
+                            {fmtShort(Number(row.income))}
+                          </ThemedText>
+                        </View>
+                      </View>
+                      <ThemedText
+                        font="signal"
+                        style={{
+                          fontSize: 8,
+                          color: net >= 0 ? colors.credit : colors.danger,
+                          textAlign: "center",
+                          marginTop: 2,
+                        }}
+                      >
+                        net {net >= 0 ? "+" : "−"}
+                        {fmtShort(Math.abs(net))}
+                      </ThemedText>
+                    </MotiView>
+                  );
+                })}
+              </View>
+            </Gate>
           </View>
         )}
 

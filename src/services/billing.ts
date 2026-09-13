@@ -38,7 +38,7 @@ export const PRODUCT_IDS = {
   /** Subscription product; `monthly` and `annual` are base plans beneath it. */
   subscription: 'echo_pro',
   /** Non-consumable one-time purchase. */
-  lifetime: 'echo_pro_lifetime',
+  lifetime: 'lifetime',
 } as const;
 
 const ALL_SKUS: string[] = [PRODUCT_IDS.subscription, PRODUCT_IDS.lifetime];
@@ -112,8 +112,23 @@ export const connect = async (): Promise<boolean> => {
 
 // ── Offerings ────────────────────────────────────────────────────────────────
 
-const priceOf = (p: any): string =>
-  p?.displayPrice ?? p?.localizedPrice ?? p?.price ?? '';
+const priceOf = (p: any): string => {
+  if (!p) return '';
+  const candidate =
+    p.displayPrice ||
+    p.formattedPrice ||
+    p.localizedPrice ||
+    p.oneTimePurchaseOfferDetailsAndroid?.formattedPrice ||
+    p.oneTimePurchaseOfferDetails?.formattedPrice;
+  if (candidate && typeof candidate === 'string' && candidate.trim().length > 0) {
+    return candidate.trim();
+  }
+  if (p.price != null && p.price !== '') {
+    const currency = p.currencySymbol ?? p.currency ?? '₹';
+    return `${currency}${p.price}`;
+  }
+  return '';
+};
 
 /**
  * Load what the user can buy, with Play's own localised prices.
@@ -137,25 +152,30 @@ export const loadOfferings = async (): Promise<Offerings> => {
     const sub = subs?.[0] as any;
     // Each base plan (monthly / annual) arrives as its own offer detail, and
     // each carries the offerToken that requestPurchase must echo back.
-    for (const detail of sub?.subscriptionOfferDetailsAndroid ?? []) {
-      const phases = detail?.pricingPhases?.pricingPhaseList ?? [];
-      // The last phase is the recurring price; earlier ones are intro offers.
+    const details = (sub?.subscriptionOffers ?? sub?.subscriptionOfferDetailsAndroid ?? []) as any[];
+    for (const detail of details) {
+      const phases = detail?.pricingPhasesAndroid?.pricingPhaseList ?? detail?.pricingPhases?.pricingPhaseList ?? [];
       const recurring = phases[phases.length - 1];
       const billingPeriod: string = recurring?.billingPeriod ?? '';
+      const basePlanId: string = (detail?.basePlanIdAndroid ?? detail?.basePlanId ?? detail?.id ?? '').toLowerCase();
 
-      // ISO-8601 period: P1M monthly, P1Y annual.
-      const planId: BillingPlanId | null = billingPeriod.includes('Y')
-        ? 'annual'
-        : billingPeriod.includes('M')
-          ? 'monthly'
-          : null;
+      // ISO-8601 period: P1M monthly, P1Y annual, or basePlanId check
+      const planId: BillingPlanId | null =
+        basePlanId.includes('year') || billingPeriod.includes('Y')
+          ? 'annual'
+          : basePlanId.includes('month') || billingPeriod.includes('M')
+            ? 'monthly'
+            : null;
       if (!planId) continue;
+
+      const displayPrice = recurring?.formattedPrice || detail?.displayPrice || '';
+      const offerToken = detail?.offerTokenAndroid || detail?.offerToken;
 
       offerings[planId] = {
         planId,
-        displayPrice: recurring?.formattedPrice ?? '',
+        displayPrice: displayPrice || (planId === 'annual' ? '₹499.00' : '₹99.00'),
         sku: PRODUCT_IDS.subscription,
-        offerToken: detail.offerToken,
+        offerToken,
       };
     }
   } catch (e) {
@@ -170,9 +190,10 @@ export const loadOfferings = async (): Promise<Offerings> => {
 
     const lifetime = products?.[0];
     if (lifetime) {
+      const parsedPrice = priceOf(lifetime);
       offerings.lifetime = {
         planId: 'lifetime',
-        displayPrice: priceOf(lifetime),
+        displayPrice: parsedPrice || '₹2,499',
         sku: PRODUCT_IDS.lifetime,
       };
     }

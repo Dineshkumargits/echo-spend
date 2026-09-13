@@ -100,8 +100,9 @@ export const FOUNDER_CUTOFF_ISO = '2026-09-06T00:00:00.000Z';
  */
 export const GRACE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
-/** Length of the no-card local trial. */
-export const TRIAL_DURATION_MS = 14 * 24 * 60 * 60 * 1000;
+/** Length of the no-card local trial (7 days: optimal conversion window). */
+export const TRIAL_DURATION_DAYS = 7;
+export const TRIAL_DURATION_MS = TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000;
 
 /** Minimum gap between Play round trips, outside of explicit user actions. */
 export const REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;

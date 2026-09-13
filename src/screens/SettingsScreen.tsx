@@ -48,6 +48,7 @@ import {
   LucideWallet,
   LucideCalendar,
   LucideArrowUpCircle,
+  LucideLock,
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { GoogleSignin } from "@react-native-google-signin/google-signin";
@@ -56,6 +57,7 @@ import { notify } from "../utils/notify";
 import { useStore } from "../store/useStore";
 import { useEntitlement } from '../hooks/useEntitlement';
 import { openManageSubscriptions } from '../services/billing';
+import ProBadge from '../components/ProBadge';
 import { SyncService } from "../services/sync";
 import { resetAllData } from "../services/database";
 import { useBiometric } from "../hooks/useBiometric";
@@ -70,7 +72,7 @@ import {
 } from "../services/updateChecker";
 import { TourGuideModal } from "../components/TourGuideModal";
 import { SectionLabel } from "../components/Signal";
-import { fonts, THEMES, themeSwatches } from "../theme/tokens";
+import { fonts, THEMES, themeSwatches, withAlpha } from "../theme/tokens";
 
 const extra = Constants.expoConfig?.extra ?? {};
 
@@ -100,6 +102,9 @@ const SettingsScreen = ({ navigation }: any) => {
     setAutoLockMinutes,
     toggleAutoSmsScan,
     updateInfo,
+    setLocalEntitlement,
+    setProEntitlement,
+    resetOnboarding,
   } = useStore();
 
   const aiModelStatus = useStore((s) => s.aiModelStatus);
@@ -411,12 +416,12 @@ const SettingsScreen = ({ navigation }: any) => {
 
   const handleBudgetAlertsToggle = async (value: boolean) => {
     triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
-    if (!value) {
-      toggleBudgetAlerts();
-      return;
-    }
     if (locked("budgetAlerts")) {
       navigation.navigate("Paywall", { trigger: "automation_toggle" });
+      return;
+    }
+    if (!value) {
+      toggleBudgetAlerts();
       return;
     }
 
@@ -428,12 +433,12 @@ const SettingsScreen = ({ navigation }: any) => {
 
   const handleRecurringAlertsToggle = async (value: boolean) => {
     triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
-    if (!value) {
-      toggleRecurringAlerts();
-      return;
-    }
     if (locked("billReminders")) {
       navigation.navigate("Paywall", { trigger: "automation_toggle" });
+      return;
+    }
+    if (!value) {
+      toggleRecurringAlerts();
       return;
     }
 
@@ -445,12 +450,12 @@ const SettingsScreen = ({ navigation }: any) => {
 
   const handleWeeklyDigestToggle = async (value: boolean) => {
     triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
-    if (!value) {
-      toggleWeeklyDigest();
-      return;
-    }
     if (locked("weeklyDigest")) {
       navigation.navigate("Paywall", { trigger: "automation_toggle" });
+      return;
+    }
+    if (!value) {
+      toggleWeeklyDigest();
       return;
     }
 
@@ -799,53 +804,132 @@ const SettingsScreen = ({ navigation }: any) => {
           {/* ── Echo Pro ── */}
           <Section title="Echo Pro" />
           <View
-            className="rounded-apple-md overflow-hidden"
+            className="rounded-apple-md overflow-hidden p-4"
             style={{
               backgroundColor: colors.surface,
               borderWidth: 1,
               borderColor: colors.border,
             }}
           >
-            <Row
-              icon={<LucideSparkles color={colors.accent} size={20} />}
-              label={
-                isPro
-                  ? entitlement.source === "trial"
-                    ? "Echo Pro trial active"
-                    : "Echo Pro is active"
-                  : "Upgrade to Echo Pro"
-              }
-              sub={
-                isPro
-                  ? onGrace
-                    ? "Offline — will re-check with Google Play"
-                    : entitlement.source === "lifetime"
-                      ? "Lifetime — thank you"
-                      : entitlement.source === "founder"
-                        ? "Founder access — thank you"
-                        : entitlement.source === "trial"
-                          ? trialDaysLeft === 0
-                            ? "Ends today"
-                            : `${trialDaysLeft} day${trialDaysLeft === 1 ? "" : "s"} left`
-                          : "Subscription active"
-                  : "Full history, deeper analysis and automation"
-              }
-              onPress={() =>
-                navigation.navigate("Paywall", { trigger: "settings" })
-              }
-            />
-            {isPro && entitlement.source === "play_sub" && (
-              <Row
-                icon={<LucideCreditCard color={colors.primary} size={20} />}
-                label="Manage subscription"
-                sub="Change plan or cancel in Google Play"
-                onPress={() => {
-                  triggerHaptic();
-                  openManageSubscriptions();
-                }}
-              />
-            )}
-          </View>
+                {isPro && entitlement.source === "trial" ? (
+                  <View style={{ gap: 12 }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                        <View style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: withAlpha(colors.accent, "20"), alignItems: "center", justifyContent: "center" }}>
+                          <LucideZap color={colors.accent} size={18} />
+                        </View>
+                        <View>
+                          <ThemedText style={{ fontSize: 16, fontWeight: "700" }}>
+                            {trialDaysLeft === 0 ? "Free Trial Ending Today" : `${trialDaysLeft ?? 7}-Day Free Trial Active`}
+                          </ThemedText>
+                          <ThemedText type="secondary" style={{ fontSize: 12 }}>
+                            {trialDaysLeft === 0 ? "Trial ends today" : `${trialDaysLeft} day${trialDaysLeft === 1 ? "" : "s"} remaining`}
+                          </ThemedText>
+                        </View>
+                      </View>
+                      <ProBadge trigger="settings" showAlways />
+                    </View>
+                    
+                    {/* Trial Progress Bar */}
+                    <View style={{ height: 6, borderRadius: 3, backgroundColor: withAlpha(colors.border, "60"), overflow: "hidden" }}>
+                      <View
+                        style={{
+                          height: "100%",
+                          width: `${Math.min(100, Math.max(0, ((7 - (trialDaysLeft ?? 0)) / 7) * 100))}%`,
+                          backgroundColor: colors.accent,
+                          borderRadius: 3,
+                        }}
+                      />
+                    </View>
+
+                    <TouchableOpacity
+                      onPress={() => {
+                        triggerHaptic();
+                        navigation.navigate("Paywall", { trigger: "settings" });
+                      }}
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        paddingTop: 8,
+                        borderTopWidth: 1,
+                        borderTopColor: colors.border,
+                      }}
+                    >
+                      <ThemedText style={{ fontSize: 13, fontWeight: "600", color: colors.accent }}>View Echo Pro Plans & Extend</ThemedText>
+                      <LucideChevronRight color={colors.accent} size={16} />
+                    </TouchableOpacity>
+                  </View>
+                ) : isPro && entitlement.source === "founder" ? (
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+                    <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: withAlpha("#FFD700", "20"), alignItems: "center", justifyContent: "center" }}>
+                      <LucideSparkles color="#FFD700" size={20} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <ThemedText style={{ fontSize: 16, fontWeight: "700" }}>Founder Access Active</ThemedText>
+                      <ThemedText type="secondary" style={{ fontSize: 12 }}>
+                        Permanent Pro — Thank you for backing Echo Spend early!
+                      </ThemedText>
+                    </View>
+                  </View>
+                ) : isPro && entitlement.source === "lifetime" ? (
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+                    <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: withAlpha(colors.accent, "20"), alignItems: "center", justifyContent: "center" }}>
+                      <LucideSparkles color={colors.accent} size={20} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <ThemedText style={{ fontSize: 16, fontWeight: "700" }}>Lifetime Pro Active</ThemedText>
+                      <ThemedText type="secondary" style={{ fontSize: 12 }}>
+                        Pay once, permanent access — Thank you!
+                      </ThemedText>
+                    </View>
+                  </View>
+                ) : isPro ? (
+                  <View style={{ gap: 10 }}>
+                    <Row
+                      icon={<LucideSparkles color={colors.accent} size={20} />}
+                      label="Echo Pro Subscription Active"
+                      sub={onGrace ? "Offline — will re-check with Google Play" : "Subscription active"}
+                      onPress={() => {
+                        triggerHaptic();
+                        navigation.navigate("Paywall", { trigger: "settings" });
+                      }}
+                    />
+                    {entitlement.source === "play_sub" && (
+                      <Row
+                        icon={<LucideCreditCard color={colors.primary} size={20} />}
+                        label="Manage subscription"
+                        sub="Change plan or cancel in Google Play"
+                        onPress={() => {
+                          triggerHaptic();
+                          openManageSubscriptions();
+                        }}
+                      />
+                    )}
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    onPress={() => {
+                      triggerHaptic();
+                      navigation.navigate("Paywall", { trigger: "settings" });
+                    }}
+                    style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}
+                  >
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 12, flex: 1 }}>
+                      <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: withAlpha(colors.accent, "20"), alignItems: "center", justifyContent: "center" }}>
+                        <LucideSparkles color={colors.accent} size={20} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <ThemedText style={{ fontSize: 16, fontWeight: "700" }}>Upgrade to Echo Pro</ThemedText>
+                        <ThemedText type="secondary" style={{ fontSize: 12 }}>
+                          Full history, deeper analysis & background automation
+                        </ThemedText>
+                      </View>
+                    </View>
+                    <LucideChevronRight color={colors.muted} size={18} />
+                  </TouchableOpacity>
+                )}
+              </View>
 
           {/* ── Appearance ── */}
           <Section title="Appearance" />
@@ -914,14 +998,22 @@ const SettingsScreen = ({ navigation }: any) => {
             Color Theme
           </ThemedText>
           <View className="flex-row flex-wrap justify-between">
-            {THEMES.map((t) => {
+            {THEMES.map((t, idx) => {
               const sw = themeSwatches(t, isDark ? "dark" : "light");
               const selected = themeId === t.id;
+              const isThemeGated = !isPro && idx >= 1;
               return (
                 <TouchableOpacity
                   key={t.id}
                   activeOpacity={0.85}
-                  onPress={() => setThemeId(t.id)}
+                  onPress={() => {
+                    triggerHaptic();
+                    if (isThemeGated) {
+                      navigation.navigate("Paywall", { trigger: "settings" });
+                      return;
+                    }
+                    setThemeId(t.id);
+                  }}
                   style={{
                     width: "48.5%",
                     marginBottom: 12,
@@ -931,6 +1023,7 @@ const SettingsScreen = ({ navigation }: any) => {
                     backgroundColor: sw.bg,
                     padding: 12,
                     overflow: "hidden",
+                    opacity: isThemeGated && !selected ? 0.8 : 1,
                   }}
                 >
                   {/* Mini preview: a surface bar + swatch dots */}
@@ -970,6 +1063,22 @@ const SettingsScreen = ({ navigation }: any) => {
                         opacity: 0.35,
                       }}
                     />
+                    {isThemeGated && (
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 2,
+                          paddingHorizontal: 5,
+                          paddingVertical: 1,
+                          borderRadius: 6,
+                          backgroundColor: withAlpha(colors.accent, "25"),
+                        }}
+                      >
+                        <LucideLock color={colors.accent} size={9} />
+                        <ThemedText font="signal" style={{ fontSize: 8, fontWeight: "700", color: colors.accent }}>PRO</ThemedText>
+                      </View>
+                    )}
                   </View>
                   <View
                     className="flex-row items-center justify-between"
@@ -1246,19 +1355,27 @@ const SettingsScreen = ({ navigation }: any) => {
             <Row
               icon={
                 <LucideBell
-                  color={alertsBlocked ? colors.secondary : colors.primary}
+                  color={alertsBlocked || locked("budgetAlerts") ? colors.secondary : colors.primary}
                   size={20}
                 />
               }
-              label="Budget Alerts"
+              label={
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <ThemedText style={{ fontSize: 16, color: colors.primary, fontFamily: fonts.textSemibold }}>Budget Alerts</ThemedText>
+                  <ProBadge trigger="automation_toggle" />
+                </View>
+              }
               sub={
                 alertsBlocked
                   ? "⚠ Enable permissions above to activate"
-                  : undefined
+                  : locked("budgetAlerts")
+                    ? "Echo Pro feature · tap to unlock"
+                    : undefined
               }
+              onPress={locked("budgetAlerts") ? () => navigation.navigate("Paywall", { trigger: "automation_toggle" }) : undefined}
               right={
                 <Switch
-                  value={preferences.budgetAlerts}
+                  value={locked("budgetAlerts") ? false : preferences.budgetAlerts}
                   onValueChange={(val) => handleBudgetAlertsToggle(val)}
                   trackColor={{ true: colors.success }}
                 />
@@ -1288,19 +1405,27 @@ const SettingsScreen = ({ navigation }: any) => {
             <Row
               icon={
                 <LucideRefreshCcw
-                  color={alertsBlocked ? colors.secondary : colors.primary}
+                  color={alertsBlocked || locked("billReminders") ? colors.secondary : colors.primary}
                   size={20}
                 />
               }
-              label="Bill Reminders"
+              label={
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <ThemedText style={{ fontSize: 16, color: colors.primary, fontFamily: fonts.textSemibold }}>Bill Reminders</ThemedText>
+                  <ProBadge trigger="automation_toggle" />
+                </View>
+              }
               sub={
                 alertsBlocked
                   ? "⚠ Enable permissions above to activate"
-                  : undefined
+                  : locked("billReminders")
+                    ? "Echo Pro feature · tap to unlock"
+                    : undefined
               }
+              onPress={locked("billReminders") ? () => navigation.navigate("Paywall", { trigger: "automation_toggle" }) : undefined}
               right={
                 <Switch
-                  value={preferences.recurringAlerts}
+                  value={locked("billReminders") ? false : preferences.recurringAlerts}
                   onValueChange={(val) => handleRecurringAlertsToggle(val)}
                   trackColor={{ true: colors.success }}
                 />
@@ -1309,19 +1434,27 @@ const SettingsScreen = ({ navigation }: any) => {
             <Row
               icon={
                 <LucideDownload
-                  color={alertsBlocked ? colors.secondary : colors.primary}
+                  color={alertsBlocked || locked("weeklyDigest") ? colors.secondary : colors.primary}
                   size={20}
                 />
               }
-              label="Weekly Digest"
+              label={
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <ThemedText style={{ fontSize: 16, color: colors.primary, fontFamily: fonts.textSemibold }}>Weekly Digest</ThemedText>
+                  <ProBadge trigger="automation_toggle" />
+                </View>
+              }
               sub={
                 alertsBlocked
                   ? "⚠ Enable permissions above to activate"
-                  : undefined
+                  : locked("weeklyDigest")
+                    ? "Echo Pro feature · tap to unlock"
+                    : undefined
               }
+              onPress={locked("weeklyDigest") ? () => navigation.navigate("Paywall", { trigger: "automation_toggle" }) : undefined}
               right={
                 <Switch
-                  value={preferences.weeklyDigest}
+                  value={locked("weeklyDigest") ? false : preferences.weeklyDigest}
                   onValueChange={(val) => handleWeeklyDigestToggle(val)}
                   trackColor={{ true: colors.success }}
                 />
@@ -1764,7 +1897,7 @@ const SettingsScreen = ({ navigation }: any) => {
             <>
               <Section title="Developer Testing" />
               <View
-                className="rounded-apple-md overflow-hidden mb-24"
+                className="rounded-apple-md overflow-hidden mb-8"
                 style={{
                   backgroundColor: colors.surface,
                   borderWidth: 1,
@@ -1830,6 +1963,100 @@ const SettingsScreen = ({ navigation }: any) => {
                       "alerts",
                       { screen: "Home" },
                     );
+                  }}
+                />
+              </View>
+            </>
+          )}
+
+          {/* ── Entitlement & Subscription Previews ── (Hidden in Release) */}
+          {__DEV__ && (
+            <>
+              <Section title="Entitlement & Subscription Previews" />
+              <View
+                className="rounded-apple-md overflow-hidden mb-24"
+                style={{
+                  backgroundColor: colors.surface,
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                }}
+              >
+                <Row
+                  icon={<LucideZap color={colors.accent} size={20} />}
+                  label="Simulate 7-Day Trial"
+                  sub="Active trial with full 7 days remaining"
+                  onPress={() => {
+                    triggerHaptic();
+                    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+                    setLocalEntitlement({ tier: "pro", source: "trial", expiresAt });
+                    setProEntitlement(null, null);
+                    notify.success("Preview Mode: 7-Day Free Trial", "Pro features unlocked with 7 days left");
+                  }}
+                />
+                <Row
+                  icon={<LucideTimer color={colors.warning} size={20} />}
+                  label="Simulate Trial Ending Today"
+                  sub="Active trial with < 2 hours remaining"
+                  onPress={() => {
+                    triggerHaptic();
+                    const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+                    setLocalEntitlement({ tier: "pro", source: "trial", expiresAt });
+                    setProEntitlement(null, null);
+                    notify.info("Preview Mode: Trial Ending Today", "Trial badge shows 'Ends today'");
+                  }}
+                />
+                <Row
+                  icon={<LucideSparkles color="#FFD700" size={20} />}
+                  label="Simulate Founder Access"
+                  sub="Permanent Pro thank-you grant"
+                  onPress={() => {
+                    triggerHaptic();
+                    setLocalEntitlement({ tier: "pro", source: "founder", expiresAt: null });
+                    setProEntitlement(null, null);
+                    notify.success("Preview Mode: Founder Supporter", "Permanent Pro unlocked");
+                  }}
+                />
+                <Row
+                  icon={<LucideSparkles color={colors.accent} size={20} />}
+                  label="Simulate Lifetime Pro"
+                  sub="One-time purchased unlock"
+                  onPress={() => {
+                    triggerHaptic();
+                    setLocalEntitlement(null);
+                    setProEntitlement({ tier: "pro", source: "lifetime", expiresAt: null }, new Date().toISOString());
+                    notify.success("Preview Mode: Lifetime Pro", "One-time purchase active");
+                  }}
+                />
+                <Row
+                  icon={<LucideCreditCard color={colors.primary} size={20} />}
+                  label="Simulate Active Play Subscription"
+                  sub="Google Play monthly/annual subscriber"
+                  onPress={() => {
+                    triggerHaptic();
+                    setLocalEntitlement(null);
+                    setProEntitlement({ tier: "pro", source: "play_sub", expiresAt: null }, new Date().toISOString());
+                    notify.success("Preview Mode: Play Subscription", "Active Google Play subscription");
+                  }}
+                />
+                <Row
+                  icon={<LucideShield color={colors.muted} size={20} />}
+                  label="Simulate Free Tier (Trial Expired)"
+                  sub="Gated analytics & capped limits (3 accounts, 90d SMS)"
+                  onPress={() => {
+                    triggerHaptic();
+                    setLocalEntitlement({ tier: "free", source: "none", expiresAt: null });
+                    setProEntitlement({ tier: "free", source: "none", expiresAt: null }, new Date().toISOString());
+                    notify.info("Preview Mode: Free Tier", "Trial expired — free limits active");
+                  }}
+                />
+                <Row
+                  icon={<LucideRefreshCcw color={colors.accent} size={20} />}
+                  label="Replay Onboarding Screen"
+                  sub="Reset onboarding flag to test Welcome & Plan step"
+                  onPress={() => {
+                    triggerHaptic();
+                    resetOnboarding();
+                    notify.success("Onboarding Reset", "Navigating to Welcome screen");
                   }}
                 />
               </View>

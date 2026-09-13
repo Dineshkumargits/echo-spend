@@ -376,6 +376,128 @@ const ProTipsStep = ({ onFinish }: { onFinish: () => void }) => {
   );
 };
 
+// ─── Step 3: Plan Overview ───────────────────────────────────────────────────
+
+const PlanStep = ({ onNext }: { onNext: () => void }) => {
+  const { colors } = useTheme();
+
+  return (
+    <View style={{ flex: 1 }}>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 16 }}
+        showsVerticalScrollIndicator={false}
+      >
+        <MotiView
+          from={{ opacity: 0, translateY: 16 }}
+          animate={{ opacity: 1, translateY: 0 }}
+          transition={{ type: 'timing', duration: 400 }}
+          style={{ marginTop: 8, marginBottom: 20 }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+            <View style={{
+              width: 36, height: 36, borderRadius: 10,
+              backgroundColor: `${colors.accent}20`,
+              alignItems: 'center', justifyContent: 'center',
+            }}>
+              <LucideZap color={colors.accent} size={18} />
+            </View>
+            <ThemedText style={{ fontSize: 22, fontWeight: '700' }}>Free & Pro Plans</ThemedText>
+          </View>
+          <ThemedText style={{ fontSize: 14, color: colors.secondary, lineHeight: 20 }}>
+            Echo Spend is local-first. Core tracking is free forever — no credit card needed.
+          </ThemedText>
+        </MotiView>
+
+        {/* Free Plan Card */}
+        <MotiView
+          from={{ opacity: 0, translateY: 20 }}
+          animate={{ opacity: 1, translateY: 0 }}
+          transition={{ type: 'timing', duration: 400, delay: 100 }}
+          style={{
+            padding: 16, borderRadius: 18, marginBottom: 14,
+            backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border,
+          }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+            <ThemedText style={{ fontSize: 16, fontWeight: '700' }}>Free Forever</ThemedText>
+            <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 99, backgroundColor: `${colors.secondary}20` }}>
+              <ThemedText style={{ fontSize: 10, fontWeight: '700', color: colors.secondary }}>INCLUDED</ThemedText>
+            </View>
+          </View>
+          <View style={{ gap: 8 }}>
+            {[
+              'Real-time SMS transaction auto-capture',
+              'Manual expense, income & transfer logging',
+              '0 Ads & 100% local, offline privacy',
+              'CSV export & Google Drive backup/restore',
+              'Up to 3 accounts, 3 budgets, 90-day scan history',
+            ].map((item, idx) => (
+              <View key={idx} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <LucideCheck color={colors.accent} size={14} />
+                <ThemedText style={{ fontSize: 12.5, color: colors.primary, flex: 1 }}>{item}</ThemedText>
+              </View>
+            ))}
+          </View>
+        </MotiView>
+
+        {/* Echo Pro Card */}
+        <MotiView
+          from={{ opacity: 0, translateY: 20 }}
+          animate={{ opacity: 1, translateY: 0 }}
+          transition={{ type: 'timing', duration: 400, delay: 200 }}
+          style={{
+            padding: 16, borderRadius: 18, marginBottom: 14,
+            backgroundColor: `${colors.accent}10`, borderWidth: 1, borderColor: colors.accent,
+          }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <LucideSparkles color={colors.accent} size={16} />
+              <ThemedText style={{ fontSize: 16, fontWeight: '700', color: colors.accent }}>Echo Pro</ThemedText>
+            </View>
+            <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 99, backgroundColor: colors.accent }}>
+              <ThemedText style={{ fontSize: 9.5, fontWeight: '800', color: '#fff' }}>7-DAY TRIAL ACTIVE</ThemedText>
+            </View>
+          </View>
+          <View style={{ gap: 8 }}>
+            {[
+              'Full SMS Archive — scan history beyond 90 days',
+              'Merchant breakdowns & spending trend analytics',
+              'Automated background backups & bill reminders',
+              'Unlimited accounts, budgets, goals, loans & subscriptions',
+            ].map((item, idx) => (
+              <View key={idx} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <LucideSparkles color={colors.accent} size={13} />
+                <ThemedText style={{ fontSize: 12.5, color: colors.primary, fontWeight: '600', flex: 1 }}>{item}</ThemedText>
+              </View>
+            ))}
+          </View>
+        </MotiView>
+      </ScrollView>
+
+      <View style={{ paddingHorizontal: 24, paddingBottom: 24, paddingTop: 8 }}>
+        <TouchableOpacity
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            onNext();
+          }}
+          style={{
+            flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+            gap: 10, paddingVertical: 16, borderRadius: 99,
+            backgroundColor: colors.accent,
+          }}
+        >
+          <ThemedText style={{ fontSize: 16, fontWeight: '700', color: '#fff' }}>
+            Got It, Continue
+          </ThemedText>
+          <LucideArrowRight color="#fff" size={18} />
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+};
+
 // ─── Dot Indicator ────────────────────────────────────────────────────────────
 
 const Dots = ({ total, current, colors }: { total: number; current: number; colors: any }) => (
@@ -405,7 +527,7 @@ const OnboardingScreen = () => {
   const [budget, setBudgetLocal] = useState(String(preferences.monthlyBudget ?? 50000));
   const [theme, setThemeLocal] = useState<'dark' | 'light' | 'system'>(preferences.theme ?? 'dark');
 
-  const TOTAL_STEPS = 4;
+  const TOTAL_STEPS = 5;
 
   const savePreferences = () => {
     setCurrency('₹');
@@ -434,6 +556,9 @@ const OnboardingScreen = () => {
         <AIModelSetupStep variant="onboarding" onComplete={() => setStep(3)} />
       )}
       {step === 3 && (
+        <PlanStep onNext={() => setStep(4)} />
+      )}
+      {step === 4 && (
         <ProTipsStep onFinish={completeOnboarding} />
       )}
     </ThemedSafeAreaView>
