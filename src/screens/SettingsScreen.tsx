@@ -49,6 +49,7 @@ import {
   LucideCalendar,
   LucideArrowUpCircle,
   LucideLock,
+  LucideLandmark,
 } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { GoogleSignin } from "@react-native-google-signin/google-signin";
@@ -65,6 +66,7 @@ import { useTheme } from "../theme/ThemeProvider";
 import { registerBackgroundTasks } from "../services/backgroundTasks";
 import { NotificationService } from "../services/notifications";
 import { AIModelManager } from "../services/aiModelManager";
+import { AccountDetectionSheet } from "../components/AccountDetectionSheet";
 import {
   checkForUpdate,
   getCurrentVersionName,
@@ -117,6 +119,7 @@ const SettingsScreen = ({ navigation }: any) => {
   const [isBatteryOptimized, setIsBatteryOptimized] = useState(true);
   const [isExactAlarmAllowed, setIsExactAlarmAllowed] = useState(true);
   const [isNotificationGranted, setIsNotificationGranted] = useState(true);
+  const [showAccountDetection, setShowAccountDetection] = useState(false);
 
   const checkBackgroundPermissions = async () => {
     // Check notification permission (all platforms)
@@ -1595,6 +1598,18 @@ const SettingsScreen = ({ navigation }: any) => {
                 />
               }
             />
+            <Row
+              icon={<LucideLandmark color={colors.primary} size={20} />}
+              label="Scan for New Accounts"
+              sub="Detect unlinked bank accounts or credit cards from SMS"
+              onPress={() => {
+                triggerHaptic();
+                setShowAccountDetection(true);
+              }}
+              right={
+                <LucideChevronRight color={colors.secondary} size={14} />
+              }
+            />
             {preferences.autoSmsScan && Platform.OS === "android" && (
               <Row
                 icon={<LucideAlertTriangle color={colors.warning} size={18} />}
@@ -2064,6 +2079,13 @@ const SettingsScreen = ({ navigation }: any) => {
           )}
         </ScrollView>
         <TourGuideModal visible={showTour} onClose={() => setShowTour(false)} />
+        <AccountDetectionSheet
+          visible={showAccountDetection}
+          onClose={() => setShowAccountDetection(false)}
+          onAccountsAdded={() => {}}
+          currency={preferences.currency}
+          navigation={navigation}
+        />
       </KeyboardAvoidingView>
     </ThemedSafeAreaView>
   );

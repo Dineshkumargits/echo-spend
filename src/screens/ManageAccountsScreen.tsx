@@ -18,6 +18,7 @@ import {
   LucideArrowUp,
   LucideArrowDown,
   LucideSettings2,
+  LucideSparkles,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { notify } from '../utils/notify';
@@ -32,6 +33,7 @@ import { useTheme } from '../theme/ThemeProvider';
 import { MotiView, AnimatePresence } from 'moti';
 import { useEntitlement } from '../hooks/useEntitlement';
 import { useStore } from '../store/useStore';
+import { AccountDetectionSheet } from '../components/AccountDetectionSheet';
 
 export const ManageAccountsScreen = () => {
   const { colors, isDark } = useTheme();
@@ -42,6 +44,7 @@ export const ManageAccountsScreen = () => {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const { canAdd } = useEntitlement();
   const [loading, setLoading] = useState(true);
+  const [showDetectionSheet, setShowDetectionSheet] = useState(false);
 
   const loadAccounts = useCallback(async () => {
     try {
@@ -132,12 +135,57 @@ export const ManageAccountsScreen = () => {
             <ThemedText className="text-2xl font-bold">Manage Accounts</ThemedText>
             <ThemedText type="secondary" className="text-xs">Edit, delete or reorder items</ThemedText>
           </View>
+          <TouchableOpacity
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setShowDetectionSheet(true);
+            }}
+            style={[
+              styles.scanHeaderBtn,
+              { backgroundColor: `${colors.accent}15`, borderColor: `${colors.accent}30` },
+            ]}
+            activeOpacity={0.7}
+          >
+            <LucideSparkles color={colors.accent} size={15} />
+            <ThemedText style={{ color: colors.accent, fontWeight: '700', fontSize: 11, marginLeft: 4 }}>
+              Scan SMS
+            </ThemedText>
+          </TouchableOpacity>
         </View>
 
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingBottom: 40 }}
         >
+          {/* Scan SMS Discovery Banner */}
+          <TouchableOpacity
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setShowDetectionSheet(true);
+            }}
+            activeOpacity={0.8}
+            style={[
+              styles.scanBanner,
+              { backgroundColor: `${colors.accent}10`, borderColor: `${colors.accent}30` },
+            ]}
+          >
+            <View style={[styles.scanBannerIcon, { backgroundColor: colors.accent }]}>
+              <LucideSparkles color="#fff" size={18} />
+            </View>
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <ThemedText style={{ fontWeight: '700', fontSize: 13, color: colors.primary }}>
+                Detect Accounts from SMS
+              </ThemedText>
+              <ThemedText type="secondary" style={{ fontSize: 11, marginTop: 2 }}>
+                Auto-detect new bank accounts or credit cards
+              </ThemedText>
+            </View>
+            <View style={[styles.scanBadge, { backgroundColor: `${colors.accent}20` }]}>
+              <ThemedText style={{ color: colors.accent, fontSize: 10, fontWeight: '800' }}>
+                AUTO
+              </ThemedText>
+            </View>
+          </TouchableOpacity>
           {accounts.map((acc, index) => (
             <MotiView
               key={acc.id}
@@ -229,6 +277,14 @@ export const ManageAccountsScreen = () => {
             <ThemedText className="font-bold text-base" style={{ color: colors.accent }}>Add New Account</ThemedText>
           </TouchableOpacity>
         </ScrollView>
+
+        <AccountDetectionSheet
+          visible={showDetectionSheet}
+          onClose={() => setShowDetectionSheet(false)}
+          onAccountsAdded={() => loadAccounts()}
+          currency={currency}
+          navigation={navigation}
+        />
       </View>
     </ThemedSafeAreaView>
   );
@@ -238,6 +294,34 @@ const styles = StyleSheet.create({
   container: { flex: 1, paddingHorizontal: 20 },
   header: { flexDirection: 'row', alignItems: 'center', marginVertical: 20 },
   backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  scanHeaderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  scanBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    marginBottom: 16,
+  },
+  scanBannerIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scanBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
   accountCard: { borderRadius: 16, borderWidth: 1, marginBottom: 12, overflow: 'hidden' },
   cardMain: { flexDirection: 'row', alignItems: 'center' },
   

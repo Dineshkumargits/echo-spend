@@ -11,11 +11,20 @@ import {
   LucideArrowRight, LucideCheck, LucideWallet, LucideCalendar, LucideClock,
   LucideSun, LucideMoon, LucideMonitor, LucideTag, LucideZap,
   LucideCloud, LucideTarget, LucideSmartphone, LucideSparkles,
+  LucideLandmark, LucideCreditCard, LucideShieldCheck, LucideRefreshCw,
 } from 'lucide-react-native';
+import { ActivityIndicator } from 'react-native';
 import { useStore } from '../store/useStore';
 import { addSalaryDate } from '../services/database';
 import { useTheme } from '../theme/ThemeProvider';
 import AIModelSetupStep from './AIModelSetupStep';
+import {
+  detectAccountsFromSms,
+  addDetectedAccounts,
+  checkSmsPermission,
+  requestSmsPermission,
+  DetectedAccountCandidate,
+} from '../services/accountDetector';
 
 // ─── Step 1: Welcome ──────────────────────────────────────────────────────────
 
@@ -196,6 +205,458 @@ const PreferencesStep = ({
           <ThemedText className="font-bold text-base" style={{ color: '#fff' }}>Continue</ThemedText>
           <LucideArrowRight color="#fff" size={18} />
         </TouchableOpacity>
+      </View>
+    </KeyboardAvoidingView>
+  );
+};
+
+// ─── Step 2: Detect Accounts ──────────────────────────────────────────────────
+
+interface CandidateItem extends DetectedAccountCandidate {
+  selected: boolean;
+  nameInput: string;
+  balanceInput: string;
+}
+
+const COMMON_PRESETS = [
+  { name: 'HDFC Bank', type: 'bank' as const },
+  { name: 'State Bank of India', type: 'bank' as const },
+  { name: 'ICICI Bank', type: 'bank' as const },
+  { name: 'Axis Bank', type: 'bank' as const },
+  { name: 'Cash Wallet', type: 'cash' as const },
+];
+
+const AccountDiscoveryStep = ({ onFinish }: { onFinish: () => void }) => {
+  const { colors, isDark } = useTheme();
+  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
+  const [isScanning, setIsScanning] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [candidates, setCandidates] = useState<CandidateItem[]>([]);
+  const [hasScanned, setHasScanned] = useState(false);
+  const [addedPresets, setAddedPresets] = useState<string[]>([]);
+
+  const runScan = async () => {
+    setIsScanning(true);
+    try {
+      const res = await detectAccountsFromSms({ daysBack: 180, maxMessages: 2500 });
+      const items: CandidateItem[] = res.newCandidates.map((c) => ({
+        ...c,
+        selected: true,
+        nameInput: c.suggestedName,
+        balanceInput: c.balance > 0 ? String(c.balance) : '0',
+      }));
+      setCandidates(items);
+      setHasScanned(true);
+      if (items.length > 0) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+    } catch (e) {
+      console.warn('[Onboarding] Scan failed:', e);
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
+  React.useEffect(() => {
+    if (Platform.OS === 'android') {
+      checkSmsPermission().then((granted) => {
+        setHasPermission(granted);
+        if (granted) {
+          runScan();
+        }
+      });
+    }
+  }, []);
+
+  const handleRequestPermission = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const granted = await requestSmsPermission();
+    setHasPermission(granted);
+    if (granted) {
+      runScan();
+    }
+  };
+
+  const toggleSelect = (key: string) => {
+    Haptics.selectionAsync();
+    setCandidates((prev) =>
+      prev.map((c) => (c.key === key ? { ...c, selected: !c.selected } : c))
+    );
+  };
+
+  const updateCandidateName = (key: string, nameInput: string) => {
+    setCandidates((prev) =>
+      prev.map((c) => (c.key === key ? { ...c, nameInput } : c))
+    );
+  };
+
+  const updateCandidateBalance = (key: string, balanceInput: string) => {
+    setCandidates((prev) =>
+      prev.map((c) => (c.key === key ? { ...c, balanceInput } : c))
+    );
+  };
+
+  const handleSaveAndContinue = async () => {
+    const selected = candidates.filter((c) => c.selected);
+    if (selected.length > 0) {
+      setIsSaving(true);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      try {
+        await addDetectedAccounts(
+          selected.map((s) => ({
+            name: s.nameInput.trim() || s.suggestedName,
+            balance: parseFloat(s.balanceInput) || 0,
+            accountType: s.accountType,
+            last4Digits: s.last4Digits,
+          }))
+        );
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } catch (err) {
+        console.warn('[Onboarding] Error saving detected accounts:', err);
+      } finally {
+        setIsSaving(false);
+      }
+    }
+    onFinish();
+  };
+
+  const handleAddPreset = async (preset: { name: string; type: 'bank' | 'credit_card' | 'cash' }) => {
+    if (addedPresets.includes(preset.name)) return;
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setAddedPresets((prev) => [...prev, preset.name]);
+    try {
+      await addDetectedAccounts([{ name: preset.name, balance: 0, accountType: preset.type }]);
+    } catch (e) {
+      console.warn('[Onboarding] Failed to add preset:', e);
+    }
+  };
+
+  const selectedCount = candidates.filter((c) => c.selected).length;
+
+  return (
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <ScrollView className="flex-1 px-6" showsVerticalScrollIndicator={false}>
+        <MotiView
+          from={{ opacity: 0, translateY: 20 }}
+          animate={{ opacity: 1, translateY: 0 }}
+          transition={{ type: 'timing', duration: 400 }}
+        >
+          <ThemedText className="text-2xl font-bold mt-6 mb-1">Detect Accounts</ThemedText>
+          <ThemedText type="secondary" className="mb-6 leading-5">
+            Auto-detect your bank accounts and credit cards directly from SMS.
+          </ThemedText>
+
+          {/* Privacy badge */}
+          <View
+            className="flex-row items-center p-3 rounded-2xl border mb-6"
+            style={{ backgroundColor: colors.translucent, borderColor: colors.border }}
+          >
+            <LucideShieldCheck color={colors.accent} size={18} />
+            <ThemedText type="secondary" className="text-xs flex-1 ml-2 font-medium">
+              100% On-Device · Your SMS never leaves your phone.
+            </ThemedText>
+          </View>
+
+          {/* iOS Fallback */}
+          {Platform.OS === 'ios' && (
+            <View className="mb-6">
+              <ThemedText type="secondary" className="text-xs font-bold uppercase tracking-widest mb-3">
+                Quick Add Popular Banks
+              </ThemedText>
+              <View className="gap-3">
+                {COMMON_PRESETS.map((p) => (
+                  <TouchableOpacity
+                    key={p.name}
+                    onPress={() => handleAddPreset(p)}
+                    activeOpacity={0.7}
+                    className="flex-row items-center justify-between p-4 rounded-2xl border"
+                    style={{ backgroundColor: colors.surface, borderColor: colors.border }}
+                  >
+                    <View className="flex-row items-center gap-3">
+                      <View
+                        className="w-10 h-10 rounded-xl items-center justify-center"
+                        style={{ backgroundColor: `${colors.accent}15` }}
+                      >
+                        {p.type === 'cash' ? (
+                          <LucideWallet color={colors.accent} size={20} />
+                        ) : (
+                          <LucideLandmark color={colors.accent} size={20} />
+                        )}
+                      </View>
+                      <ThemedText className="font-bold text-base">{p.name}</ThemedText>
+                    </View>
+                    {addedPresets.includes(p.name) ? (
+                      <View className="flex-row items-center gap-1.5 px-3 py-1.5 rounded-full" style={{ backgroundColor: `${colors.accent}15` }}>
+                        <LucideCheck color={colors.accent} size={14} strokeWidth={3} />
+                        <ThemedText style={{ color: colors.accent, fontWeight: '700', fontSize: 12 }}>
+                          Added
+                        </ThemedText>
+                      </View>
+                    ) : (
+                      <ThemedText style={{ color: colors.accent, fontWeight: '700', fontSize: 13 }}>
+                        + Add
+                      </ThemedText>
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )}
+
+          {/* Android: Request SMS permission */}
+          {Platform.OS === 'android' && hasPermission === false && !isScanning && (
+            <View
+              className="p-6 rounded-3xl border items-center mb-6"
+              style={{ backgroundColor: colors.surface, borderColor: colors.border }}
+            >
+              <View
+                className="w-16 h-16 rounded-full items-center justify-center mb-4"
+                style={{ backgroundColor: `${colors.accent}15` }}
+              >
+                <LucideSparkles color={colors.accent} size={30} />
+              </View>
+              <ThemedText className="text-lg font-bold text-center mb-2">
+                Scan SMS for Bank Accounts
+              </ThemedText>
+              <ThemedText type="secondary" className="text-xs text-center leading-5 mb-5">
+                Echo Spend can scan your financial messages to discover your active bank accounts and credit cards with their latest balances.
+              </ThemedText>
+
+              <TouchableOpacity
+                onPress={handleRequestPermission}
+                activeOpacity={0.8}
+                className="w-full py-4 rounded-full items-center justify-center flex-row gap-2"
+                style={{ backgroundColor: colors.accent }}
+              >
+                <ThemedText className="font-bold text-base" style={{ color: '#fff' }}>
+                  Allow & Scan SMS
+                </ThemedText>
+                <LucideArrowRight color="#fff" size={18} />
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Android: Scanning indicator */}
+          {isScanning && (
+            <View className="items-center justify-center py-12">
+              <ActivityIndicator size="large" color={colors.accent} />
+              <ThemedText className="text-base font-bold mt-4 mb-1">
+                Scanning Financial Messages...
+              </ThemedText>
+              <ThemedText type="secondary" className="text-xs text-center">
+                Finding bank accounts and credit cards
+              </ThemedText>
+            </View>
+          )}
+
+          {/* Android: Found candidates */}
+          {!isScanning && hasPermission && candidates.length > 0 && (
+            <View className="mb-6">
+              <View className="flex-row items-center justify-between mb-3">
+                <ThemedText type="secondary" className="text-xs font-bold uppercase tracking-widest">
+                  Found {candidates.length} {candidates.length === 1 ? 'Account' : 'Accounts'}
+                </ThemedText>
+                <TouchableOpacity onPress={runScan} activeOpacity={0.6}>
+                  <ThemedText style={{ color: colors.accent, fontSize: 12, fontWeight: '700' }}>
+                    Re-scan
+                  </ThemedText>
+                </TouchableOpacity>
+              </View>
+
+              <View className="gap-3">
+                {candidates.map((item) => {
+                  const isCC = item.accountType === 'credit_card';
+                  return (
+                    <View
+                      key={item.key}
+                      className="p-4 rounded-2xl border"
+                      style={{
+                        backgroundColor: item.selected ? (isDark ? '#1e242b' : '#f4f8fa') : colors.surface,
+                        borderColor: item.selected ? colors.accent : colors.border,
+                      }}
+                    >
+                      <TouchableOpacity
+                        onPress={() => toggleSelect(item.key)}
+                        activeOpacity={0.7}
+                        className="flex-row items-center"
+                      >
+                        <View
+                          className="w-6 h-6 rounded-md items-center justify-center border"
+                          style={{
+                            backgroundColor: item.selected ? colors.accent : 'transparent',
+                            borderColor: item.selected ? colors.accent : colors.border,
+                          }}
+                        >
+                          {item.selected && <LucideCheck color="#fff" size={14} strokeWidth={3} />}
+                        </View>
+
+                        <View
+                          className="w-9 h-9 rounded-xl items-center justify-center ml-3"
+                          style={{ backgroundColor: `${colors.accent}15` }}
+                        >
+                          {isCC ? (
+                            <LucideCreditCard color={colors.accent} size={18} />
+                          ) : (
+                            <LucideLandmark color={colors.accent} size={18} />
+                          )}
+                        </View>
+
+                        <View className="flex-1 ml-3">
+                          <ThemedText className="font-bold text-base">{item.bankName}</ThemedText>
+                          <ThemedText type="secondary" className="text-[11px]">
+                            {isCC ? 'Credit Card' : 'Bank Account'} · ending in {item.last4Digits}
+                          </ThemedText>
+                        </View>
+
+                        {item.balance > 0 && (
+                          <View className="px-2.5 py-1 rounded-full border" style={{ borderColor: colors.border, backgroundColor: colors.translucent }}>
+                            <ThemedText font="signal" className="text-xs font-bold" style={{ color: colors.accent }}>
+                              ₹{item.balance.toLocaleString('en-IN')}
+                            </ThemedText>
+                          </View>
+                        )}
+                      </TouchableOpacity>
+
+                      {item.selected && (
+                        <View className="flex-row items-center gap-3 mt-3 pt-3 border-t" style={{ borderTopColor: colors.border }}>
+                          <View className="flex-1">
+                            <ThemedText type="secondary" className="text-[10px] font-bold uppercase mb-1">
+                              Account Name
+                            </ThemedText>
+                            <TextInput
+                              value={item.nameInput}
+                              onChangeText={(val) => updateCandidateName(item.key, val)}
+                              className="px-3 py-2 rounded-lg border font-semibold text-xs"
+                              style={{
+                                color: colors.primary,
+                                borderColor: colors.border,
+                                backgroundColor: colors.surface,
+                              }}
+                            />
+                          </View>
+                          <View style={{ width: 100 }}>
+                            <ThemedText type="secondary" className="text-[10px] font-bold uppercase mb-1">
+                              Balance (₹)
+                            </ThemedText>
+                            <TextInput
+                              value={item.balanceInput}
+                              onChangeText={(val) => updateCandidateBalance(item.key, val)}
+                              keyboardType="numeric"
+                              className="px-3 py-2 rounded-lg border font-semibold text-xs"
+                              style={{
+                                color: colors.primary,
+                                borderColor: colors.border,
+                                backgroundColor: colors.surface,
+                              }}
+                            />
+                          </View>
+                        </View>
+                      )}
+                    </View>
+                  );
+                })}
+              </View>
+            </View>
+          )}
+
+          {/* Android: No accounts found after scan */}
+          {!isScanning && hasPermission && hasScanned && candidates.length === 0 && (
+            <View
+              className="p-6 rounded-3xl border items-center mb-6"
+              style={{ backgroundColor: colors.surface, borderColor: colors.border }}
+            >
+              <ThemedText className="text-base font-bold text-center mb-1">
+                No Accounts Detected in SMS
+              </ThemedText>
+              <ThemedText type="secondary" className="text-xs text-center leading-5 mb-5">
+                We didn't find any financial account alerts in recent messages. You can add your accounts later anytime in Manage Accounts.
+              </ThemedText>
+
+              <ThemedText type="secondary" className="text-xs font-bold uppercase tracking-widest mb-3 self-start">
+                Or Quick Add a Preset:
+              </ThemedText>
+              <View className="w-full gap-2 mb-2">
+                {COMMON_PRESETS.slice(0, 3).map((p) => (
+                  <TouchableOpacity
+                    key={p.name}
+                    onPress={() => handleAddPreset(p)}
+                    activeOpacity={0.7}
+                    className="flex-row items-center justify-between p-3.5 rounded-xl border"
+                    style={{ backgroundColor: colors.translucent, borderColor: colors.border }}
+                  >
+                    <ThemedText className="font-semibold text-sm">{p.name}</ThemedText>
+                    {addedPresets.includes(p.name) ? (
+                      <View className="flex-row items-center gap-1.5 px-3 py-1 rounded-full" style={{ backgroundColor: `${colors.accent}15` }}>
+                        <LucideCheck color={colors.accent} size={13} strokeWidth={3} />
+                        <ThemedText style={{ color: colors.accent, fontWeight: '700', fontSize: 11 }}>
+                          Added
+                        </ThemedText>
+                      </View>
+                    ) : (
+                      <ThemedText style={{ color: colors.accent, fontWeight: '700', fontSize: 12 }}>
+                        + Add
+                      </ThemedText>
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )}
+        </MotiView>
+      </ScrollView>
+
+      {/* Bottom Footer Actions */}
+      <View className="px-6 pb-8 pt-2">
+        {candidates.length > 0 && selectedCount > 0 ? (
+          <>
+            <TouchableOpacity
+              onPress={handleSaveAndContinue}
+              disabled={isSaving}
+              className="flex-row items-center justify-center gap-3 py-4 rounded-full mb-3"
+              style={{ backgroundColor: colors.accent }}
+            >
+              {isSaving ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <>
+                  <ThemedText className="font-bold text-base" style={{ color: '#fff' }}>
+                    Add {selectedCount} {selectedCount === 1 ? 'Account' : 'Accounts'} & Continue
+                  </ThemedText>
+                  <LucideArrowRight color="#fff" size={18} />
+                </>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                onFinish();
+              }}
+              className="items-center justify-center py-2"
+            >
+              <ThemedText type="secondary" className="font-semibold text-sm">
+                Skip for now
+              </ThemedText>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <TouchableOpacity
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              onFinish();
+            }}
+            className="flex-row items-center justify-center gap-3 py-4 rounded-full"
+            style={{ backgroundColor: colors.accent }}
+          >
+            <ThemedText className="font-bold text-base" style={{ color: '#fff' }}>
+              Continue
+            </ThemedText>
+            <LucideArrowRight color="#fff" size={18} />
+          </TouchableOpacity>
+        )}
       </View>
     </KeyboardAvoidingView>
   );
@@ -527,7 +988,7 @@ const OnboardingScreen = () => {
   const [budget, setBudgetLocal] = useState(String(preferences.monthlyBudget ?? 50000));
   const [theme, setThemeLocal] = useState<'dark' | 'light' | 'system'>(preferences.theme ?? 'dark');
 
-  const TOTAL_STEPS = 5;
+  const TOTAL_STEPS = 6;
 
   const savePreferences = () => {
     setCurrency('₹');
@@ -553,12 +1014,15 @@ const OnboardingScreen = () => {
         />
       )}
       {step === 2 && (
-        <AIModelSetupStep variant="onboarding" onComplete={() => setStep(3)} />
+        <AccountDiscoveryStep onFinish={() => setStep(3)} />
       )}
       {step === 3 && (
-        <PlanStep onNext={() => setStep(4)} />
+        <AIModelSetupStep variant="onboarding" onComplete={() => setStep(4)} />
       )}
       {step === 4 && (
+        <PlanStep onNext={() => setStep(5)} />
+      )}
+      {step === 5 && (
         <ProTipsStep onFinish={completeOnboarding} />
       )}
     </ThemedSafeAreaView>
