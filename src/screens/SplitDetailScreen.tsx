@@ -11,12 +11,14 @@ import {
   LucideChevronRight, LucideUsers, LucideRepeat, LucideTarget, LucideLandmark,
   LucideEdit2, LucideUndo,
 } from 'lucide-react-native';
+import { ScrollView as GHScrollView } from 'react-native-gesture-handler';
 import { useIsFocused } from '@react-navigation/native';
 import { ThemedSafeAreaView, ThemedText } from '../components/ThemedSafeAreaView';
 import { useTheme } from '../theme/ThemeProvider';
-import { withAlpha } from '../theme/tokens';
+import { withAlpha, fonts } from '../theme/tokens';
 import { useStore } from '../store/useStore';
 import { notify } from '../utils/notify';
+import { BottomSheet, FieldLabel, PrimaryButton } from '../components/Kit';
 import {
   getSplitById, deleteSplit, receiveSplitPayment, updateSplitReceiveAccount,
   getAccounts, getTransactionById, getSubscriptionById, getGoalById, getLoanById,
@@ -106,87 +108,70 @@ const ReceiveModal = ({
       notify.error(`Amount cannot exceed the remaining balance of ${currency}${remaining.toLocaleString('en-IN')}`);
       return;
     }
+    if (!selected) {
+      notify.error('Please select an account to receive payment');
+      return;
+    }
     onConfirm(selected, amt);
   };
 
   return (
-    <Modal transparent animationType="none" onRequestClose={onClose}>
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    <BottomSheet
+      visible={true}
+      onClose={onClose}
+      title={`Receive from ${member.name}`}
+      maxHeightPct={0.9}
+    >
+      <GHScrollView
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 32 }}
       >
-      <TouchableOpacity
-        style={{ flex: 1, backgroundColor: '#00000080', justifyContent: 'flex-end' }}
-        activeOpacity={1}
-        onPress={onClose}
-      >
-        <MotiView
-          from={{ translateY: 80, opacity: 0 }}
-          animate={{ translateY: 0, opacity: 1 }}
-          exit={{ translateY: 80, opacity: 0 }}
-          transition={{ type: 'spring', damping: 22, stiffness: 200 }}
-        >
-          <TouchableOpacity activeOpacity={1}
-            style={{ backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40 }}
-          >
-            {/* Drag handle */}
-            <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: 'center', marginBottom: 16 }} />
+        <ThemedText style={{ fontSize: 13, color: colors.secondary, marginBottom: 16 }}>
+          Total share: <ThemedText font="signal" style={{ fontSize: 13, color: colors.secondary }}>{currency}{member.share.toLocaleString('en-IN')}</ThemedText> · Already paid: <ThemedText font="signal" style={{ fontSize: 13, color: colors.secondary }}>{currency}{(member.paidAmount ?? 0).toLocaleString('en-IN')}</ThemedText>
+        </ThemedText>
 
-            <ThemedText style={{ fontSize: 17, fontWeight: '700', marginBottom: 4 }}>
-              Receive from {member.name}
-            </ThemedText>
-            <ThemedText style={{ fontSize: 13, color: colors.secondary, marginBottom: 16 }}>
-              Total share: <ThemedText font="signal" style={{ fontSize: 13, color: colors.secondary }}>{currency}{member.share.toLocaleString('en-IN')}</ThemedText> · Already paid: <ThemedText font="signal" style={{ fontSize: 13, color: colors.secondary }}>{currency}{(member.paidAmount ?? 0).toLocaleString('en-IN')}</ThemedText>
-            </ThemedText>
+        <FieldLabel>Repayment Amount ({currency})</FieldLabel>
+        <TextInput
+          value={amountStr}
+          onChangeText={setAmountStr}
+          keyboardType="decimal-pad"
+          placeholderTextColor={colors.muted}
+          style={{
+            padding: 12,
+            borderRadius: 12,
+            borderWidth: 1.5,
+            borderColor: colors.border,
+            color: colors.primary,
+            backgroundColor: colors.surfaceElevated ?? colors.surface,
+            fontFamily: fonts.signalBold,
+            fontSize: 20,
+            fontVariant: ['tabular-nums'],
+            marginBottom: 16,
+          }}
+        />
 
-            <ThemedText style={{ fontSize: 11, fontWeight: '700', color: colors.secondary, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 }}>
-              Repayment Amount ({currency})
-            </ThemedText>
-            <TextInput
-              value={amountStr}
-              onChangeText={setAmountStr}
-              keyboardType="decimal-pad"
-              style={{
-                padding: 12,
-                borderRadius: 12,
-                borderWidth: 1.5,
-                borderColor: colors.border,
-                color: colors.primary,
-                backgroundColor: colors.translucent,
-                fontSize: 16,
-                fontWeight: '600',
-                marginBottom: 16,
-              }}
-            />
+        <FieldLabel style={{ marginBottom: 10 }}>Add to account</FieldLabel>
 
-            <ThemedText style={{ fontSize: 11, fontWeight: '700', color: colors.secondary, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 10 }}>
-              Add to account
-            </ThemedText>
+        {accounts.map(acc => (
+          <AccountRow
+            key={acc.id}
+            acc={acc}
+            isSelected={selected === acc.id}
+            currency={currency}
+            onPress={handleSelect}
+            colors={colors}
+          />
+        ))}
 
-            {accounts.map(acc => (
-              <AccountRow
-                key={acc.id}
-                acc={acc}
-                isSelected={selected === acc.id}
-                currency={currency}
-                onPress={handleSelect}
-                colors={colors}
-              />
-            ))}
-
-            <TouchableOpacity
-              onPress={handleConfirm}
-              style={{ marginTop: 8, padding: 16, borderRadius: 14, backgroundColor: colors.success, alignItems: 'center' }}
-            >
-              <ThemedText style={{ fontSize: 15, fontWeight: '700', color: '#fff' }}>
-                Confirm — Receive <ThemedText font="signal" style={{ fontSize: 15, fontWeight: '700', color: '#fff' }}>{currency}{parseFloat(amountStr || '0').toLocaleString('en-IN')}</ThemedText>
-              </ThemedText>
-            </TouchableOpacity>
-          </TouchableOpacity>
-        </MotiView>
-      </TouchableOpacity>
-      </KeyboardAvoidingView>
-    </Modal>
+        <PrimaryButton
+          label={`Confirm — Receive ${currency}${parseFloat(amountStr || '0').toLocaleString('en-IN')}`}
+          tone="echo"
+          onPress={handleConfirm}
+          style={{ marginTop: 14 }}
+        />
+      </GHScrollView>
+    </BottomSheet>
   );
 };
 
