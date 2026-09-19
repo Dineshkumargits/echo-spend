@@ -782,7 +782,7 @@ const BudgetScreen = () => {
         <GHScrollView
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 8 }}
+          contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 32 }}
         >
           {/* Priority row: Amount (left) + Category square card (right) —
               mirrors AddTransactionScreen's amount+category layout so the
@@ -1106,8 +1106,13 @@ const BudgetScreen = () => {
         visible={showPlan}
         onClose={() => setShowPlan(false)}
         title="Cycle plan"
+        maxHeightPct={0.9}
       >
-        <View style={{ paddingHorizontal: 24, paddingBottom: 8 }}>
+        <GHScrollView
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 32 }}
+        >
           <FieldLabel>Monthly budget ({currency})</FieldLabel>
           <TextField
             keyboardType="numeric"
@@ -1259,6 +1264,7 @@ const BudgetScreen = () => {
 
           <FieldLabel style={{ marginTop: 20 }}>Salary category</FieldLabel>
           <CategoryPicker
+            label=""
             selectedCategory={preferences?.salaryCategory ?? "Salary"}
             onSelect={setSalaryCategory}
             categories={incomeCategories}
@@ -1273,7 +1279,7 @@ const BudgetScreen = () => {
           </ThemedText>
 
           <PrimaryButton label="Save plan" onPress={savePlan} style={{ marginTop: 22 }} />
-        </View>
+        </GHScrollView>
       </BottomSheet>
     </ThemedSafeAreaView>
   );

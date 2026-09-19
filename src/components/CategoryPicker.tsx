@@ -98,8 +98,8 @@ export const CategoryPicker: React.FC<CategoryPickerProps> = ({
   );
 
   const renderRow = () => (
-    <View style={{ marginBottom: 24 }}>
-      <ThemedText type="secondary" style={styles.label}>{label}</ThemedText>
+    <View style={{ marginBottom: label ? 24 : 12 }}>
+      {!!label && <ThemedText type="secondary" style={styles.label}>{label}</ThemedText>}
       <TouchableOpacity
         onPress={() => setModalVisible(true)}
         style={[

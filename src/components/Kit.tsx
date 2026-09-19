@@ -7,12 +7,13 @@
  * controls, grabber sheets, and mono form fields. Deliberately distinct from
  * the old iOS-list look (circular icons, pill chips, big bold titles).
  */
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, Pressable, ScrollView, TextInput, Modal, useWindowDimensions,
-  ViewStyle, StyleProp, TextStyle, TextInputProps, KeyboardAvoidingView,
+  ViewStyle, StyleProp, TextStyle, TextInputProps, Platform, Keyboard, LayoutAnimation,
 } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MotiView } from 'moti';
 import * as Haptics from 'expo-haptics';
 import { useTheme } from '../theme/ThemeProvider';
@@ -375,6 +376,56 @@ interface BottomSheetProps {
 export const BottomSheet: React.FC<BottomSheetProps> = ({ visible, onClose, title, right, children, maxHeightPct = 0.82 }) => {
   const { colors } = useTheme();
   const { height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  useEffect(() => {
+    if (!visible) {
+      setKeyboardHeight(0);
+      return;
+    }
+
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const onShow = (e: any) => {
+      const kh = e?.endCoordinates?.height ?? 0;
+      if (Platform.OS === 'ios' && e?.duration) {
+        LayoutAnimation.configureNext({
+          duration: e.duration,
+          update: { type: LayoutAnimation.Types.keyboard },
+        });
+      }
+      setKeyboardHeight(kh);
+    };
+
+    const onHide = (e: any) => {
+      if (Platform.OS === 'ios' && e?.duration) {
+        LayoutAnimation.configureNext({
+          duration: e.duration,
+          update: { type: LayoutAnimation.Types.keyboard },
+        });
+      }
+      setKeyboardHeight(0);
+    };
+
+    const showSub = Keyboard.addListener(showEvent, onShow);
+    const hideSub = Keyboard.addListener(hideEvent, onHide);
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [visible]);
+
+  const topInset = Math.max(insets?.top ?? 0, 24);
+  const bottomInset = insets?.bottom ?? 0;
+  const availableHeight = height - keyboardHeight - (keyboardHeight > 0 ? 0 : bottomInset);
+  const sheetMaxHeight = Math.min(
+    height * maxHeightPct,
+    Math.max(200, availableHeight - topInset)
+  );
+
   return (
     <Modal visible={visible} transparent statusBarTranslucent animationType="fade" onRequestClose={onClose}>
       {/* react-native Modal renders in a separate native hierarchy OUTSIDE the app's
@@ -382,41 +433,44 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({ visible, onClose, titl
           touch arbitration for the inner ScrollView vs its Pressable rows — scroll
           only works over non-pressable areas (e.g. an icon). This wrapper fixes it. */}
       <GestureHandlerRootView style={{ flex: 1 }}>
-      {/* This Modal is statusBarTranslucent, so Android's adjustResize does not
-          shrink its window — keyboard avoidance must be done here. 'padding'
-          (not 'height') because it measures actual overlap with the keyboard,
-          so it stays stable when the sheet opens with the keyboard already up. */}
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior="padding"
-      >
-      <Pressable onPress={onClose} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' }}>
-        <MotiView
-          from={{ translateY: 32, opacity: 0 }}
-          animate={{ translateY: 0, opacity: 1 }}
-          transition={{ type: 'timing', duration: motion.base }}
+        <Pressable
+          onPress={() => {
+            Keyboard.dismiss();
+            onClose();
+          }}
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(0,0,0,0.55)',
+            justifyContent: 'flex-end',
+            paddingBottom: keyboardHeight,
+          }}
         >
-          {/* Swallow taps so touches inside the sheet don't close it */}
-          <Pressable onPress={() => {}} style={{ width: '100%' }}>
-            <View
-              style={{
-                backgroundColor: colors.surface,
-                borderTopLeftRadius: radius.xl,
-                borderTopRightRadius: radius.xl,
-                borderWidth: 1,
-                borderBottomWidth: 0,
-                borderColor: colors.border,
-                maxHeight: height * maxHeightPct,
-                paddingBottom: 28,
-              }}
-            >
-              <SheetHandle title={title} onClose={onClose} right={right} />
-              {children}
-            </View>
-          </Pressable>
-        </MotiView>
-      </Pressable>
-      </KeyboardAvoidingView>
+          <MotiView
+            from={{ translateY: 32, opacity: 0 }}
+            animate={{ translateY: 0, opacity: 1 }}
+            transition={{ type: 'timing', duration: motion.base }}
+          >
+            {/* Swallow taps so touches inside the sheet don't close it */}
+            <Pressable onPress={() => {}} style={{ width: '100%' }}>
+              <View
+                style={{
+                  backgroundColor: colors.surface,
+                  borderTopLeftRadius: radius.xl,
+                  borderTopRightRadius: radius.xl,
+                  borderWidth: 1,
+                  borderBottomWidth: 0,
+                  borderColor: colors.border,
+                  maxHeight: sheetMaxHeight,
+                  paddingBottom: keyboardHeight > 0 ? 12 : Math.max(bottomInset, 16),
+                  overflow: 'hidden',
+                }}
+              >
+                <SheetHandle title={title} onClose={onClose} right={right} />
+                {children}
+              </View>
+            </Pressable>
+          </MotiView>
+        </Pressable>
       </GestureHandlerRootView>
     </Modal>
   );
