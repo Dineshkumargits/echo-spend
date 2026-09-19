@@ -148,6 +148,7 @@ const AnalyticsScreen = () => {
     // so changing the range left them unchanged — and their month key was derived
     // in UTC while the rows were filtered in local time.
     const rangeEnd = new Date();
+    rangeEnd.setHours(23, 59, 59, 999);
     const rangeStart = new Date();
     rangeStart.setDate(rangeStart.getDate() - (trendDays - 1));
     rangeStart.setHours(0, 0, 0, 0);

@@ -457,10 +457,11 @@ const arcPath = (
   startAngle: number,
   endAngle: number,
 ) => {
-  const start = polarPoint(cx, cy, r, endAngle);
-  const end = polarPoint(cx, cy, r, startAngle);
-  const largeArc = endAngle - startAngle <= 180 ? '0' : '1';
-  return `M ${start.x} ${start.y} A ${r} ${r} 0 ${largeArc} 0 ${end.x} ${end.y}`;
+  const delta = Math.min(Math.max(endAngle - startAngle, 0.1), 359.9);
+  const start = polarPoint(cx, cy, r, startAngle);
+  const end = polarPoint(cx, cy, r, startAngle + delta);
+  const largeArc = delta <= 180 ? '0' : '1';
+  return `M ${start.x} ${start.y} A ${r} ${r} 0 ${largeArc} 1 ${end.x} ${end.y}`;
 };
 
 export interface DonutSegment {
@@ -501,27 +502,45 @@ export const InteractiveDonut: React.FC<{
   const cy = size / 2;
   const gapDeg = segments.length > 1 ? 3 : 0;
 
-  let cursor = 0;
-  const paths = segments.map((seg, i) => {
-    const sweep = (seg.value / total) * (360 - gapDeg * segments.length);
+  let content: React.ReactNode;
+  if (segments.length === 1) {
+    const seg = segments[0];
     const id = seg.key ?? seg.label;
     const selected = selectedLabel === id;
-    const dim = selectedLabel != null && !selected;
-    const d = arcPath(cx, cy, r, cursor, cursor + Math.max(sweep, 1));
-    cursor += sweep + gapDeg;
-    return (
-      <Path
-        key={id}
-        d={d}
+    content = (
+      <Circle
+        cx={cx}
+        cy={cy}
+        r={r}
         stroke={seg.color}
         strokeWidth={selected ? strokeWidth + 4 : strokeWidth}
-        strokeLinecap="round"
-        strokeOpacity={dim ? 0.28 : 1}
         fill="none"
         onPress={() => onSelect?.(selected ? null : id)}
       />
     );
-  });
+  } else {
+    let cursor = 0;
+    content = segments.map((seg) => {
+      const sweep = Math.min((seg.value / total) * (360 - gapDeg * segments.length), 359.5);
+      const id = seg.key ?? seg.label;
+      const selected = selectedLabel === id;
+      const dim = selectedLabel != null && !selected;
+      const d = arcPath(cx, cy, r, cursor, cursor + Math.max(sweep, 0.5));
+      cursor += sweep + gapDeg;
+      return (
+        <Path
+          key={id}
+          d={d}
+          stroke={seg.color}
+          strokeWidth={selected ? strokeWidth + 4 : strokeWidth}
+          strokeLinecap="butt"
+          strokeOpacity={dim ? 0.28 : 1}
+          fill="none"
+          onPress={() => onSelect?.(selected ? null : id)}
+        />
+      );
+    });
+  }
 
   return (
     <View
@@ -537,7 +556,7 @@ export const InteractiveDonut: React.FC<{
           strokeWidth={strokeWidth}
           fill="none"
         />
-        {paths}
+        {content}
       </Svg>
       <Pressable
         onPress={() => onSelect?.(null)}

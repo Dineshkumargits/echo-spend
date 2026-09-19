@@ -1565,7 +1565,7 @@ export const getCategoryBreakdownForRange = async (
      FROM transactions t
      WHERE t.type = 'debit' AND t.isConfirmed = 1
        AND ${NOT_CASHFLOW}
-       AND t.date >= ? AND t.date < ?
+       AND t.date >= ? AND t.date <= ?
      GROUP BY t.category
      ORDER BY total DESC`,
     start.toISOString(), end.toISOString(),
@@ -1586,7 +1586,7 @@ export const getTopMerchantsForRange = async (
      WHERE t.type = 'debit' AND t.isConfirmed = 1
        AND ${NOT_CASHFLOW}
        AND t.merchant IS NOT NULL AND t.merchant != ''
-       AND t.date >= ? AND t.date < ?
+       AND t.date >= ? AND t.date <= ?
      GROUP BY t.merchant ORDER BY total DESC LIMIT ?`,
     start.toISOString(), end.toISOString(), limit,
   );
