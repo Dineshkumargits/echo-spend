@@ -24,7 +24,7 @@ export const AddLoanScreen = () => {
   const { preferences } = useStore();
   const navigation = useNavigation();
   const route = useRoute();
-  const { loanToEdit, prefillType } = (route.params as { loanToEdit?: Loan; prefillType?: 'borrowed' | 'lent' }) ?? {};
+  const { loanToEdit, prefillType, onDone } = (route.params as { loanToEdit?: Loan; prefillType?: 'borrowed' | 'lent'; onDone?: () => void }) ?? {};
   const isEditing = !!loanToEdit;
 
   const [type, setType] = useState<'borrowed' | 'lent'>(loanToEdit?.type ?? prefillType ?? 'borrowed');
@@ -122,6 +122,7 @@ export const AddLoanScreen = () => {
     }
 
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    onDone?.();
     navigation.goBack();
   };
 
@@ -139,6 +140,7 @@ export const AddLoanScreen = () => {
             await deleteLoan(loanToEdit.id);
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             notify.success('Loan record deleted');
+            onDone?.();
             navigation.goBack();
           }
         }

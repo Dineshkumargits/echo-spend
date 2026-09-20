@@ -16,7 +16,7 @@ export const showBudgetImpactToast = async (categoryName: string) => {
     if (!u) return;
     const fmt = (n: number) => `${currency}${Math.round(n).toLocaleString('en-IN')}`;
     const name = u.displayName;
-    const window = u.budget.period === 'weekly' ? 'week' : 'cycle';
+    const window = u.budget.period === 'weekly' ? 'week' : u.budget.period === 'quarterly' ? 'quarter' : u.budget.period === 'yearly' ? 'year' : 'cycle';
     if (u.remaining < 0) {
       notify.error(
         `${name} budget exceeded`,
@@ -60,7 +60,7 @@ export const runCategoryBudgetAlerts = async () => {
   const utilizations = await getBudgetUtilization(cycleAnchorFrom(prefs));
 
   for (const u of utilizations) {
-    if (u.orphaned) continue;
+    if (u.orphaned || u.budget.isActive === false) continue;
     const name = u.displayName;
     const lastPct = budgetNotificationHistory[u.budget.id] || 0;
 
@@ -71,7 +71,7 @@ export const runCategoryBudgetAlerts = async () => {
       if (lastPct < 100) {
         await NotificationService.scheduleLocalNotification(
           `Budget exceeded: ${name}`,
-          `${fmt(u.spent - u.effectiveLimit)} over your ${fmt(u.effectiveLimit)} limit with ${u.daysLeft} days left in this ${u.budget.period === 'weekly' ? 'week' : 'cycle'}.`,
+          `${fmt(u.spent - u.effectiveLimit)} over your ${fmt(u.effectiveLimit)} limit with ${u.daysLeft} days left in this ${u.budget.period === 'weekly' ? 'week' : u.budget.period === 'quarterly' ? 'quarter' : u.budget.period === 'yearly' ? 'year' : 'cycle'}.`,
           'budget',
           { screen: 'Budget' },
         );

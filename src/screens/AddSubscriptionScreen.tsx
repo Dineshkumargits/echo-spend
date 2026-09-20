@@ -23,9 +23,10 @@ import { CategoryPicker } from '../components/CategoryPicker';
 
 
 const FREQUENCIES = [
-  { key: 'weekly', label: 'Weekly' },
-  { key: 'monthly', label: 'Monthly' },
-  { key: 'yearly', label: 'Yearly' },
+  { key: 'monthly', label: 'Monthly', sub: 'Every month' },
+  { key: 'quarterly', label: 'Quarterly', sub: 'Every 3 months' },
+  { key: 'yearly', label: 'Yearly', sub: 'Every year' },
+  { key: 'weekly', label: 'Weekly', sub: 'Every week' },
 ] as const;
 
 export const AddSubscriptionScreen = () => {
@@ -38,20 +39,22 @@ export const AddSubscriptionScreen = () => {
     prefillName, 
     prefillAmount, 
     prefillCategory, 
-    prefillAccountId 
+    prefillAccountId,
+    onDone,
   } = (route.params as { 
     subscriptionToEdit?: Subscription;
     prefillName?: string;
     prefillAmount?: string;
     prefillCategory?: string;
     prefillAccountId?: number;
+    onDone?: () => void;
   }) ?? {};
   const isEditing = !!subscriptionToEdit;
 
   const [name, setName] = useState(subscriptionToEdit?.name ?? prefillName ?? '');
   const [amount, setAmount] = useState(subscriptionToEdit?.amount ? String(subscriptionToEdit.amount) : (prefillAmount ?? ''));
   const [category, setCategory] = useState(subscriptionToEdit?.category ?? prefillCategory ?? '');
-  const [frequency, setFrequency] = useState<'weekly' | 'monthly' | 'yearly'>(subscriptionToEdit?.frequency ?? 'monthly');
+  const [frequency, setFrequency] = useState<Subscription['frequency']>(subscriptionToEdit?.frequency ?? 'monthly');
   const [nextDueDate, setNextDueDate] = useState<Date>(
     subscriptionToEdit?.nextDueDate ? new Date(subscriptionToEdit.nextDueDate) : new Date(new Date().setMonth(new Date().getMonth() + 1))
   );
@@ -66,12 +69,13 @@ export const AddSubscriptionScreen = () => {
   // Categories from DB
   const [categories, setCategories] = useState<Category[]>([]);
 
-  // Split
-  const [splitEnabled, setSplitEnabled] = useState(subscriptionToEdit?.splitEnabled ?? false);
+  const [splitEnabled, setSplitEnabled] = useState(Boolean(subscriptionToEdit?.splitEnabled));
   // Paused subscriptions keep their history and stop appearing in bills. Saving
   // used to hardcode isActive: true, so editing a paused one silently revived it
   // — and deleting was the only way to stop one, which orphaned its payments.
-  const [isActive, setIsActive] = useState(subscriptionToEdit?.isActive ?? true);
+  const [isActive, setIsActive] = useState(
+    subscriptionToEdit?.isActive !== undefined ? Boolean(subscriptionToEdit.isActive) : true
+  );
   const [splitMemberNames, setSplitMemberNames] = useState<string[]>(
     subscriptionToEdit?.splitMembers 
       ? JSON.parse(subscriptionToEdit.splitMembers).map((m: any) => m.name)
@@ -163,6 +167,7 @@ export const AddSubscriptionScreen = () => {
     }
 
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    onDone?.();
     navigation.goBack();
   };
 
@@ -180,6 +185,7 @@ export const AddSubscriptionScreen = () => {
             await deleteSubscription(subscriptionToEdit.id);
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             notify.success('Subscription deleted');
+            onDone?.();
             navigation.goBack();
           }
         }
@@ -203,9 +209,37 @@ export const AddSubscriptionScreen = () => {
     input: { fontSize: 18, borderBottomWidth: 1, borderBottomColor: colors.border, paddingVertical: 10, color: colors.primary },
     amountInput: { fontSize: 36, fontWeight: 'bold', borderBottomWidth: 1, borderBottomColor: colors.border, paddingVertical: 10, color: colors.debit },
     dateRow: { flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: colors.border, paddingVertical: 12, gap: 10 },
-    toggleRow: { flexDirection: 'row', backgroundColor: colors.translucent, borderRadius: 12, padding: 4 },
-    toggleBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 8 },
-    toggleActive: { backgroundColor: colors.surface, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2, elevation: 1 },
+    cycleRow: { flexDirection: 'row', gap: 10 },
+    cycleCard: {
+      flex: 1,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      borderRadius: 14,
+      borderWidth: 1.5,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    cycleCardActive: {
+      borderColor: colors.accent,
+      backgroundColor: `${colors.accent}14`,
+    },
+    cycleCardTitle: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: colors.primary,
+    },
+    cycleCardTitleActive: {
+      color: colors.accent,
+    },
+    cycleCardSub: {
+      fontSize: 11,
+      color: colors.muted,
+      marginTop: 2,
+    },
+    cycleCardSubActive: {
+      color: colors.accent,
+      opacity: 0.85,
+    },
     saveButton: { height: 60, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 16, backgroundColor: colors.accent },
     deleteButton: { height: 56, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 12, borderWidth: 1, borderColor: colors.danger },
     iosPickerContainer: { backgroundColor: colors.surface, borderRadius: 14, overflow: 'hidden', marginTop: 12, borderWidth: 1, borderColor: colors.border },
@@ -274,18 +308,47 @@ export const AddSubscriptionScreen = () => {
             {/* Billing Cycle */}
             <View style={s.field}>
               <ThemedText style={s.label}>Billing Cycle</ThemedText>
-              <View style={s.toggleRow}>
-                {FREQUENCIES.map(f => (
-                  <TouchableOpacity
-                    key={f.key}
-                    style={[s.toggleBtn, frequency === f.key && s.toggleActive]}
-                    onPress={() => { setFrequency(f.key); Haptics.selectionAsync(); }}
-                  >
-                    <ThemedText style={{ fontSize: 12, fontWeight: 'bold', color: frequency === f.key ? colors.primary : colors.secondary }}>
-                      {f.label}
-                    </ThemedText>
-                  </TouchableOpacity>
-                ))}
+              <View style={{ gap: 10 }}>
+                <View style={s.cycleRow}>
+                  {FREQUENCIES.slice(0, 2).map(f => {
+                    const isSelected = frequency === f.key;
+                    return (
+                      <TouchableOpacity
+                        key={f.key}
+                        style={[s.cycleCard, isSelected && s.cycleCardActive]}
+                        onPress={() => { setFrequency(f.key); Haptics.selectionAsync(); }}
+                        activeOpacity={0.7}
+                      >
+                        <ThemedText style={[s.cycleCardTitle, isSelected && s.cycleCardTitleActive]}>
+                          {f.label}
+                        </ThemedText>
+                        <ThemedText style={[s.cycleCardSub, isSelected && s.cycleCardSubActive]}>
+                          {f.sub}
+                        </ThemedText>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+                <View style={s.cycleRow}>
+                  {FREQUENCIES.slice(2, 4).map(f => {
+                    const isSelected = frequency === f.key;
+                    return (
+                      <TouchableOpacity
+                        key={f.key}
+                        style={[s.cycleCard, isSelected && s.cycleCardActive]}
+                        onPress={() => { setFrequency(f.key); Haptics.selectionAsync(); }}
+                        activeOpacity={0.7}
+                      >
+                        <ThemedText style={[s.cycleCardTitle, isSelected && s.cycleCardTitleActive]}>
+                          {f.label}
+                        </ThemedText>
+                        <ThemedText style={[s.cycleCardSub, isSelected && s.cycleCardSubActive]}>
+                          {f.sub}
+                        </ThemedText>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
               </View>
             </View>
 
@@ -366,11 +429,15 @@ export const AddSubscriptionScreen = () => {
 
             {/* Pause — only meaningful for something that already exists */}
             {isEditing && (
-              <View style={[s.field, { backgroundColor: colors.surface, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: isActive ? colors.border : `${colors.debit}50` }]}>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                onPress={() => { setIsActive(prev => !prev); Haptics.selectionAsync(); }}
+                style={[s.field, { backgroundColor: colors.surface, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: isActive ? `${colors.accent}50` : colors.border }]}
+              >
                 <View style={s.switchRow}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, marginRight: 10 }}>
                     <LucideRepeat color={isActive ? colors.accent : colors.debit} size={20} />
-                    <View>
+                    <View style={{ flex: 1 }}>
                       <ThemedText style={{ fontWeight: 'bold', fontSize: 15 }}>
                         {isActive ? 'Active' : 'Paused'}
                       </ThemedText>
@@ -388,7 +455,7 @@ export const AddSubscriptionScreen = () => {
                     thumbColor={isActive ? colors.accent : colors.secondary}
                   />
                 </View>
-              </View>
+              </TouchableOpacity>
             )}
 
             {/* Split */}

@@ -609,11 +609,10 @@ function buildCategoryContext(categories: Category[]): string {
 /** Build budget context so AI can flag anomalies */
 function buildBudgetContext(budgets: Budget[]): string {
   if (!budgets.length) return '';
-  const monthly = budgets
-    .filter(b => b.period === 'monthly')
-    .map(b => `${b.categoryName}: ₹${b.amount.toLocaleString('en-IN')}`)
+  const list = budgets
+    .map(b => `${b.categoryName}: ₹${b.amount.toLocaleString('en-IN')} (${b.period})`)
     .join(', ');
-  return monthly ? `\nMonthly budgets set by user: ${monthly}` : '';
+  return list ? `\nBudgets set by user: ${list}` : '';
 }
 
 /** Render an ISO timestamp as the DD-MM-YYYY form the model was fine-tuned on. */

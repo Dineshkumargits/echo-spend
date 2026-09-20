@@ -11,8 +11,8 @@ import {
   Alert,
   ActivityIndicator,
   ScrollView,
+  Switch,
 } from "react-native";
-import { ScrollView as GHScrollView } from "react-native-gesture-handler";
 import * as Haptics from "expo-haptics";
 import {
   LucidePlus,
@@ -25,6 +25,8 @@ import {
   LucideX,
   LucideTag,
   LucideCalendar,
+  LucidePlay,
+  LucidePower,
 } from "lucide-react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { useNavigation, useIsFocused } from "@react-navigation/native";
@@ -42,6 +44,7 @@ import {
   getSuggestedBudgetAmount,
   upsertBudget,
   deleteBudget,
+  setBudgetActive,
   getCategories,
   budgetSelections,
   budgetAutoName,
@@ -150,8 +153,9 @@ const BudgetScreen = () => {
   // a sensible prefilled name.
   const [nameEdited, setNameEdited] = useState(false);
   const [formAmount, setFormAmount] = useState("");
-  const [formPeriod, setFormPeriod] = useState<"monthly" | "weekly">("monthly");
+  const [formPeriod, setFormPeriod] = useState<"monthly" | "weekly" | "quarterly" | "yearly">("monthly");
   const [formRollover, setFormRollover] = useState(false);
+  const [formIsActive, setFormIsActive] = useState(true);
   const [suggested, setSuggested] = useState<number | null>(null);
 
   // Category picker sheet (stacked over the editor so the editor stays clean)
@@ -300,6 +304,7 @@ const BudgetScreen = () => {
     setFormAmount("");
     setFormPeriod("monthly");
     setFormRollover(false);
+    setFormIsActive(true);
     setEditing("new");
   };
 
@@ -314,6 +319,7 @@ const BudgetScreen = () => {
     setFormAmount(String(row.budget.amount));
     setFormPeriod(row.budget.period);
     setFormRollover(!!row.budget.rollover);
+    setFormIsActive(row.budget.isActive !== false);
     setEditing(row);
   };
 
@@ -339,10 +345,19 @@ const BudgetScreen = () => {
       period: formPeriod,
       startDate: new Date().toISOString().slice(0, 10),
       rollover: formRollover,
+      isActive: formIsActive,
     });
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     notify.success("Budget saved");
     setEditing(null);
+    await load();
+    await checkBudgetAlerts();
+  };
+
+  const handleQuickResume = async (id: number) => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    await setBudgetActive(id, true);
+    notify.success("Budget resumed");
     await load();
     await checkBudgetAlerts();
   };
@@ -493,11 +508,16 @@ const BudgetScreen = () => {
   };
 
   // ── Row visuals ───────────────────────────────────────────────────────────
-  const paceColor = (pace: BudgetPace): string => budgetPaceColor(pace, colors);
+  const paceColor = (u: BudgetUtilization): string => {
+    if (u.budget.isActive === false) return colors.muted;
+    return budgetPaceColor(u.pace, colors);
+  };
 
   const paceLabel = (u: BudgetUtilization): { text: string; color: string } => {
     if (u.orphaned)
       return { text: "category removed — tap to clean up", color: colors.danger };
+    if (u.budget.isActive === false)
+      return { text: "paused · hidden from targets & alerts", color: colors.muted };
     if (u.pace === "over")
       return {
         text: `over by ${fmt(u.spent - u.effectiveLimit)}`,
@@ -554,7 +574,7 @@ const BudgetScreen = () => {
       {loading ? (
         <ActivityIndicator color={colors.accent} style={{ marginTop: 48 }} />
       ) : (
-        <GHScrollView
+        <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 120 }}
         >
@@ -619,7 +639,7 @@ const BudgetScreen = () => {
               </SectionLabel>
               {rows.map((u) => {
                 const cat = catFor(u.budget.categoryName);
-                const color = paceColor(u.pace);
+                const color = paceColor(u);
                 const label = paceLabel(u);
                 const prevDelta = u.budget.amount - u.prevSpent;
                 return (
@@ -631,7 +651,7 @@ const BudgetScreen = () => {
                       paddingVertical: 14,
                       borderBottomWidth: 1,
                       borderBottomColor: colors.border,
-                      opacity: u.orphaned ? 0.55 : 1,
+                      opacity: u.orphaned || u.budget.isActive === false ? 0.55 : 1,
                     }}
                   >
                     <View
@@ -647,12 +667,35 @@ const BudgetScreen = () => {
                         size={34}
                       />
                       <View style={{ flex: 1, marginLeft: 12, minWidth: 0 }}>
-                        <ThemedText
-                          numberOfLines={1}
-                          style={{ fontFamily: fonts.textSemibold, fontSize: 14 }}
-                        >
-                          {u.displayName}
-                        </ThemedText>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                          <ThemedText
+                            numberOfLines={1}
+                            style={{ fontFamily: fonts.textSemibold, fontSize: 14, flexShrink: 1 }}
+                          >
+                            {u.displayName}
+                          </ThemedText>
+                          {u.budget.isActive === false && (
+                            <View
+                              style={{
+                                backgroundColor: `${colors.muted}25`,
+                                paddingHorizontal: 5,
+                                paddingVertical: 1.5,
+                                borderRadius: 4,
+                              }}
+                            >
+                              <ThemedText
+                                style={{
+                                  fontSize: 8.5,
+                                  color: colors.muted,
+                                  fontWeight: "bold",
+                                  textTransform: "uppercase",
+                                }}
+                              >
+                                Paused
+                              </ThemedText>
+                            </View>
+                          )}
+                        </View>
                         <ThemedText
                           font="signal"
                           style={{
@@ -663,7 +706,13 @@ const BudgetScreen = () => {
                             marginTop: 1,
                           }}
                         >
-                          {u.budget.period === "weekly" ? "This week" : "This cycle"}
+                          {u.budget.period === "weekly"
+                            ? "This week"
+                            : u.budget.period === "quarterly"
+                            ? "This quarter"
+                            : u.budget.period === "yearly"
+                            ? "This year"
+                            : "This cycle"}
                           {u.coveredCount > 1
                             ? ` · ${u.coveredCount} categories`
                             : ""}
@@ -713,19 +762,56 @@ const BudgetScreen = () => {
                       >
                         {label.text}
                       </ThemedText>
-                      {u.prevSpent > 0 && !u.orphaned && (
-                        <ThemedText
-                          font="signal"
+                      {u.budget.isActive === false ? (
+                        <TouchableOpacity
+                          onPress={(e) => {
+                            e.stopPropagation?.();
+                            handleQuickResume(u.budget.id);
+                          }}
                           style={{
-                            fontSize: 10,
-                            color: prevDelta >= 0 ? colors.credit : colors.danger,
+                            flexDirection: "row",
+                            alignItems: "center",
+                            gap: 4,
+                            backgroundColor: `${colors.accent}18`,
+                            paddingHorizontal: 8,
+                            paddingVertical: 3,
+                            borderRadius: 6,
                           }}
                         >
-                          last {u.budget.period === "weekly" ? "week" : "cycle"}{" "}
-                          {prevDelta >= 0
-                            ? `${fmt(prevDelta)} under`
-                            : `${fmt(-prevDelta)} over`}
-                        </ThemedText>
+                          <LucidePlay color={colors.accent} size={11} />
+                          <ThemedText
+                            font="signal"
+                            style={{
+                              fontSize: 10,
+                              color: colors.accent,
+                              fontWeight: "bold",
+                            }}
+                          >
+                            Resume
+                          </ThemedText>
+                        </TouchableOpacity>
+                      ) : (
+                        u.prevSpent > 0 && !u.orphaned && (
+                          <ThemedText
+                            font="signal"
+                            style={{
+                              fontSize: 10,
+                              color: prevDelta >= 0 ? colors.credit : colors.danger,
+                            }}
+                          >
+                            last{" "}
+                            {u.budget.period === "weekly"
+                              ? "week"
+                              : u.budget.period === "quarterly"
+                              ? "quarter"
+                              : u.budget.period === "yearly"
+                              ? "year"
+                              : "cycle"}{" "}
+                            {prevDelta >= 0
+                              ? `${fmt(prevDelta)} under`
+                              : `${fmt(-prevDelta)} over`}
+                          </ThemedText>
+                        )
                       )}
                     </View>
                   </TouchableOpacity>
@@ -733,7 +819,7 @@ const BudgetScreen = () => {
               })}
             </>
           )}
-        </GHScrollView>
+        </ScrollView>
       )}
 
       {/* ── Add budget FAB (matches Dashboard / Finances) ── */}
@@ -779,7 +865,7 @@ const BudgetScreen = () => {
           ) : undefined
         }
       >
-        <GHScrollView
+        <ScrollView
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 32 }}
@@ -822,8 +908,15 @@ const BudgetScreen = () => {
                     font="signal"
                     style={{ fontSize: 10.5, color: colors.accent }}
                   >
-                    Avg of last 3 {formPeriod === "weekly" ? "weeks" : "cycles"}:{" "}
-                    {fmt(suggested)} — tap to use
+                    Avg of last 3{" "}
+                    {formPeriod === "weekly"
+                      ? "weeks"
+                      : formPeriod === "quarterly"
+                      ? "quarters"
+                      : formPeriod === "yearly"
+                      ? "years"
+                      : "cycles"}
+                    : {fmt(suggested)} — tap to use
                   </ThemedText>
                 </TouchableOpacity>
               )}
@@ -959,7 +1052,7 @@ const BudgetScreen = () => {
           </ThemedText>
 
           <FieldLabel style={{ marginTop: 18 }}>Period</FieldLabel>
-          <View style={{ flexDirection: "row", gap: 8 }}>
+          <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
             <PillButton
               label="Monthly cycle"
               active={formPeriod === "monthly"}
@@ -969,6 +1062,16 @@ const BudgetScreen = () => {
               label="Weekly"
               active={formPeriod === "weekly"}
               onPress={() => setFormPeriod("weekly")}
+            />
+            <PillButton
+              label="3 Months (Quarterly)"
+              active={formPeriod === "quarterly"}
+              onPress={() => setFormPeriod("quarterly")}
+            />
+            <PillButton
+              label="Yearly"
+              active={formPeriod === "yearly"}
+              onPress={() => setFormPeriod("yearly")}
             />
           </View>
 
@@ -989,9 +1092,86 @@ const BudgetScreen = () => {
           <ThemedText
             style={{ fontSize: 11, color: colors.muted, marginTop: 6 }}
           >
-            Carries last {formPeriod === "weekly" ? "week's" : "cycle's"} leftover
-            (or overspend) into this limit.
+            Carries last{" "}
+            {formPeriod === "weekly"
+              ? "week's"
+              : formPeriod === "quarterly"
+              ? "quarter's"
+              : formPeriod === "yearly"
+              ? "year's"
+              : "cycle's"}{" "}
+            leftover (or overspend) into this limit.
           </ThemedText>
+
+          {/* Pause / Resume — only meaningful for a budget that already exists */}
+          {editingRow && (
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={() => {
+                setFormIsActive((prev) => !prev);
+                Haptics.selectionAsync();
+              }}
+              style={{
+                backgroundColor: colors.surface,
+                borderRadius: 16,
+                padding: 16,
+                borderWidth: 1,
+                borderColor: formIsActive ? `${colors.accent}50` : colors.border,
+                marginTop: 18,
+              }}
+            >
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}
+              >
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 10,
+                    flex: 1,
+                    marginRight: 10,
+                  }}
+                >
+                  <LucidePower
+                    color={formIsActive ? colors.accent : colors.debit}
+                    size={20}
+                  />
+                  <View style={{ flex: 1 }}>
+                    <ThemedText style={{ fontWeight: "bold", fontSize: 15 }}>
+                      {formIsActive ? "Active" : "Paused"}
+                    </ThemedText>
+                    <ThemedText
+                      style={{
+                        fontSize: 11,
+                        color: colors.secondary,
+                        marginTop: 2,
+                      }}
+                    >
+                      {formIsActive
+                        ? "Counts in budget watch, alerts and monthly totals"
+                        : "Hidden from alerts and monthly budget targets"}
+                    </ThemedText>
+                  </View>
+                </View>
+                <Switch
+                  value={formIsActive}
+                  onValueChange={(v) => {
+                    setFormIsActive(v);
+                    Haptics.selectionAsync();
+                  }}
+                  trackColor={{
+                    false: colors.border,
+                    true: `${colors.accent}80`,
+                  }}
+                  thumbColor={formIsActive ? colors.accent : colors.secondary}
+                />
+              </View>
+            </TouchableOpacity>
+          )}
 
           {editingRow && !editingRow.orphaned && (
             <PillButton
@@ -1007,7 +1187,7 @@ const BudgetScreen = () => {
             onPress={handleSave}
             style={{ marginTop: 22 }}
           />
-        </GHScrollView>
+        </ScrollView>
       </BottomSheet>
 
       {/* ── Category picker sheet (stacked over the editor) ── */}
@@ -1033,7 +1213,7 @@ const BudgetScreen = () => {
             }
           />
         </View>
-        <GHScrollView
+        <ScrollView
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 8 }}
@@ -1098,7 +1278,7 @@ const BudgetScreen = () => {
             onPress={() => setShowCatPicker(false)}
             style={{ marginTop: 22 }}
           />
-        </GHScrollView>
+        </ScrollView>
       </BottomSheet>
 
       {/* ── Plan sheet ── */}
@@ -1108,7 +1288,7 @@ const BudgetScreen = () => {
         title="Cycle plan"
         maxHeightPct={0.9}
       >
-        <GHScrollView
+        <ScrollView
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 32 }}
@@ -1279,7 +1459,7 @@ const BudgetScreen = () => {
           </ThemedText>
 
           <PrimaryButton label="Save plan" onPress={savePlan} style={{ marginTop: 22 }} />
-        </GHScrollView>
+        </ScrollView>
       </BottomSheet>
     </ThemedSafeAreaView>
   );

@@ -33,13 +33,15 @@ export const AddGoalScreen = () => {
     prefillName, 
     prefillAmount, 
     prefillCategory, 
-    prefillAccountId 
+    prefillAccountId,
+    onDone,
   } = (route.params as { 
     goalToEdit?: Goal;
     prefillName?: string;
     prefillAmount?: string;
     prefillCategory?: string;
     prefillAccountId?: number;
+    onDone?: () => void;
   }) ?? {};
   const isEditing = !!goalToEdit;
 
@@ -124,6 +126,7 @@ export const AddGoalScreen = () => {
     }
 
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    onDone?.();
     navigation.goBack();
   };
 
@@ -141,6 +144,7 @@ export const AddGoalScreen = () => {
             await deleteGoal(goalToEdit.id);
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             notify.success('Goal deleted');
+            onDone?.();
             navigation.goBack();
           }
         }

@@ -429,48 +429,43 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({ visible, onClose, titl
   return (
     <Modal visible={visible} transparent statusBarTranslucent animationType="fade" onRequestClose={onClose}>
       {/* react-native Modal renders in a separate native hierarchy OUTSIDE the app's
-          root GestureHandlerRootView. Without re-establishing one here, RNGH breaks
-          touch arbitration for the inner ScrollView vs its Pressable rows — scroll
-          only works over non-pressable areas (e.g. an icon). This wrapper fixes it. */}
-      <GestureHandlerRootView style={{ flex: 1 }}>
-        <Pressable
-          onPress={() => {
-            Keyboard.dismiss();
-            onClose();
-          }}
-          style={{
-            flex: 1,
-            backgroundColor: 'rgba(0,0,0,0.55)',
-            justifyContent: 'flex-end',
-            paddingBottom: keyboardHeight,
-          }}
-        >
+          root GestureHandlerRootView. Re-establishing one here preserves RNGH gesture
+          handling. The backdrop Pressable is a flex sibling ABOVE the sheet so it only
+          receives taps outside the sheet, eliminating the need for a touch-swallowing
+          inner Pressable that broke ScrollView drag gestures on empty space. */}
+      <GestureHandlerRootView style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }}>
+        <View style={{ flex: 1, justifyContent: 'flex-end' }}>
+          <Pressable
+            onPress={() => {
+              Keyboard.dismiss();
+              onClose();
+            }}
+            style={{ flex: 1 }}
+          />
           <MotiView
             from={{ translateY: 32, opacity: 0 }}
             animate={{ translateY: 0, opacity: 1 }}
             transition={{ type: 'timing', duration: motion.base }}
+            style={{ width: '100%', paddingBottom: keyboardHeight }}
           >
-            {/* Swallow taps so touches inside the sheet don't close it */}
-            <Pressable onPress={() => {}} style={{ width: '100%' }}>
-              <View
-                style={{
-                  backgroundColor: colors.surface,
-                  borderTopLeftRadius: radius.xl,
-                  borderTopRightRadius: radius.xl,
-                  borderWidth: 1,
-                  borderBottomWidth: 0,
-                  borderColor: colors.border,
-                  maxHeight: sheetMaxHeight,
-                  paddingBottom: keyboardHeight > 0 ? 12 : Math.max(bottomInset, 16),
-                  overflow: 'hidden',
-                }}
-              >
-                <SheetHandle title={title} onClose={onClose} right={right} />
-                {children}
-              </View>
-            </Pressable>
+            <View
+              style={{
+                backgroundColor: colors.surface,
+                borderTopLeftRadius: radius.xl,
+                borderTopRightRadius: radius.xl,
+                borderWidth: 1,
+                borderBottomWidth: 0,
+                borderColor: colors.border,
+                maxHeight: sheetMaxHeight,
+                paddingBottom: keyboardHeight > 0 ? 12 : Math.max(bottomInset, 16),
+                overflow: 'hidden',
+              }}
+            >
+              <SheetHandle title={title} onClose={onClose} right={right} />
+              {children}
+            </View>
           </MotiView>
-        </Pressable>
+        </View>
       </GestureHandlerRootView>
     </Modal>
   );

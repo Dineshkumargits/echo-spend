@@ -56,7 +56,7 @@ export interface Subscription {
   name: string;
   amount: number;
   category: string;
-  frequency: 'monthly' | 'yearly' | 'weekly';
+  frequency: 'monthly' | 'yearly' | 'weekly' | 'quarterly';
   nextDueDate: string;
   lastPaidDate?: string;
   isActive: boolean;
@@ -141,10 +141,11 @@ export interface Budget {
    */
   categoryNames?: string[];
   amount: number;
-  period: 'monthly' | 'weekly';
+  period: 'monthly' | 'weekly' | 'quarterly' | 'yearly';
   startDate: string;
   /** carry last window's leftover (or overspend) into the current limit */
   rollover?: boolean;
+  isActive?: boolean;
 }
 
 export interface Insight {
@@ -307,7 +308,8 @@ export const initDatabase = async () => {
         categoryName TEXT NOT NULL,
         amount REAL NOT NULL,
         period TEXT NOT NULL DEFAULT 'monthly',
-        startDate TEXT NOT NULL
+        startDate TEXT NOT NULL,
+        isActive INTEGER NOT NULL DEFAULT 1
       );`);
 
       await db.execAsync(`CREATE TABLE IF NOT EXISTS insights (
@@ -520,6 +522,7 @@ const runMigrations = async () => {
 
   // Legacy migrations (catch failures if columns already exist)
   const migrations = [
+    'ALTER TABLE budgets ADD COLUMN isActive INTEGER DEFAULT 1',
     'ALTER TABLE budgets ADD COLUMN rollover INTEGER DEFAULT 0',
     'ALTER TABLE budgets ADD COLUMN categoryNames TEXT',
     'ALTER TABLE budgets ADD COLUMN name TEXT',
@@ -1397,6 +1400,7 @@ const revertTransactionImpact = async (tx: Transaction) => {
     if (sub) {
       const prev = new Date(sub.nextDueDate);
       if (sub.frequency === 'monthly') prev.setMonth(prev.getMonth() - 1);
+      else if (sub.frequency === 'quarterly') prev.setMonth(prev.getMonth() - 3);
       else if (sub.frequency === 'yearly') prev.setFullYear(prev.getFullYear() - 1);
       else if (sub.frequency === 'weekly') prev.setDate(prev.getDate() - 7);
       // Only roll back if the revert makes logical sense (new prev is before now)
@@ -2326,6 +2330,7 @@ const mapBudgetRow = (row: any): Budget => {
     categoryNames,
     name: row.name ? String(row.name) : undefined,
     rollover: !!row.rollover,
+    isActive: row.isActive !== undefined && row.isActive !== null ? Boolean(row.isActive) : true,
   };
 };
 
@@ -2349,9 +2354,16 @@ export const budgetAutoName = (selections: string[]): string => {
 export const budgetDisplayName = (b: Budget): string =>
   b.name?.trim() || budgetAutoName(budgetSelections(b));
 
-export const getBudgets = async (): Promise<Budget[]> => {
-  const rows = await db.getAllAsync<any>('SELECT * FROM budgets ORDER BY categoryName');
+export const getBudgets = async (activeOnly: boolean = false): Promise<Budget[]> => {
+  const query = activeOnly
+    ? 'SELECT * FROM budgets WHERE isActive != 0 ORDER BY categoryName'
+    : 'SELECT * FROM budgets ORDER BY categoryName';
+  const rows = await db.getAllAsync<any>(query);
   return rows.map(mapBudgetRow);
+};
+
+export const setBudgetActive = async (id: number, isActive: boolean) => {
+  await db.runAsync('UPDATE budgets SET isActive = ? WHERE id = ?', isActive ? 1 : 0, id);
 };
 
 export const upsertBudget = async (budget: Omit<Budget, 'id'> & { id?: number }) => {
@@ -2365,11 +2377,12 @@ export const upsertBudget = async (budget: Omit<Budget, 'id'> & { id?: number })
   // its categories instead of freezing a stale name.
   const trimmed = budget.name?.trim();
   const name = trimmed && trimmed !== budgetAutoName(selections) ? trimmed : null;
+  const isActive = budget.isActive !== false ? 1 : 0;
 
   const update = (id: number) =>
     db.runAsync(
-      'UPDATE budgets SET name = ?, categoryName = ?, categoryNames = ?, amount = ?, period = ?, startDate = ?, rollover = ? WHERE id = ?',
-      name, primary, namesJson, budget.amount, budget.period, budget.startDate, budget.rollover ? 1 : 0, id
+      'UPDATE budgets SET name = ?, categoryName = ?, categoryNames = ?, amount = ?, period = ?, startDate = ?, rollover = ?, isActive = ? WHERE id = ?',
+      name, primary, namesJson, budget.amount, budget.period, budget.startDate, budget.rollover ? 1 : 0, isActive, id
     );
 
   if (budget.id != null) {
@@ -2386,8 +2399,8 @@ export const upsertBudget = async (budget: Omit<Budget, 'id'> & { id?: number })
     await update(existing.id);
   } else {
     await db.runAsync(
-      'INSERT INTO budgets (name, categoryName, categoryNames, amount, period, startDate, rollover) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      name, primary, namesJson, budget.amount, budget.period, budget.startDate, budget.rollover ? 1 : 0
+      'INSERT INTO budgets (name, categoryName, categoryNames, amount, period, startDate, rollover, isActive) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      name, primary, namesJson, budget.amount, budget.period, budget.startDate, budget.rollover ? 1 : 0, isActive
     );
   }
 };
@@ -3161,6 +3174,26 @@ const getWeekWindow = (shift = 0) => {
   return { start, end };
 };
 
+/** Calendar quarter window [Q1: Jan-Mar, Q2: Apr-Jun, Q3: Jul-Sep, Q4: Oct-Dec], shifted by `shift` quarters. */
+const getQuarterWindow = (shift = 0) => {
+  const now = new Date();
+  const currentQ = Math.floor(now.getMonth() / 3) + shift;
+  const startYear = now.getFullYear() + Math.floor(currentQ / 4);
+  const startMonth = (((currentQ % 4) + 4) % 4) * 3;
+  const start = new Date(startYear, startMonth, 1);
+  const end = new Date(startYear, startMonth + 3, 1);
+  return { start, end };
+};
+
+/** Calendar year window, shifted by `shift` years. */
+const getYearWindow = (shift = 0) => {
+  const now = new Date();
+  const year = now.getFullYear() + shift;
+  const start = new Date(year, 0, 1);
+  const end = new Date(year + 1, 0, 1);
+  return { start, end };
+};
+
 /** One grouped query: spend per category text within [start, end). */
 const getSpendByCategory = async (start: Date, end: Date): Promise<Map<string, number>> => {
   const rows = await db.getAllAsync<{ category: string; total: number }>(
@@ -3248,11 +3281,14 @@ export const getBudgetUtilization = async (
 ): Promise<BudgetUtilization[]> => {
   // Budget cycle mirrors getCurrentMonthSpend so gauges and month totals agree.
   // Weekly budgets get a real Monday-start week instead.
+  // Quarterly budgets get calendar quarters, yearly budgets get calendar years.
   const [budgets, categories] = await Promise.all([getBudgets(), getCategories()]);
   if (budgets.length === 0) return [];
 
   const now = new Date();
   const hasWeekly = budgets.some((b) => b.period === 'weekly');
+  const hasQuarterly = budgets.some((b) => b.period === 'quarterly');
+  const hasYearly = budgets.some((b) => b.period === 'yearly');
 
   const [monthWin, prevMonthWin] = await Promise.all([
     getSalaryCycleWindowAsync(anchorLike),
@@ -3260,23 +3296,56 @@ export const getBudgetUtilization = async (
   ]);
   const weekWin = getWeekWindow();
   const prevWeekWin = getWeekWindow(-1);
+  const quarterWin = getQuarterWindow();
+  const prevQuarterWin = getQuarterWindow(-1);
+  const yearWin = getYearWindow();
+  const prevYearWin = getYearWindow(-1);
 
-  const [monthSpendMap, prevMonthSpendMap, weekSpendMap, prevWeekSpendMap] = await Promise.all([
+  const [
+    monthSpendMap,
+    prevMonthSpendMap,
+    weekSpendMap,
+    prevWeekSpendMap,
+    quarterSpendMap,
+    prevQuarterSpendMap,
+    yearSpendMap,
+    prevYearSpendMap,
+  ] = await Promise.all([
     getSpendByCategory(monthWin.start, monthWin.end),
     getSpendByCategory(prevMonthWin.start, prevMonthWin.end),
     hasWeekly ? getSpendByCategory(weekWin.start, weekWin.end) : Promise.resolve(new Map<string, number>()),
     hasWeekly ? getSpendByCategory(prevWeekWin.start, prevWeekWin.end) : Promise.resolve(new Map<string, number>()),
+    hasQuarterly ? getSpendByCategory(quarterWin.start, quarterWin.end) : Promise.resolve(new Map<string, number>()),
+    hasQuarterly ? getSpendByCategory(prevQuarterWin.start, prevQuarterWin.end) : Promise.resolve(new Map<string, number>()),
+    hasYearly ? getSpendByCategory(yearWin.start, yearWin.end) : Promise.resolve(new Map<string, number>()),
+    hasYearly ? getSpendByCategory(prevYearWin.start, prevYearWin.end) : Promise.resolve(new Map<string, number>()),
   ]);
 
   const liveNames = new Set(categories.map((c) => c.name));
 
   const results: BudgetUtilization[] = budgets.map((b) => {
-    const weekly = b.period === 'weekly';
-    const win = weekly ? weekWin : monthWin;
+    let win: { start: Date; end: Date } = monthWin;
+    let spendMap = monthSpendMap;
+    let prevSpendMap = prevMonthSpendMap;
+
+    if (b.period === 'weekly') {
+      win = weekWin;
+      spendMap = weekSpendMap;
+      prevSpendMap = prevWeekSpendMap;
+    } else if (b.period === 'quarterly') {
+      win = quarterWin;
+      spendMap = quarterSpendMap;
+      prevSpendMap = prevQuarterSpendMap;
+    } else if (b.period === 'yearly') {
+      win = yearWin;
+      spendMap = yearSpendMap;
+      prevSpendMap = prevYearSpendMap;
+    }
+
     const selections = budgetSelections(b);
     const names = coveredCategoryNames(selections, categories);
-    const spent = sumCovered(names, weekly ? weekSpendMap : monthSpendMap);
-    const prevSpent = sumCovered(names, weekly ? prevWeekSpendMap : prevMonthSpendMap);
+    const spent = sumCovered(names, spendMap);
+    const prevSpent = sumCovered(names, prevSpendMap);
 
     const rolloverCarry = b.rollover ? b.amount - prevSpent : 0;
     const effectiveLimit = Math.max(b.amount + rolloverCarry, 0);
@@ -3331,12 +3400,15 @@ export const getBudgetUtilization = async (
   });
 
   // Urgency first: blown budgets, then at-risk pace, then the rest by usage.
-  // Orphaned budgets sink to the bottom for cleanup.
+  // Paused budgets sink below active budgets; orphaned budgets sink to the bottom for cleanup.
   // Urgency order: a budget with nothing left outranks one merely pacing badly.
   const paceRank: Record<BudgetPace, number> = {
     over: 0, reached: 1, risk: 2, on_track: 3, under: 4,
   };
   return results.sort((a, b) => {
+    const aActive = a.budget.isActive !== false;
+    const bActive = b.budget.isActive !== false;
+    if (aActive !== bActive) return aActive ? -1 : 1;
     if (a.orphaned !== b.orphaned) return a.orphaned ? 1 : -1;
     if (paceRank[a.pace] !== paceRank[b.pace]) return paceRank[a.pace] - paceRank[b.pace];
     return b.percentage - a.percentage;
@@ -3366,17 +3438,24 @@ export const getBudgetSummary = async (
   const spendMap = await getSpendByCategory(monthWin.start, monthWin.end);
   const cycleSpend = [...spendMap.values()].reduce((a, v) => a + v, 0);
 
-  const monthly = util.filter((u) => u.budget.period === 'monthly' && !u.orphaned);
+  const monthly = util.filter((u) => u.budget.period === 'monthly' && !u.orphaned && u.budget.isActive !== false);
+  const quarterly = util.filter((u) => u.budget.period === 'quarterly' && !u.orphaned && u.budget.isActive !== false);
+  const yearly = util.filter((u) => u.budget.period === 'yearly' && !u.orphaned && u.budget.isActive !== false);
   const covered = new Set<string>();
-  monthly.forEach((u) =>
+  util.filter((u) => !u.orphaned && u.budget.isActive !== false).forEach((u) =>
     coveredCategoryNames(budgetSelections(u.budget), categories).forEach((n) =>
       covered.add(n),
     ),
   );
   const budgetedSpent = sumCovered([...covered], spendMap);
 
+  const totalMonthlyBudgeted =
+    monthly.reduce((a, u) => a + u.effectiveLimit, 0) +
+    quarterly.reduce((a, u) => a + Math.round(u.effectiveLimit / 3), 0) +
+    yearly.reduce((a, u) => a + Math.round(u.effectiveLimit / 12), 0);
+
   return {
-    totalBudgeted: monthly.reduce((a, u) => a + u.effectiveLimit, 0),
+    totalBudgeted: totalMonthlyBudgeted,
     budgetedSpent,
     cycleSpend,
     unbudgetedSpend: Math.max(cycleSpend - budgetedSpent, 0),
@@ -3389,7 +3468,7 @@ export const getBudgetSummary = async (
  */
 export const getSuggestedBudgetAmount = async (
   selections: string[],
-  period: 'monthly' | 'weekly',
+  period: 'monthly' | 'weekly' | 'quarterly' | 'yearly',
   // Historical windows only (shift -1/-2/-3), so the rule is used without any
   // detection snap — past cycles must stay stable.
   anchorLike: CycleAnchor | number = 1,
@@ -3400,11 +3479,12 @@ export const getSuggestedBudgetAmount = async (
   // Three independent windows — resolve and query them in parallel rather than
   // six sequential round-trips.
   const windows = await Promise.all(
-    [-1, -2, -3].map((shift) =>
-      period === 'weekly'
-        ? Promise.resolve(getWeekWindow(shift))
-        : getSalaryCycleWindowAsync(anchorLike, shift),
-    ),
+    [-1, -2, -3].map((shift) => {
+      if (period === 'weekly') return Promise.resolve(getWeekWindow(shift));
+      if (period === 'quarterly') return Promise.resolve(getQuarterWindow(shift));
+      if (period === 'yearly') return Promise.resolve(getYearWindow(shift));
+      return getSalaryCycleWindowAsync(anchorLike, shift);
+    }),
   );
   const maps = await Promise.all(
     windows.map((win) => getSpendByCategory(win.start, win.end)),
@@ -3432,13 +3512,14 @@ export const getBudgetImpactForCategory = async (
   // whose expanded coverage (parent → subs) includes it. `util` is urgency-
   // sorted, so ties resolve to the most pressing budget.
   const explicit = util.find(
-    (u) => !u.orphaned && budgetSelections(u.budget).includes(categoryName),
+    (u) => !u.orphaned && u.budget.isActive !== false && budgetSelections(u.budget).includes(categoryName),
   );
   if (explicit) return explicit;
   return (
     util.find(
       (u) =>
         !u.orphaned &&
+        u.budget.isActive !== false &&
         coveredCategoryNames(budgetSelections(u.budget), categories).includes(
           categoryName,
         ),
@@ -3725,11 +3806,22 @@ export const resetAllAccountScanDates = async (isoDate: string): Promise<void> =
 
 export const getSubscriptions = async (activeOnly = false): Promise<Subscription[]> => {
   const where = activeOnly ? 'WHERE isActive = 1' : '';
-  return await db.getAllAsync<Subscription>(`SELECT * FROM subscriptions ${where} ORDER BY nextDueDate ASC`);
+  const rows = await db.getAllAsync<any>(`SELECT * FROM subscriptions ${where} ORDER BY nextDueDate ASC`);
+  return rows.map((r: any) => ({
+    ...r,
+    isActive: Boolean(r.isActive),
+    splitEnabled: Boolean(r.splitEnabled),
+  }));
 };
 
 export const getSubscriptionById = async (id: number): Promise<Subscription | null> => {
-  return await db.getFirstAsync<Subscription>('SELECT * FROM subscriptions WHERE id = ?', id) ?? null;
+  const r = await db.getFirstAsync<any>('SELECT * FROM subscriptions WHERE id = ?', id);
+  if (!r) return null;
+  return {
+    ...r,
+    isActive: Boolean(r.isActive),
+    splitEnabled: Boolean(r.splitEnabled),
+  };
 };
 
 export const getGoalById = async (id: number): Promise<Goal | null> => {
@@ -3775,7 +3867,7 @@ export const nextBillingDate = (
     d.setDate(d.getDate() + 7);
     return d.toISOString();
   }
-  const months = frequency === 'yearly' ? 12 : 1;
+  const months = frequency === 'yearly' ? 12 : frequency === 'quarterly' ? 3 : 1;
   const target = new Date(d.getFullYear(), d.getMonth() + months, 1);
   const daysInTarget = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
   const day = Math.min(anchorDay ?? d.getDate(), daysInTarget);
@@ -3790,6 +3882,7 @@ const previousBillingDate = (from: string, frequency: Subscription['frequency'])
   const d = new Date(from);
   if (frequency === 'weekly') d.setDate(d.getDate() - 7);
   else if (frequency === 'yearly') d.setFullYear(d.getFullYear() - 1);
+  else if (frequency === 'quarterly') d.setMonth(d.getMonth() - 3);
   else d.setMonth(d.getMonth() - 1);
   return d.toISOString();
 };
@@ -3931,6 +4024,7 @@ export const revertSubscriptionCycleFor = async (transactionId: number): Promise
   const back = new Date(sub.nextDueDate);
   if (sub.frequency === 'weekly') back.setDate(back.getDate() - 7);
   else if (sub.frequency === 'yearly') back.setFullYear(back.getFullYear() - 1);
+  else if (sub.frequency === 'quarterly') back.setMonth(back.getMonth() - 3);
   else back.setMonth(back.getMonth() - 1);
 
   await db.runAsync(

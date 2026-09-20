@@ -477,9 +477,11 @@ const DashboardScreen = ({ navigation }: any) => {
   }, [transactions]);
 
   // §3.7 Budget watch — top 3 (already urgency-sorted by the DB), shown when
-  // anything is ≥60% used OR pacing to blow its limit.
+  // anything is ≥60% used OR pacing to blow its limit. Paused budgets are excluded.
   const budgetWatchFiltered = useMemo(() => {
-    const top3 = budgetWatch.filter((b) => !b.orphaned).slice(0, 3);
+    const top3 = budgetWatch
+      .filter((b) => !b.orphaned && b.budget.isActive !== false)
+      .slice(0, 3);
     return top3.some(
       (b) => b.percentage >= 60 || b.pace === "risk" || b.pace === "over",
     )

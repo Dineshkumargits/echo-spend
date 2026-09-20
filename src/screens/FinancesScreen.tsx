@@ -14,7 +14,7 @@ import {
   LucideX, LucideCheck, LucideChevronLeft,
 } from 'lucide-react-native';
 import { MotiView } from 'moti';
-import { useIsFocused } from '@react-navigation/native';
+import { useIsFocused, useFocusEffect } from '@react-navigation/native';
 import {
   getGoals, getLoans, getSubscriptions, getAccounts, getSplits,
   paySubscription, contributeToGoal, recordLoanPayment,
@@ -222,9 +222,11 @@ export const FinancesScreen = ({ navigation, route }: any) => {
   const [showCompletedGoals, setShowCompletedGoals] = useState(false);
   const [showCompletedLoans, setShowCompletedLoans] = useState(false);
 
-  useEffect(() => {
-    if (isFocused) loadData();
-  }, [isFocused]);
+  useFocusEffect(
+    React.useCallback(() => {
+      loadData();
+    }, [])
+  );
 
   useEffect(() => {
     if (isFocused && route.params?.initialTab) {
@@ -339,6 +341,7 @@ export const FinancesScreen = ({ navigation, route }: any) => {
     const activeSubs = subscriptions.filter((sub) => sub.isActive);
     const totalMonthly = activeSubs.reduce((s, sub) => {
       if (sub.frequency === 'monthly') return s + sub.amount;
+      if (sub.frequency === 'quarterly') return s + sub.amount / 3;
       if (sub.frequency === 'yearly') return s + sub.amount / 12;
       if (sub.frequency === 'weekly') return s + sub.amount * 4.33;
       return s;
@@ -387,7 +390,7 @@ export const FinancesScreen = ({ navigation, route }: any) => {
                 isUrgent && { borderColor: `${colors.danger}50` },
                 isHighlighted && { borderColor: colors.accent, borderWidth: 2, shadowColor: colors.accent, shadowOpacity: 0.3, shadowRadius: 10, elevation: 8 }
               ]}
-              onPress={() => navigation.navigate('AddSubscription', { subscriptionToEdit: sub })}
+              onPress={() => navigation.navigate('AddSubscription', { subscriptionToEdit: sub, onDone: loadData })}
               activeOpacity={0.8}
             >
               <View style={[styles.cardHeader, !sub.isActive && { opacity: 0.55 }]}>
@@ -492,7 +495,7 @@ export const FinancesScreen = ({ navigation, route }: any) => {
           isHighlighted && { borderColor: colors.accent, borderWidth: 2, shadowColor: colors.accent, shadowOpacity: 0.3, shadowRadius: 10, elevation: 8 }
         ]}
         activeOpacity={0.8}
-        onPress={() => navigation.navigate('AddGoal', { goalToEdit: goal })}
+        onPress={() => navigation.navigate('AddGoal', { goalToEdit: goal, onDone: loadData })}
       >
         <View style={styles.cardHeader}>
           <View style={[styles.iconContainer, { backgroundColor: withAlpha(color, '15') }]}>
@@ -772,7 +775,7 @@ export const FinancesScreen = ({ navigation, route }: any) => {
           isHighlighted && { borderColor: colors.accent, borderWidth: 2, shadowColor: colors.accent, shadowOpacity: 0.3, shadowRadius: 10, elevation: 8 }
         ]}
         activeOpacity={0.8}
-        onPress={() => navigation.navigate('AddLoan', { loanToEdit: loan })}
+        onPress={() => navigation.navigate('AddLoan', { loanToEdit: loan, onDone: loadData })}
       >
         <View style={styles.cardHeader}>
           <View style={[styles.iconContainer, { backgroundColor: `${color}15` }]}>
@@ -1303,7 +1306,7 @@ export const FinancesScreen = ({ navigation, route }: any) => {
                 return;
               }
               const screen = activeTab === 'subs' ? 'AddSubscription' : activeTab === 'goals' ? 'AddGoal' : 'AddLoan';
-              navigation.navigate(screen);
+              navigation.navigate(screen, { onDone: loadData });
             }}
           >
             <LucidePlus color={colors.onAccent} size={32} />
