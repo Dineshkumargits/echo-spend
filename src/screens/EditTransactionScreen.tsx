@@ -4,7 +4,7 @@ import { showBudgetImpactToast } from '../services/budgetAlerts';
 import { View, StyleSheet, TextInput, TouchableOpacity, ScrollView, Platform, KeyboardAvoidingView, Modal, ActivityIndicator, Alert } from 'react-native';
 import { MotiView } from 'moti';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { LucideX, LucideSave, LucideCheck, LucidePlus, LucideCalendar, LucideSearch, LucideTag, LucideChevronRight, LucideUsers, LucideToggleLeft, LucideToggleRight, LucideWallet, LucideTrash2 } from 'lucide-react-native';
+import { LucideX, LucideSave, LucideCheck, LucidePlus, LucideCalendar, LucideSearch, LucideChevronRight, LucideUsers, LucideToggleLeft, LucideToggleRight, LucideWallet, LucideTrash2 } from 'lucide-react-native';
 
 import * as Haptics from 'expo-haptics';
 import { notify } from '../utils/notify';
@@ -60,6 +60,14 @@ export const EditTransactionScreen = () => {
   const [amount, setAmount] = useState(transaction.amount.toString());
   const [merchant, setMerchant] = useState(transaction.merchant);
   const [category, setCategory] = useState(transaction.category);
+  const [sameAsCategory, setSameAsCategory] = useState(
+    Boolean(
+      transaction.merchant &&
+        transaction.category &&
+        transaction.merchant.trim().toLowerCase() ===
+          transaction.category.trim().toLowerCase(),
+    ),
+  );
   const [type, setType] = useState<'debit' | 'credit' | 'transfer'>(transaction.type as 'debit' | 'credit' | 'transfer');
   const [notes, setNotes] = useState(transaction.notes || '');
   const [tags, setTags] = useState<string[]>(transaction.tags || []);
@@ -415,6 +423,13 @@ export const EditTransactionScreen = () => {
     }
   }, [selectedLoan]);
 
+  useEffect(() => {
+    if (sameAsCategory && category) {
+      setMerchant(category);
+      setErrors((e) => ({ ...e, merchant: undefined }));
+    }
+  }, [category, sameAsCategory]);
+
   const validate = (): boolean => {
     const newErrors: typeof errors = {};
     const parsedAmount = parseFloat(amount);
@@ -752,7 +767,56 @@ export const EditTransactionScreen = () => {
 
             {/* 4. Merchant */}
             <View style={themedStyles.field}>
-              <ThemedText type="secondary" style={themedStyles.label}>Merchant / Source</ThemedText>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <ThemedText type="secondary" style={[themedStyles.label, { marginBottom: 0 }]}>Merchant / Source</ThemedText>
+                {!!category && (
+                  <TouchableOpacity
+                    onPress={() => {
+                      Haptics.selectionAsync();
+                      if (sameAsCategory) {
+                        setSameAsCategory(false);
+                      } else {
+                        setSameAsCategory(true);
+                        setMerchant(category);
+                        setErrors((e) => ({ ...e, merchant: undefined }));
+                      }
+                    }}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 6,
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <View
+                      style={{
+                        width: 17,
+                        height: 17,
+                        borderRadius: 4,
+                        borderWidth: 1.5,
+                        borderColor: sameAsCategory ? colors.accent : colors.muted,
+                        backgroundColor: sameAsCategory ? colors.accent : 'transparent',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      {sameAsCategory && (
+                        <LucideCheck size={11} color={colors.onAccent} strokeWidth={3} />
+                      )}
+                    </View>
+                    <ThemedText
+                      style={{
+                        fontSize: 12,
+                        color: sameAsCategory ? colors.primary : colors.secondary,
+                        fontFamily: sameAsCategory ? fonts.textMedium : fonts.text,
+                      }}
+                    >
+                      Same as category
+                    </ThemedText>
+                  </TouchableOpacity>
+                )}
+              </View>
               <TextInput
                 style={[
                   themedStyles.merchantInput,
@@ -762,7 +826,13 @@ export const EditTransactionScreen = () => {
                 placeholder="e.g. Starbucks, Salary"
                 placeholderTextColor={colors.muted}
                 value={merchant}
-                onChangeText={v => { setMerchant(v); setErrors(e => ({ ...e, merchant: undefined })); }}
+                onChangeText={v => {
+                  setMerchant(v);
+                  if (sameAsCategory && v.trim().toLowerCase() !== category.trim().toLowerCase()) {
+                    setSameAsCategory(false);
+                  }
+                  setErrors(e => ({ ...e, merchant: undefined }));
+                }}
                 maxLength={100}
               />
               {errors.merchant && <ThemedText style={{ color: colors.danger, fontSize: 12, marginTop: 4 }}>{errors.merchant}</ThemedText>}

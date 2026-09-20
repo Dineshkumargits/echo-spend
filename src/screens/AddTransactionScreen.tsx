@@ -30,7 +30,6 @@ import {
   LucidePlus,
   LucideCalendar,
   LucideSearch,
-  LucideTag,
   LucideChevronRight,
   LucideSplit,
   LucideToggleLeft,
@@ -803,6 +802,14 @@ export const AddTransactionScreen = ({ navigation: navProp, route }: any) => {
   );
   const [merchant, setMerchant] = useState(prefill.merchant ?? "");
   const [category, setCategory] = useState(prefill.category ?? "Other");
+  const [sameAsCategory, setSameAsCategory] = useState(
+    Boolean(
+      prefill.merchant &&
+        prefill.category &&
+        prefill.merchant.trim().toLowerCase() ===
+          prefill.category.trim().toLowerCase(),
+    ),
+  );
   const [type, setType] = useState<"debit" | "credit" | "transfer">(
     prefill.type ?? "debit",
   );
@@ -1181,7 +1188,12 @@ export const AddTransactionScreen = ({ navigation: navProp, route }: any) => {
     }
   }, [type, categories]);
 
-
+  useEffect(() => {
+    if (sameAsCategory && category) {
+      setMerchant(category);
+      setErrors((e) => ({ ...e, merchant: undefined }));
+    }
+  }, [category, sameAsCategory]);
 
   const validate = (): boolean => {
     const newErrors: typeof errors = {};
@@ -1617,9 +1629,68 @@ export const AddTransactionScreen = ({ navigation: navProp, route }: any) => {
 
             {/* 4. Merchant */}
             <View style={themedStyles.field}>
-              <ThemedText type="secondary" style={themedStyles.label}>
-                Merchant / Source
-              </ThemedText>
+              <View
+                style={{
+                  flexDirection: "row",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: 8,
+                }}
+              >
+                <ThemedText
+                  type="secondary"
+                  style={[themedStyles.label, { marginBottom: 0 }]}
+                >
+                  Merchant / Source
+                </ThemedText>
+                {!!category && (
+                  <TouchableOpacity
+                    onPress={() => {
+                      Haptics.selectionAsync();
+                      if (sameAsCategory) {
+                        setSameAsCategory(false);
+                      } else {
+                        setSameAsCategory(true);
+                        setMerchant(category);
+                        setErrors((e) => ({ ...e, merchant: undefined }));
+                      }
+                    }}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <View
+                      style={{
+                        width: 17,
+                        height: 17,
+                        borderRadius: 4,
+                        borderWidth: 1.5,
+                        borderColor: sameAsCategory ? colors.accent : colors.muted,
+                        backgroundColor: sameAsCategory ? colors.accent : "transparent",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      {sameAsCategory && (
+                        <LucideCheck size={11} color={colors.onAccent} strokeWidth={3} />
+                      )}
+                    </View>
+                    <ThemedText
+                      style={{
+                        fontSize: 12,
+                        color: sameAsCategory ? colors.primary : colors.secondary,
+                        fontFamily: sameAsCategory ? fonts.textMedium : fonts.text,
+                      }}
+                    >
+                      Same as category
+                    </ThemedText>
+                  </TouchableOpacity>
+                )}
+              </View>
               <TextInput
                 style={[
                   themedStyles.merchantInput,
@@ -1631,6 +1702,12 @@ export const AddTransactionScreen = ({ navigation: navProp, route }: any) => {
                 value={merchant}
                 onChangeText={(v) => {
                   setMerchant(v);
+                  if (
+                    sameAsCategory &&
+                    v.trim().toLowerCase() !== category.trim().toLowerCase()
+                  ) {
+                    setSameAsCategory(false);
+                  }
                   setErrors((e) => ({ ...e, merchant: undefined }));
                 }}
                 maxLength={100}

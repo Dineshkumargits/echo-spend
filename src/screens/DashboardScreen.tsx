@@ -1889,7 +1889,7 @@ const DashboardScreen = ({ navigation }: any) => {
         activeOpacity={0.85}
         style={{
           position: "absolute",
-          bottom: 32,
+          bottom: 100,
           right: 24,
           width: 64,
           height: 64,
