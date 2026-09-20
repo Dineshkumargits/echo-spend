@@ -897,7 +897,7 @@ export const FinancesScreen = ({ navigation, route }: any) => {
                       <ThemedText style={{ fontSize: 11, color: colors.secondary, marginTop: 2 }}>
                         {preferences.hideAmounts
                           ? '****'
-                          : `${preferences.currency}${totalOutstanding.toLocaleString('en-IN')} outstanding incl. unbilled`}
+                          : `${preferences.currency}${totalOutstanding.toLocaleString('en-IN', { maximumFractionDigits: 2 })} total outstanding (${preferences.currency}${(totalOutstanding - totalDue).toLocaleString('en-IN', { maximumFractionDigits: 2 })} unbilled)`}
                       </ThemedText>
                     )}
                   </View>

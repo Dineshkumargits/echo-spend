@@ -309,87 +309,91 @@ const DashboardScreen = ({ navigation }: any) => {
 
   // ── Data loading (§4) ───────────────────────────────────────────────────────
   const loadData = useCallback(async () => {
-    const [
-      txs,
-      accs,
-      cats,
-      spend,
-      gs,
-      ls,
-      ss,
-      unconfirmed,
-      trendData,
-      catBreakdown,
-      budgetUtil,
-      splits,
-      activeInsights,
-      scanTime,
-      lastInsightGen,
-      resolvedCycle,
-      openStatements,
-    ] = await Promise.all([
-      getTransactions({ limit: 15, confirmedOnly: true }),
-      getAccounts(),
-      getCategories(),
-      getCurrentMonthSpend(cycleAnchorFrom(preferences)),
-      getGoals(true),
-      getLoans(true),
-      getSubscriptions(true),
-      getUnconfirmedTransactions(),
-      getSpendTrend(14),
-      getCategoryBreakdown(),
-      getBudgetUtilization(cycleAnchorFrom(preferences)),
-      getPendingSplitMembers(),
-      getActiveInsights(),
-      getLastScanTime(),
-      getLastInsightGenerationDate(),
-      getSalaryCycleWindowAsync(cycleAnchorFrom(preferences)),
-      getOpenStatements(),
-    ]);
-    setTransactions(txs);
-    setAccounts(accs);
-    setCategories(cats);
-    setMonthlySpend(spend);
-    setUnconfirmedCount(unconfirmed.length);
-    setTrend14(trendData);
-    setTopCategories(catBreakdown);
-    setBudgetWatch(budgetUtil);
-    setPendingSplits(splits);
-    setInsights(activeInsights);
-    setLastScanAt(scanTime);
-    setGoals(gs);
-    setLoans(ls);
-    setSubscriptions(ss);
-    setCycleWindow(resolvedCycle);
-    setStatements(openStatements);
+    try {
+      const [
+        txs,
+        accs,
+        cats,
+        spend,
+        gs,
+        ls,
+        ss,
+        unconfirmed,
+        trendData,
+        catBreakdown,
+        budgetUtil,
+        splits,
+        activeInsights,
+        scanTime,
+        lastInsightGen,
+        resolvedCycle,
+        openStatements,
+      ] = await Promise.all([
+        getTransactions({ limit: 15, confirmedOnly: true }),
+        getAccounts(),
+        getCategories(),
+        getCurrentMonthSpend(cycleAnchorFrom(preferences)),
+        getGoals(true),
+        getLoans(true),
+        getSubscriptions(true),
+        getUnconfirmedTransactions(),
+        getSpendTrend(14),
+        getCategoryBreakdown(),
+        getBudgetUtilization(cycleAnchorFrom(preferences)),
+        getPendingSplitMembers(),
+        getActiveInsights(),
+        getLastScanTime(),
+        getLastInsightGenerationDate(),
+        getSalaryCycleWindowAsync(cycleAnchorFrom(preferences)),
+        getOpenStatements(),
+      ]);
+      setTransactions(txs);
+      setAccounts(accs);
+      setCategories(cats);
+      setMonthlySpend(spend);
+      setUnconfirmedCount(unconfirmed.length);
+      setTrend14(trendData);
+      setTopCategories(catBreakdown);
+      setBudgetWatch(budgetUtil);
+      setPendingSplits(splits);
+      setInsights(activeInsights);
+      setLastScanAt(scanTime);
+      setGoals(gs);
+      setLoans(ls);
+      setSubscriptions(ss);
+      setCycleWindow(resolvedCycle);
+      setStatements(openStatements);
 
-    // §3.6 Insight freshness: generate once per mount if stale.
-    // Keyed on the last GENERATION date (dismissed rows included) rather than on
-    // the visible list — otherwise dismissing every card reads as "never
-    // generated" and immediately regenerates the same set.
-    if (!insightGenGuard.current && txs.length > 0) {
-      const todayStr = new Date().toISOString().split("T")[0];
-      const newestInsightDate = lastInsightGen?.split("T")[0];
-      if (!newestInsightDate || newestInsightDate !== todayStr) {
-        insightGenGuard.current = true;
-        generateInsights()
-          .then((fresh) => setInsights(fresh))
-          .catch(() => {});
+      // §3.6 Insight freshness: generate once per mount if stale.
+      // Keyed on the last GENERATION date (dismissed rows included) rather than on
+      // the visible list — otherwise dismissing every card reads as "never
+      // generated" and immediately regenerates the same set.
+      if (!insightGenGuard.current && txs.length > 0) {
+        const todayStr = new Date().toISOString().split("T")[0];
+        const newestInsightDate = lastInsightGen?.split("T")[0];
+        if (!newestInsightDate || newestInsightDate !== todayStr) {
+          insightGenGuard.current = true;
+          generateInsights()
+            .then((fresh) => setInsights(fresh))
+            .catch(() => {});
+        }
       }
-    }
 
-    // §3.13 Celebration hook
-    for (const g of gs) {
-      if (
-        g.currentAmount >= g.targetAmount &&
-        !celebratedGoals.current.has(g.id)
-      ) {
-        celebratedGoals.current.add(g.id);
-        setCelebrationTrigger((t) => t + 1);
-        Haptics.notificationAsync(
-          Haptics.NotificationFeedbackType.Success,
-        ).catch(() => {});
+      // §3.13 Celebration hook
+      for (const g of gs) {
+        if (
+          g.currentAmount >= g.targetAmount &&
+          !celebratedGoals.current.has(g.id)
+        ) {
+          celebratedGoals.current.add(g.id);
+          setCelebrationTrigger((t) => t + 1);
+          Haptics.notificationAsync(
+            Haptics.NotificationFeedbackType.Success,
+          ).catch(() => {});
+        }
       }
+    } catch (err) {
+      console.error('[Dashboard] loadData failed:', err);
     }
   }, [
     preferences.salaryDay,

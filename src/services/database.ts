@@ -1,6 +1,7 @@
 import * as SQLite from 'expo-sqlite';
 import { hashSms } from './smsHash';
 import { resolveCycle, cycleAnchorFrom, CycleAnchor, CycleWindow } from './salaryCycle';
+import { lastOccurrenceOfDay, nextDueDateAfter } from '../utils/dateUtils';
 
 export interface Category {
   id: number;
@@ -2493,6 +2494,30 @@ export const upsertCardStatement = async (input: {
   const st = mapStatement(existing);
   const reported = input.totalDue;
 
+  // If the existing statement was an inferred / manual statement and now a genuine bank SMS arrives,
+  // upgrade totalDue, source, rawSms to the bank's authoritative values.
+  if (st.source === 'manual' && input.source === 'sms') {
+    await db.runAsync(
+      `UPDATE card_statements
+          SET totalDue = ?,
+              source = 'sms',
+              rawSms = ?,
+              minimumDue = COALESCE(?, minimumDue),
+              statementDate = COALESCE(?, statementDate),
+              updatedAt = ?
+        WHERE id = ?`,
+      input.totalDue,
+      input.rawSms ?? null,
+      input.minimumDue ?? null,
+      input.statementDate ?? null,
+      now,
+      st.id,
+    );
+    await recomputeStatementPaid(st.id);
+    await resyncCardPayments(input.accountId);
+    return await getStatementById(input.accountId, input.dueDate);
+  }
+
   // A reminder quoting less than the original bill implies payments we haven't
   // matched. Trust the bank and reconcile — but only ever upward, so a stale
   // duplicate can't un-pay a settled statement. Stored as the bank's own figure;
@@ -2532,7 +2557,13 @@ export const getStatementById = async (
 };
 
 /** Unpaid statements, oldest due first — the order payments are applied in. */
-export const getOpenStatements = async (accountId?: number): Promise<CardStatement[]> => {
+export const getOpenStatements = async (
+  accountId?: number,
+  skipSync = false,
+): Promise<CardStatement[]> => {
+  if (!skipSync) {
+    await syncInferredStatementsForCards(accountId);
+  }
   const rows = accountId
     ? await db.getAllAsync<any>(
         'SELECT * FROM card_statements WHERE isPaid = 0 AND accountId = ? ORDER BY dueDate ASC', accountId)
@@ -2551,6 +2582,7 @@ export const getStatementsForAccount = async (
   accountId: number,
   limit = 12,
 ): Promise<CardStatement[]> => {
+  await syncInferredStatementsForCards(accountId);
   const rows = await db.getAllAsync<any>(
     'SELECT * FROM card_statements WHERE accountId = ? ORDER BY dueDate DESC LIMIT ?',
     accountId, limit,
@@ -2695,7 +2727,7 @@ export const syncCardPaymentForTransaction = async (transactionId: number): Prom
   const paidAt = new Date(tx.date).getTime();
   if (Number.isNaN(paidAt)) return 0;
 
-  const open = (await getOpenStatements(target.cardId)).filter(
+  const open = (await getOpenStatements(target.cardId, true)).filter(
     (st) => paidAt >= statementOpensAt(st),
   );
 
@@ -2731,7 +2763,7 @@ export const syncCardPaymentForTransaction = async (transactionId: number): Prom
  * two can meet in either order.
  */
 export const resyncCardPayments = async (accountId: number): Promise<void> => {
-  const open = await getOpenStatements(accountId);
+  const open = await getOpenStatements(accountId, true);
   if (open.length === 0) return;
 
   const since = Math.min(...open.map(statementOpensAt));
@@ -2749,6 +2781,154 @@ export const resyncCardPayments = async (accountId: number): Promise<void> => {
     const tx = mapTransactionRow(row);
     if (new Date(tx.date).getTime() < since) continue;
     await syncCardPaymentForTransaction(tx.id);
+  }
+};
+
+/**
+ * Automatically derive and maintain statements for credit cards whose billing
+ * cycle statement day has passed, when no bank statement SMS has been received.
+ *
+ * Computes unbilled spend (transactions after the statement date) and derives
+ * the cycle's billed totalDue. Reconciles with any payments made after statement
+ * generation so the bill reflects the true amount owed for that cycle.
+ */
+let isSyncingInferredStatements = false;
+
+export const syncInferredStatementsForCards = async (targetAccountId?: number): Promise<void> => {
+  if (isSyncingInferredStatements) return;
+  isSyncingInferredStatements = true;
+  try {
+    const allAccounts = await getAccounts();
+    const cards = allAccounts.filter(
+      (a) =>
+        a.accountType === 'credit_card' &&
+        a.statementDay &&
+        a.billDueDay &&
+        (!targetAccountId || a.id === targetAccountId),
+    );
+    if (cards.length === 0) return;
+
+    const now = new Date();
+    const nowIso = now.toISOString();
+
+    for (const card of cards) {
+      const stmtDate = lastOccurrenceOfDay(card.statementDay!, now);
+      // Statement day must have already arrived/passed
+      if (now < stmtDate) continue;
+
+      const stmtDateEnd = new Date(stmtDate);
+      stmtDateEnd.setHours(23, 59, 59, 999);
+
+      const dueDate = nextDueDateAfter(card.billDueDay!, stmtDate);
+      const dueDateIso = dueDate.toISOString();
+      const stmtDateIso = stmtDate.toISOString();
+      const stmtDateEndIso = stmtDateEnd.toISOString();
+
+      // Check if a statement already exists for this account within ~12 days of the due date
+      // (accounting for bank dueDate variations like weekends/holidays or UTC offsets)
+      const existing = await db.getFirstAsync<any>(
+        `SELECT * FROM card_statements
+          WHERE accountId = ?
+            AND abs(strftime('%s', dueDate) - strftime('%s', ?)) < 12 * 86400
+          ORDER BY CASE WHEN source = 'sms' THEN 0 ELSE 1 END, id ASC
+          LIMIT 1`,
+        card.id,
+        dueDateIso,
+      );
+
+      // Clean up any stale/duplicate manual statements if an SMS statement already exists for this cycle
+      if (existing && existing.source === 'sms') {
+        await db.runAsync(
+          `DELETE FROM card_statements
+            WHERE accountId = ?
+              AND source = 'manual'
+              AND abs(strftime('%s', dueDate) - strftime('%s', ?)) < 12 * 86400`,
+          card.id,
+          dueDateIso,
+        );
+        await resyncCardPayments(card.id);
+        continue;
+      }
+
+      // Calculate transactions after statement close (unbilled spend and payments)
+      const recentTxs = await db.getAllAsync<any>(
+        'SELECT * FROM transactions WHERE (accountId = ? OR toAccountId = ?) AND date > ? AND isConfirmed = 1',
+        card.id,
+        card.id,
+        stmtDateEndIso,
+      );
+
+      let unbilledDebits = 0;
+      let unbilledRefunds = 0;
+      let paymentsAfterStmt = 0;
+
+      for (const row of recentTxs) {
+        const tx = mapTransactionRow(row);
+        if (tx.accountId === card.id) {
+          if (tx.type === 'debit') {
+            unbilledDebits += tx.amount;
+          } else if (tx.type === 'credit') {
+            const isNonPayment = NON_PAYMENT_CREDIT.test(
+              `${tx.merchant ?? ''} ${tx.category ?? ''} ${tx.notes ?? ''}`,
+            );
+            if (isNonPayment) {
+              unbilledRefunds += tx.amount;
+            } else {
+              paymentsAfterStmt += tx.amount;
+            }
+          }
+        }
+        if (tx.type === 'transfer' && tx.toAccountId === card.id) {
+          paymentsAfterStmt += tx.amount;
+        }
+      }
+
+      const netUnbilled = Math.max(unbilledDebits - unbilledRefunds, 0);
+
+      // The original billed balance at statement close was (current balance - unbilled spend + payments made since).
+      const rawBilled = card.balance - netUnbilled + paymentsAfterStmt;
+      let totalDue = Math.max(Math.round(rawBilled * 100) / 100, 0);
+      if (totalDue < 1.0) {
+        totalDue = 0;
+      }
+
+      if (!existing) {
+        const isPaid = totalDue === 0 ? 1 : 0;
+        await db.runAsync(
+          `INSERT INTO card_statements
+            (accountId, statementDate, dueDate, totalDue, minimumDue, paidAmount, isPaid, source, rawSms, createdAt, updatedAt)
+           VALUES (?, ?, ?, ?, NULL, 0, ?, 'manual', NULL, ?, ?)`,
+          card.id,
+          stmtDateIso,
+          dueDateIso,
+          totalDue,
+          isPaid,
+          nowIso,
+          nowIso,
+        );
+        if (!isPaid) {
+          await resyncCardPayments(card.id);
+        }
+      } else if (existing.source === 'manual' && !existing.isPaid) {
+        if (Math.abs(existing.totalDue - totalDue) > 0.01) {
+          const isPaid = totalDue === 0 ? 1 : 0;
+          await db.runAsync(
+            'UPDATE card_statements SET totalDue = ?, isPaid = ?, statementDate = ?, updatedAt = ? WHERE id = ?',
+            totalDue,
+            isPaid,
+            stmtDateIso,
+            nowIso,
+            existing.id,
+          );
+          await recomputeStatementPaid(existing.id);
+          await resyncCardPayments(card.id);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[CardStatement] Failed to sync inferred statements:', err);
+  } finally {
+    isSyncingInferredStatements = false;
   }
 };
 

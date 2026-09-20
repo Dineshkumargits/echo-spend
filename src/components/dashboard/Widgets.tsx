@@ -672,6 +672,7 @@ export const CreditCardsWidget: React.FC<CreditCardsWidgetProps> = ({
 
   const totalDue = cards.reduce((sum, c) => sum + (c.amountDue ?? 0), 0);
   const totalOutstanding = cards.reduce((sum, c) => sum + c.outstanding, 0);
+  const totalUnbilled = Math.max(totalOutstanding - totalDue, 0);
 
   return (
     <WidgetSection
@@ -694,9 +695,9 @@ export const CreditCardsWidget: React.FC<CreditCardsWidgetProps> = ({
               />
             </View>
             <View style={{ alignItems: 'flex-end' }}>
-              <SectionLabel>Outstanding</SectionLabel>
+              <SectionLabel>Unbilled</SectionLabel>
               <AmountText
-                value={totalOutstanding}
+                value={totalUnbilled}
                 size={17}
                 currency={currency}
                 masked={masked}
@@ -705,6 +706,36 @@ export const CreditCardsWidget: React.FC<CreditCardsWidgetProps> = ({
               />
             </View>
           </View>
+          {totalOutstanding > 0 && (
+            <View
+              style={{
+                flexDirection: 'row',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginTop: 10,
+                paddingTop: 8,
+                borderTopWidth: 1,
+                borderTopColor: colors.border,
+              }}
+            >
+              <ThemedText
+                style={{
+                  fontFamily: fonts.text,
+                  fontSize: 11,
+                  color: colors.secondary,
+                }}
+              >
+                Total Outstanding
+              </ThemedText>
+              <AmountText
+                value={totalOutstanding}
+                size={12}
+                currency={currency}
+                masked={masked}
+                kind="neutral"
+              />
+            </View>
+          )}
         </Card>
       )}
 

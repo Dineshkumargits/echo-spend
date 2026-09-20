@@ -49,6 +49,36 @@ export const nextOccurrenceOfDay = (dayOfMonth: number, now: Date = new Date()):
   return thisMonth >= today ? thisMonth : build(today.getFullYear(), today.getMonth() + 1);
 };
 
+/**
+ * The most recent date landing on `dayOfMonth` — this month if today is >= dayOfMonth,
+ * otherwise last month. Clamped so day 31 resolves in short months.
+ */
+export const lastOccurrenceOfDay = (dayOfMonth: number, now: Date = new Date()): Date => {
+  const today = startOfDay(now);
+  const day = Math.min(Math.max(Math.round(dayOfMonth) || 1, 1), 31);
+  const build = (year: number, month: number): Date => {
+    const lastDay = new Date(year, month + 1, 0).getDate();
+    return startOfDay(new Date(year, month, Math.min(day, lastDay)));
+  };
+  const thisMonth = build(today.getFullYear(), today.getMonth());
+  return thisMonth <= today ? thisMonth : build(today.getFullYear(), today.getMonth() - 1);
+};
+
+/**
+ * The first occurrence of `billDueDay` strictly following `statementDate`.
+ */
+export const nextDueDateAfter = (billDueDay: number, statementDate: Date): Date => {
+  const day = Math.min(Math.max(Math.round(billDueDay) || 1, 1), 31);
+  const build = (year: number, month: number): Date => {
+    const lastDay = new Date(year, month + 1, 0).getDate();
+    return startOfDay(new Date(year, month, Math.min(day, lastDay)));
+  };
+  const stmtStart = startOfDay(statementDate);
+  const sameMonth = build(stmtStart.getFullYear(), stmtStart.getMonth());
+  if (sameMonth > stmtStart) return sameMonth;
+  return build(stmtStart.getFullYear(), stmtStart.getMonth() + 1);
+};
+
 /** "Today" / "Tomorrow" / "in 4d" / "3d overdue" */
 export const formatDueLabel = (daysLeft: number): string => {
   if (daysLeft < 0) return `${Math.abs(daysLeft)}d overdue`;
