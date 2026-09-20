@@ -1264,7 +1264,8 @@ const applyTransactionImpact = async (tx: Omit<Transaction, 'id'> | Transaction,
       // Advance loan nextDueDate if this transaction is a debt reduction payment (credit/transfer for lent, debit/transfer for borrowed)
       const isRepayment = (loan.type === 'lent' && (type === 'credit' || type === 'transfer')) || 
                           (loan.type !== 'lent' && (type === 'debit' || type === 'transfer'));
-      if (isRepayment && loan.nextDueDate) {
+      const isPrincipalOnly = tx.notes?.includes('[principal_only]');
+      if (isRepayment && loan.nextDueDate && !isPrincipalOnly) {
         const next = new Date(loan.nextDueDate);
         next.setMonth(next.getMonth() + 1);
         await db.runAsync('UPDATE loans SET nextDueDate = ? WHERE id = ?', next.toISOString(), tx.loanId);
@@ -1380,10 +1381,11 @@ const revertTransactionImpact = async (tx: Transaction) => {
       }
       await db.runAsync('UPDATE loans SET remainingAmount = ? WHERE id = ?', Math.max(0, newRemaining), tx.loanId);
 
-      // Revert the next due date by 1 month
+      // Revert the next due date by 1 month if not principal-only
       const isRepayment = (loan.type === 'lent' && (type === 'credit' || type === 'transfer')) || 
                           (loan.type !== 'lent' && (type === 'debit' || type === 'transfer'));
-      if (isRepayment && loan.nextDueDate) {
+      const isPrincipalOnly = tx.notes?.includes('[principal_only]');
+      if (isRepayment && loan.nextDueDate && !isPrincipalOnly) {
         const prev = new Date(loan.nextDueDate);
         prev.setMonth(prev.getMonth() - 1);
         await db.runAsync('UPDATE loans SET nextDueDate = ? WHERE id = ?', prev.toISOString(), tx.loanId);
@@ -4165,36 +4167,75 @@ export const addLoan = async (loan: Omit<Loan, 'id'>) => {
   return result.lastInsertRowId;
 };
 
+export interface LoanPaymentOptions {
+  isExternal?: boolean;
+  externalSource?: string;
+  advanceDueDate?: boolean;
+  isPrincipalOnly?: boolean;
+  notes?: string;
+  date?: string;
+}
+
 /**
  * Record a loan EMI/repayment:
- * - Borrowed: creates a debit tx from linked account, reduces remainingAmount, advances nextDueDate.
- * - Lent: creates a credit tx to linked account, reduces remainingAmount, advances nextDueDate.
+ * - Borrowed: creates a debit tx. If internal account is specified, debits it; if external, no account is debited.
+ *   Reduces remainingAmount. Advances nextDueDate unless isPrincipalOnly / advanceDueDate is false.
+ * - Lent: creates a credit tx. If internal account is specified, credits it; if external, no account is credited.
+ *   Reduces remainingAmount. Advances nextDueDate unless isPrincipalOnly / advanceDueDate is false.
  */
 export const recordLoanPayment = async (
   loanId: number,
   amount: number,
-  accountId?: number,
+  accountId?: number | null,
+  options?: LoanPaymentOptions,
 ): Promise<number> => {
   const loan = await db.getFirstAsync<Loan>('SELECT * FROM loans WHERE id = ?', loanId);
   if (!loan) throw new Error('Loan not found');
 
+  const isExternal = options?.isExternal ?? (accountId === null);
   const txType = loan.type === 'lent' ? 'credit' : 'debit';
-  const resolvedAccountId = accountId ?? loan.linkedAccountId ?? undefined;
+  // When isExternal is true, accountId is undefined and does NOT fall back to loan.linkedAccountId
+  const resolvedAccountId = isExternal ? undefined : (accountId ?? loan.linkedAccountId ?? undefined);
+
+  // Sanitize external source (trim, max 50 chars)
+  const sanitizedSource = options?.externalSource?.trim().slice(0, 50);
+
+  let note = options?.notes?.trim();
+  if (!note) {
+    if (isExternal) {
+      const src = sanitizedSource ? ` (${sanitizedSource})` : '';
+      if (loan.type === 'lent') {
+        note = `Repayment received externally${src} from ${loan.lender}`;
+      } else {
+        note = options?.isPrincipalOnly
+          ? `External principal reduction${src} for ${loan.lender}`
+          : `External EMI payment${src} to ${loan.lender}`;
+      }
+    } else {
+      note = loan.type === 'lent'
+        ? `Repayment received from ${loan.lender}`
+        : (options?.isPrincipalOnly ? `Principal reduction for ${loan.lender}` : `EMI payment to ${loan.lender}`);
+    }
+  }
+
+  if (options?.isPrincipalOnly || options?.advanceDueDate === false) {
+    if (!note.includes('[principal_only]')) {
+      note += ' [principal_only]';
+    }
+  }
 
   const txId = await addTransaction({
     amount,
     category: 'Bills',
     merchant: loan.lender,
     type: txType,
-    date: new Date().toISOString(),
+    date: options?.date || new Date().toISOString(),
     accountId: resolvedAccountId,
     isConfirmed: true,
     loanId,
     source: 'manual',
     confidence: 'high',
-    notes: loan.type === 'lent'
-      ? `Repayment received from ${loan.lender}`
-      : `EMI payment to ${loan.lender}`,
+    notes: note,
   });
 
   return txId;

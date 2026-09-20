@@ -12,6 +12,7 @@ import {
   LucideAlertCircle, LucidePencil, LucideUsers, LucideChevronRight, LucideChevronDown,
   LucideZap, LucideWallet, LucideBanknote,
   LucideX, LucideCheck, LucideChevronLeft,
+  LucideGlobe, LucideShieldCheck, LucideArrowDownCircle, LucideInfo,
 } from 'lucide-react-native';
 import { MotiView } from 'moti';
 import { useIsFocused, useFocusEffect } from '@react-navigation/native';
@@ -38,7 +39,11 @@ interface QuickActionState {
   accentColor: string;
   accountId?: number;
   splitId?: number;
+  loan?: Loan;
+  initialMode?: 'emi' | 'extra';
 }
+
+const EXTERNAL_SOURCE_PRESETS = ['Spouse', 'Family', 'Other Bank', 'Cash', 'Company Bonus', 'Direct Deposit'];
 
 const QuickActionModal = ({
   state,
@@ -57,12 +62,56 @@ const QuickActionModal = ({
   onClose: () => void;
   navigation: any;
 }) => {
-  const [amount, setAmount] = useState(String(state.defaultAmount));
+  const isLoan = state.type === 'payLoan';
+  const loan = state.loan;
+  const isBorrowed = isLoan && loan ? loan.type !== 'lent' : false;
+
+  const [paymentMode, setPaymentMode] = useState<'emi' | 'extra'>(state.initialMode || 'emi');
+  const [sourceType, setSourceType] = useState<'account' | 'external'>('account');
+  const [externalSource, setExternalSource] = useState<string>('Spouse');
+  const [externalCustom, setExternalCustom] = useState<string>('');
+  const [advanceDueDate, setAdvanceDueDate] = useState<boolean>(state.initialMode !== 'extra');
+
+  const [amount, setAmount] = useState(() => {
+    if (isLoan && state.initialMode === 'extra') {
+      return '';
+    }
+    return state.defaultAmount ? String(state.defaultAmount) : '';
+  });
   const [accountId, setAccountId] = useState<number | undefined>(state.accountId);
   const [loading, setLoading] = useState(false);
   const [showAccPicker, setShowAccPicker] = useState(false);
 
   const selectedAcc = accounts.find(a => a.id === accountId);
+  const remainingDebt = loan ? loan.remainingAmount : 0;
+
+  const handleModeChange = (mode: 'emi' | 'extra') => {
+    Haptics.selectionAsync();
+    setPaymentMode(mode);
+    if (mode === 'emi') {
+      setAmount(String(loan?.emiAmount || ''));
+      setAdvanceDueDate(true);
+    } else {
+      setAdvanceDueDate(false);
+    }
+  };
+
+  const handleSourceTypeChange = (type: 'account' | 'external') => {
+    Haptics.selectionAsync();
+    setSourceType(type);
+    setShowAccPicker(false);
+  };
+
+  const handleQuickAmount = (val: number, isAddition: boolean = false) => {
+    Haptics.selectionAsync();
+    if (isAddition) {
+      const current = parseFloat(amount) || 0;
+      const next = Math.min(current + val, remainingDebt || 999999999);
+      setAmount(String(next));
+    } else {
+      setAmount(String(val));
+    }
+  };
 
   const handleConfirm = async () => {
     const amt = parseFloat(amount);
@@ -73,13 +122,10 @@ const QuickActionModal = ({
     setLoading(true);
     try {
       if (state.type === 'paySubscription') {
-        // The amount field is editable — a subscription price can change, and
-        // the user may be recording a different figure than the one on file.
         const result = await paySubscription(state.id, { amount: amt });
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         notify.success('Payment recorded!');
         onDone();
-        // If a split was created, navigate to it
         if (result.splitId) {
           onClose();
           navigation.navigate('SplitDetail', { splitId: result.splitId });
@@ -93,9 +139,23 @@ const QuickActionModal = ({
         onDone();
         onClose();
       } else if (state.type === 'payLoan') {
-        await recordLoanPayment(state.id, amt, accountId);
+        const isExternal = sourceType === 'external';
+        const isPrincipalOnly = paymentMode === 'extra';
+        const resolvedSourceTag = isExternal ? (externalCustom.trim() || externalSource) : undefined;
+
+        await recordLoanPayment(state.id, amt, isExternal ? null : accountId, {
+          isExternal,
+          externalSource: resolvedSourceTag,
+          isPrincipalOnly,
+          advanceDueDate: !isPrincipalOnly && advanceDueDate,
+        });
+
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        notify.success('Payment recorded!');
+        if (isExternal) {
+          notify.success(`External payment of ${currency}${amt.toLocaleString('en-IN')} recorded!`);
+        } else {
+          notify.success('Payment recorded!');
+        }
         onDone();
         onClose();
       }
@@ -107,14 +167,187 @@ const QuickActionModal = ({
   };
 
   const s = StyleSheet.create({
-    backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-    sheet: { backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40 },
-    label: { fontSize: 11, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 1, fontWeight: 'bold', color: colors.secondary },
-    amtInput: { fontSize: 36, fontWeight: 'bold', color: state.accentColor, borderBottomWidth: 2, borderBottomColor: state.accentColor, paddingVertical: 8, marginBottom: 20 },
-    accRow: { flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 12, backgroundColor: colors.translucent, marginBottom: 16, gap: 8 },
-    accPicker: { backgroundColor: colors.background, borderRadius: 14, borderWidth: 1, borderColor: colors.border, overflow: 'hidden', marginBottom: 16 },
-    accItem: { flexDirection: 'row', alignItems: 'center', padding: 12, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 8 },
-    btn: { height: 56, borderRadius: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: state.accentColor },
+    backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
+    sheet: {
+      backgroundColor: colors.surface,
+      borderTopLeftRadius: 28,
+      borderTopRightRadius: 28,
+      paddingHorizontal: 22,
+      paddingTop: 16,
+      paddingBottom: Platform.OS === 'ios' ? 36 : 24,
+      maxHeight: '92%',
+    },
+    handle: {
+      width: 40,
+      height: 4,
+      borderRadius: 2,
+      backgroundColor: colors.border,
+      alignSelf: 'center',
+      marginBottom: 14,
+    },
+    headerRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 14,
+    },
+    label: {
+      fontSize: 11,
+      marginBottom: 6,
+      textTransform: 'uppercase',
+      letterSpacing: 0.8,
+      fontWeight: 'bold',
+      color: colors.secondary,
+    },
+    modeToggleRow: {
+      flexDirection: 'row',
+      backgroundColor: colors.background,
+      borderRadius: 14,
+      padding: 4,
+      marginBottom: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    modeTab: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 9,
+      borderRadius: 10,
+      gap: 6,
+    },
+    modeTabActive: {
+      backgroundColor: colors.surface,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.15,
+      shadowRadius: 3,
+      elevation: 2,
+    },
+    amtContainer: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      borderBottomWidth: 2,
+      borderBottomColor: state.accentColor,
+      paddingBottom: 4,
+      marginBottom: 12,
+    },
+    currencyPrefix: {
+      fontSize: 24,
+      fontWeight: 'bold',
+      color: state.accentColor,
+      marginRight: 4,
+    },
+    amtInput: {
+      flex: 1,
+      fontSize: 34,
+      fontFamily: fonts.signalBold,
+      fontWeight: 'bold',
+      color: state.accentColor,
+      padding: 0,
+    },
+    chipRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 6,
+      marginBottom: 16,
+    },
+    chip: {
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+      borderRadius: 8,
+      backgroundColor: colors.background,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    chipActive: {
+      backgroundColor: `${state.accentColor}18`,
+      borderColor: state.accentColor,
+    },
+    sourceCardsRow: {
+      flexDirection: 'row',
+      gap: 10,
+      marginBottom: 14,
+    },
+    sourceCard: {
+      flex: 1,
+      padding: 12,
+      borderRadius: 14,
+      borderWidth: 1.5,
+      borderColor: colors.border,
+      backgroundColor: colors.background,
+    },
+    sourceCardActive: {
+      borderColor: state.accentColor,
+      backgroundColor: `${state.accentColor}10`,
+    },
+    accRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      padding: 12,
+      borderRadius: 12,
+      backgroundColor: colors.background,
+      borderWidth: 1,
+      borderColor: colors.border,
+      marginBottom: 14,
+      gap: 8,
+    },
+    accPicker: {
+      backgroundColor: colors.background,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+      overflow: 'hidden',
+      marginBottom: 14,
+    },
+    accItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      padding: 12,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+      gap: 8,
+    },
+    calloutBox: {
+      padding: 12,
+      borderRadius: 12,
+      backgroundColor: `${colors.accent}12`,
+      borderWidth: 1,
+      borderColor: `${colors.accent}30`,
+      marginBottom: 14,
+      flexDirection: 'row',
+      gap: 10,
+      alignItems: 'flex-start',
+    },
+    customInput: {
+      backgroundColor: colors.background,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      fontSize: 13,
+      color: colors.primary,
+      marginTop: 6,
+      marginBottom: 14,
+    },
+    btn: {
+      height: 54,
+      borderRadius: 14,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: state.accentColor,
+      marginTop: 4,
+    },
+    infoNotice: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      marginBottom: 14,
+      paddingHorizontal: 2,
+    },
   });
 
   return (
@@ -125,69 +358,266 @@ const QuickActionModal = ({
       <View style={s.backdrop}>
         <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={onClose} />
         <View style={s.sheet}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-            <ThemedText style={{ fontWeight: 'bold', fontSize: 18 }}>{state.label}</ThemedText>
-            <TouchableOpacity onPress={onClose}>
+          <View style={s.handle} />
+
+          <View style={s.headerRow}>
+            <View style={{ flex: 1 }}>
+              <ThemedText style={{ fontWeight: 'bold', fontSize: 18 }}>{state.label}</ThemedText>
+              {loan && (
+                <ThemedText style={{ fontSize: 12, color: colors.secondary, marginTop: 2 }}>
+                  Outstanding debt: {currency}{remainingDebt.toLocaleString('en-IN')}
+                </ThemedText>
+              )}
+            </View>
+            <TouchableOpacity onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
               <LucideX color={colors.secondary} size={22} />
             </TouchableOpacity>
           </View>
 
-          <ThemedText style={s.label}>Amount ({currency})</ThemedText>
-          <TextInput
-            style={s.amtInput}
-            keyboardType="numeric"
-            value={amount}
-            onChangeText={setAmount}
-            autoFocus
-            selectTextOnFocus
-          />
+          <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
+            {/* Payment Mode Selector for Borrowed Loans */}
+            {isBorrowed && (
+              <View style={s.modeToggleRow}>
+                <TouchableOpacity
+                  style={[s.modeTab, paymentMode === 'emi' && s.modeTabActive]}
+                  onPress={() => handleModeChange('emi')}
+                >
+                  <LucideCalendar size={15} color={paymentMode === 'emi' ? state.accentColor : colors.secondary} />
+                  <ThemedText style={{
+                    fontSize: 13,
+                    fontWeight: 'bold',
+                    color: paymentMode === 'emi' ? state.accentColor : colors.secondary,
+                  }}>
+                    Monthly EMI
+                  </ThemedText>
+                </TouchableOpacity>
 
-          {/* Account picker (not shown for paySubscription — account is already baked in) */}
-          {state.type !== 'paySubscription' && (
-            <>
-              <ThemedText style={s.label}>From / To Account</ThemedText>
-              <TouchableOpacity
-                style={s.accRow}
-                onPress={() => setShowAccPicker(v => !v)}
-              >
-                <LucideWallet color={colors.secondary} size={16} />
-                <ThemedText style={{ flex: 1, color: selectedAcc ? colors.primary : colors.muted }}>
-                  {selectedAcc ? selectedAcc.name : 'Select account (optional)'}
-                </ThemedText>
-                <LucideChevronRight color={colors.secondary} size={14} />
-              </TouchableOpacity>
-              {showAccPicker && (
-                <View style={s.accPicker}>
+                <TouchableOpacity
+                  style={[s.modeTab, paymentMode === 'extra' && s.modeTabActive]}
+                  onPress={() => handleModeChange('extra')}
+                >
+                  <LucideZap size={15} color={paymentMode === 'extra' ? state.accentColor : colors.secondary} />
+                  <ThemedText style={{
+                    fontSize: 13,
+                    fontWeight: 'bold',
+                    color: paymentMode === 'extra' ? state.accentColor : colors.secondary,
+                  }}>
+                    Principal / Extra
+                  </ThemedText>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            <ThemedText style={s.label}>Amount ({currency})</ThemedText>
+            <View style={s.amtContainer}>
+              <ThemedText style={s.currencyPrefix}>{currency}</ThemedText>
+              <TextInput
+                style={s.amtInput}
+                keyboardType="numeric"
+                value={amount}
+                placeholder="0"
+                placeholderTextColor={colors.muted}
+                onChangeText={setAmount}
+                autoFocus={!isLoan || paymentMode === 'extra'}
+                selectTextOnFocus
+              />
+            </View>
+
+            {/* Quick Amount Suggestion Chips */}
+            {isLoan && loan && (
+              <View style={s.chipRow}>
+                {loan.emiAmount > 0 && paymentMode === 'emi' && (
                   <TouchableOpacity
-                    style={s.accItem}
-                    onPress={() => { setAccountId(undefined); setShowAccPicker(false); }}
+                    style={[s.chip, amount === String(loan.emiAmount) && s.chipActive]}
+                    onPress={() => handleQuickAmount(loan.emiAmount)}
                   >
-                    <ThemedText style={{ color: colors.secondary }}>None</ThemedText>
+                    <ThemedText style={{ fontSize: 11, fontWeight: 'bold', color: amount === String(loan.emiAmount) ? state.accentColor : colors.primary }}>
+                      EMI: {currency}{loan.emiAmount.toLocaleString('en-IN')}
+                    </ThemedText>
                   </TouchableOpacity>
-                  {accounts.map(acc => (
-                    <TouchableOpacity
-                      key={acc.id}
-                      style={[s.accItem, accountId === acc.id && { backgroundColor: `${state.accentColor}12` }]}
-                      onPress={() => { setAccountId(acc.id); setShowAccPicker(false); }}
-                    >
-                      <LucideCreditCard color={accountId === acc.id ? state.accentColor : colors.secondary} size={14} />
-                      <ThemedText style={{ flex: 1, fontWeight: 'bold', color: accountId === acc.id ? state.accentColor : colors.primary }}>
-                        {acc.name}
-                      </ThemedText>
-                      {accountId === acc.id && <LucideCheck color={state.accentColor} size={14} />}
+                )}
+                {paymentMode === 'extra' && (
+                  <>
+                    <TouchableOpacity style={s.chip} onPress={() => handleQuickAmount(5000, true)}>
+                      <ThemedText style={{ fontSize: 11, fontWeight: 'bold', color: colors.primary }}>+₹5k</ThemedText>
                     </TouchableOpacity>
-                  ))}
-                </View>
-              )}
-            </>
-          )}
+                    <TouchableOpacity style={s.chip} onPress={() => handleQuickAmount(10000, true)}>
+                      <ThemedText style={{ fontSize: 11, fontWeight: 'bold', color: colors.primary }}>+₹10k</ThemedText>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={s.chip} onPress={() => handleQuickAmount(25000, true)}>
+                      <ThemedText style={{ fontSize: 11, fontWeight: 'bold', color: colors.primary }}>+₹25k</ThemedText>
+                    </TouchableOpacity>
+                  </>
+                )}
+                {remainingDebt > 0 && (
+                  <TouchableOpacity
+                    style={[s.chip, amount === String(remainingDebt) && s.chipActive]}
+                    onPress={() => handleQuickAmount(remainingDebt)}
+                  >
+                    <ThemedText style={{ fontSize: 11, fontWeight: 'bold', color: amount === String(remainingDebt) ? state.accentColor : colors.primary }}>
+                      Pay Full ({currency}{remainingDebt.toLocaleString('en-IN')})
+                    </ThemedText>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
 
-          <TouchableOpacity style={s.btn} onPress={handleConfirm} disabled={loading}>
-            <LucideCheck color="#fff" size={20} />
-            <ThemedText style={{ color: '#fff', fontWeight: 'bold', fontSize: 16, marginLeft: 8 }}>
-              {loading ? 'Processing…' : 'Confirm'}
-            </ThemedText>
-          </TouchableOpacity>
+            {/* Source Origin Selection for Loans */}
+            {isLoan && (
+              <>
+                <ThemedText style={s.label}>Payment Origin</ThemedText>
+                <View style={s.sourceCardsRow}>
+                  <TouchableOpacity
+                    style={[s.sourceCard, sourceType === 'account' && s.sourceCardActive]}
+                    onPress={() => handleSourceTypeChange('account')}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                      <LucideWallet size={16} color={sourceType === 'account' ? state.accentColor : colors.secondary} />
+                      <ThemedText style={{ fontWeight: 'bold', fontSize: 13, color: sourceType === 'account' ? state.accentColor : colors.primary }}>
+                        EchoSpend Acc
+                      </ThemedText>
+                    </View>
+                    <ThemedText style={{ fontSize: 10, color: colors.secondary }}>
+                      Debits linked bank
+                    </ThemedText>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[s.sourceCard, sourceType === 'external' && s.sourceCardActive]}
+                    onPress={() => handleSourceTypeChange('external')}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                      <LucideGlobe size={16} color={sourceType === 'external' ? state.accentColor : colors.secondary} />
+                      <ThemedText style={{ fontWeight: 'bold', fontSize: 13, color: sourceType === 'external' ? state.accentColor : colors.primary }}>
+                        External Source
+                      </ThemedText>
+                    </View>
+                    <ThemedText style={{ fontSize: 10, color: colors.secondary }}>
+                      Untracked / Outside
+                    </ThemedText>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+
+            {/* In-App Account Picker (when sourceType === 'account') */}
+            {state.type !== 'paySubscription' && (!isLoan || sourceType === 'account') && (
+              <>
+                <ThemedText style={s.label}>From / To Account</ThemedText>
+                <TouchableOpacity
+                  style={s.accRow}
+                  onPress={() => setShowAccPicker(v => !v)}
+                >
+                  <LucideWallet color={colors.secondary} size={16} />
+                  <ThemedText style={{ flex: 1, color: selectedAcc ? colors.primary : colors.muted }}>
+                    {selectedAcc ? selectedAcc.name : 'Select account (optional)'}
+                  </ThemedText>
+                  <LucideChevronRight color={colors.secondary} size={14} />
+                </TouchableOpacity>
+
+                {showAccPicker && (
+                  <View style={s.accPicker}>
+                    <TouchableOpacity
+                      style={s.accItem}
+                      onPress={() => { setAccountId(undefined); setShowAccPicker(false); }}
+                    >
+                      <ThemedText style={{ color: colors.secondary }}>None</ThemedText>
+                    </TouchableOpacity>
+                    {accounts.map(acc => (
+                      <TouchableOpacity
+                        key={acc.id}
+                        style={[s.accItem, accountId === acc.id && { backgroundColor: `${state.accentColor}12` }]}
+                        onPress={() => { setAccountId(acc.id); setShowAccPicker(false); }}
+                      >
+                        <LucideCreditCard color={accountId === acc.id ? state.accentColor : colors.secondary} size={14} />
+                        <ThemedText style={{ flex: 1, fontWeight: 'bold', color: accountId === acc.id ? state.accentColor : colors.primary }}>
+                          {acc.name}
+                        </ThemedText>
+                        {accountId === acc.id && <LucideCheck color={state.accentColor} size={14} />}
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+              </>
+            )}
+
+            {/* External Source Detail Section */}
+            {isLoan && sourceType === 'external' && (
+              <>
+                <View style={s.calloutBox}>
+                  <LucideShieldCheck size={18} color={colors.accent} style={{ marginTop: 2 }} />
+                  <View style={{ flex: 1 }}>
+                    <ThemedText style={{ fontWeight: 'bold', fontSize: 12, color: colors.accent, marginBottom: 2 }}>
+                      Direct Debt Reduction
+                    </ThemedText>
+                    <ThemedText style={{ fontSize: 11, color: colors.primary, opacity: 0.85, lineHeight: 16 }}>
+                      This payment reduces the remaining loan balance directly. No money will be debited from any of your EchoSpend bank accounts.
+                    </ThemedText>
+                  </View>
+                </View>
+
+                <ThemedText style={s.label}>Who paid / External Origin</ThemedText>
+                <View style={s.chipRow}>
+                  {EXTERNAL_SOURCE_PRESETS.map(preset => {
+                    const isActive = !externalCustom && externalSource === preset;
+                    return (
+                      <TouchableOpacity
+                        key={preset}
+                        style={[s.chip, isActive && s.chipActive]}
+                        onPress={() => {
+                          Haptics.selectionAsync();
+                          setExternalSource(preset);
+                          setExternalCustom('');
+                        }}
+                      >
+                        <ThemedText style={{
+                          fontSize: 11,
+                          fontWeight: isActive ? 'bold' : 'normal',
+                          color: isActive ? state.accentColor : colors.primary,
+                        }}>
+                          {preset}
+                        </ThemedText>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                <TextInput
+                  style={s.customInput}
+                  placeholder="Or enter custom origin (e.g. Spouse's salary, Mom's HDFC)"
+                  placeholderTextColor={colors.muted}
+                  value={externalCustom}
+                  onChangeText={setExternalCustom}
+                  maxLength={50}
+                />
+              </>
+            )}
+
+            {/* Due date schedule notice for loans */}
+            {isBorrowed && (
+              <View style={s.infoNotice}>
+                <LucideInfo size={13} color={colors.secondary} />
+                <ThemedText style={{ fontSize: 11, color: colors.secondary }}>
+                  {paymentMode === 'emi'
+                    ? 'Advances next EMI schedule by 1 month.'
+                    : 'Reduces loan principal. Next EMI due date remains unchanged.'}
+                </ThemedText>
+              </View>
+            )}
+
+            <TouchableOpacity style={s.btn} onPress={handleConfirm} disabled={loading}>
+              <LucideCheck color="#fff" size={20} />
+              <ThemedText style={{ color: '#fff', fontWeight: 'bold', fontSize: 15, marginLeft: 8 }}>
+                {loading
+                  ? 'Processing…'
+                  : isLoan && sourceType === 'external'
+                  ? `Record External Payment · ${currency}${amount || '0'}`
+                  : isLoan && paymentMode === 'extra'
+                  ? `Reduce Principal · ${currency}${amount || '0'}`
+                  : `Confirm ${currency}${amount || '0'}`}
+              </ThemedText>
+            </TouchableOpacity>
+          </ScrollView>
         </View>
       </View>
     </KeyboardAvoidingView>
@@ -269,6 +699,25 @@ export const FinancesScreen = ({ navigation, route }: any) => {
     getOpenStatements().then(setCardStatements).catch(() => {});
     setSplits(sps);
     setLoading(false);
+
+    if (route.params?.quickPayLoanId) {
+      const qId = route.params.quickPayLoanId;
+      const targetLoan = ls.find(l => l.id === qId);
+      if (targetLoan) {
+        const isLent = targetLoan.type === 'lent';
+        setQuickAction({
+          type: 'payLoan',
+          id: targetLoan.id,
+          label: isLent ? `Record repayment from ${targetLoan.lender}` : `Reduce Debt · ${targetLoan.lender}`,
+          defaultAmount: 0,
+          accentColor: colors.accent,
+          accountId: targetLoan.linkedAccountId,
+          loan: targetLoan,
+          initialMode: 'extra',
+        });
+      }
+      navigation.setParams({ quickPayLoanId: undefined });
+    }
   };
 
   const onRefresh = React.useCallback(async () => {
@@ -824,7 +1273,15 @@ export const FinancesScreen = ({ navigation, route }: any) => {
             <ThemedText style={{ color, fontSize: 11, fontWeight: 'bold' }}>{pct}% {isLent ? 'COLLECTED' : 'REPAID'}</ThemedText>
             {loan.remainingAmount > 0 && (
               <TouchableOpacity
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: `${color}20`, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 }}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 4,
+                  backgroundColor: `${color}20`,
+                  paddingHorizontal: 10,
+                  paddingVertical: 5,
+                  borderRadius: 8,
+                }}
                 onPress={() => {
                   Haptics.selectionAsync();
                   setQuickAction({
@@ -834,6 +1291,8 @@ export const FinancesScreen = ({ navigation, route }: any) => {
                     defaultAmount: loan.emiAmount || 0,
                     accentColor: color,
                     accountId: loan.linkedAccountId,
+                    loan,
+                    initialMode: 'emi',
                   });
                 }}
               >

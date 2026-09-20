@@ -303,7 +303,15 @@ const TransactionDetailScreen = () => {
           {transaction.tags && transaction.tags.length > 0 && (
             <DetailRow label="Tags" value={transaction.tags.map((t: string) => '#' + t).join('  ')} />
           )}
-          {account && <DetailRow label={transaction.type === 'transfer' ? "From Account" : "Account"} value={account.name} />}
+          {account ? (
+            <DetailRow label={transaction.type === 'transfer' ? "From Account" : "Account"} value={account.name} />
+          ) : transaction.loanId ? (
+            <DetailRow
+              label="Account"
+              value="External Source (Untracked)"
+              valueColor={colors.secondary}
+            />
+          ) : null}
           {transaction.type === 'transfer' && toAccount && <DetailRow label="To Account" value={toAccount.name} />}
           <View style={[s.detailRow, { borderBottomWidth: 0 }]}>
             <ThemedText type="secondary" style={{ fontSize: 13 }}>Source</ThemedText>
