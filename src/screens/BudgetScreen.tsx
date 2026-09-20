@@ -27,6 +27,8 @@ import {
   LucideCalendar,
   LucidePlay,
   LucidePower,
+  LucideReceiptText,
+  LucideChevronRight,
 } from "lucide-react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { useNavigation, useIsFocused } from "@react-navigation/native";
@@ -1174,12 +1176,103 @@ const BudgetScreen = () => {
           )}
 
           {editingRow && !editingRow.orphaned && (
-            <PillButton
-              label="View transactions"
-              icon={<LucideList color={colors.secondary} size={13} />}
-              onPress={() => openTransactions(editingRow)}
-              style={{ alignSelf: "flex-start", marginTop: 18 }}
-            />
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                openTransactions(editingRow);
+              }}
+              style={{
+                backgroundColor: colors.surface,
+                borderRadius: 16,
+                padding: 14,
+                borderWidth: 1,
+                borderColor: colors.border,
+                marginTop: 14,
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}
+            >
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  flex: 1,
+                  marginRight: 10,
+                }}
+              >
+                <View
+                  style={{
+                    width: 38,
+                    height: 38,
+                    borderRadius: 12,
+                    backgroundColor: `${colors.accent}15`,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    marginRight: 12,
+                  }}
+                >
+                  <LucideReceiptText color={colors.accent} size={18} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <ThemedText style={{ fontWeight: "bold", fontSize: 14 }}>
+                    View Transactions
+                  </ThemedText>
+                  <ThemedText
+                    style={{
+                      fontSize: 11,
+                      color: colors.secondary,
+                      marginTop: 2,
+                    }}
+                  >
+                    {editingRow.spent > 0
+                      ? `${fmt(editingRow.spent)} spent in this ${
+                          editingRow.budget.period === "weekly"
+                            ? "week"
+                            : editingRow.budget.period === "quarterly"
+                            ? "quarter"
+                            : editingRow.budget.period === "yearly"
+                            ? "year"
+                            : "cycle"
+                        }`
+                      : `No spending yet in this ${
+                          editingRow.budget.period === "weekly"
+                            ? "week"
+                            : editingRow.budget.period === "quarterly"
+                            ? "quarter"
+                            : editingRow.budget.period === "yearly"
+                            ? "year"
+                            : "cycle"
+                        }`}
+                  </ThemedText>
+                </View>
+              </View>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                {editingRow.spent > 0 && (
+                  <View
+                    style={{
+                      backgroundColor: `${colors.accent}15`,
+                      paddingHorizontal: 8,
+                      paddingVertical: 3,
+                      borderRadius: 8,
+                    }}
+                  >
+                    <ThemedText
+                      font="signal"
+                      style={{
+                        fontSize: 11,
+                        color: colors.accent,
+                        fontWeight: "700",
+                      }}
+                    >
+                      {fmt(editingRow.spent)}
+                    </ThemedText>
+                  </View>
+                )}
+                <LucideChevronRight color={colors.muted} size={18} />
+              </View>
+            </TouchableOpacity>
           )}
 
           <PrimaryButton
