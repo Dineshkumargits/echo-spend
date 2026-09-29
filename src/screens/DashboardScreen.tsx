@@ -1364,7 +1364,7 @@ const DashboardScreen = ({ navigation }: any) => {
   };
 
   return (
-    <ThemedSafeAreaView>
+    <ThemedSafeAreaView edges={["top"]}>
       <ScrollView
         className="flex-1 px-6"
         showsVerticalScrollIndicator={false}
@@ -1891,7 +1891,7 @@ const DashboardScreen = ({ navigation }: any) => {
         activeOpacity={0.85}
         style={{
           position: "absolute",
-          bottom: 100,
+          bottom: 20,
           right: 24,
           width: 64,
           height: 64,
