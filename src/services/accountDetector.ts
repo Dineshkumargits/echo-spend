@@ -282,62 +282,152 @@ export interface DetectAccountsOptions {
   maxMessages?: number;
 }
 
+// ── Directional & Role-Aware Patterns for Account Detection ─────────────────
+
+function isCreditSms(body: string): boolean {
+  const b = body.toLowerCase();
+  if (
+    /\b(?:debited|spent|withdrawn|paid|payment\s+of)\b/i.test(b) &&
+    !/\bpayment\s+received\b/i.test(b)
+  ) {
+    return false;
+  }
+  return /\b(?:credited|deposited|salary|refund|cashback|received\s+in|payment\s+received)\b/i.test(
+    b
+  );
+}
+
+// Beneficiary / receiving account patterns in debit or transfer-out SMS
+const BENEFICIARY_PATTERNS = [
+  // to ... a/c ending 5678 / transfer to John A/c 5678 / sent to Ramesh (a/c 5678)
+  // (guarding against "your a/c" or "ur a/c")
+  /(?:to|towards|sent\s+to|transfer(?:red)?\s+to|trf\s+to|paid\s+to)\s+(?!(?:your|ur)\b)[^.;\n]{0,50}?(?:a\/c|account|card)\s*(?:ending\s*(?:with|in)?\s*)?[:\s]*[*xX.\d]*?(\d{3,4})\b/gi,
+  // beneficiary / payee / bene / dest / recipient a/c ending 5678
+  /\b(?:bene(?:ficiary)?|payee|recipient|dest(?:ination)?|target)\s*(?:a\/c|acct?|account|no\.?)?\s*(?:ending\s*(?:with|in)?\s*)?[:\s]*[*xX.\d]*?(\d{3,4})\b/gi,
+  // in favor of ... a/c 5678
+  /in\s+favo(?:u)?r\s+of\s+[^.;\n]{0,40}?(?:a\/c|account)?\s*[*xX.\d]*?(\d{3,4})\b/gi,
+  // in debit SMS: credited to ... a/c 5678
+  /credited\s+to\s+(?!(?:your|ur)\b)[^.;\n]{0,30}?(?:a\/c|account)?\s*[*xX.\d]*?(\d{3,4})\b/gi,
+  // to a/c *5678 / to *5678 / To A/c ending 5678
+  /\bto\s+(?!(?:your|ur)\b)(?:a\/c|acct?|account)\s*(?:ending\s*(?:with|in)?\s*)?[:\s]*[*xX.\d]*?(\d{3,4})\b/gi,
+  /\bto\s+[*xX.]{1,}(\d{3,4})\b/gi,
+  /\btrf\s+to\s*[*xX.]{1,}(\d{3,4})\b/gi,
+];
+
+// In credit / inbound SMS: remitter or sending counterparty account
+const REMITTER_PATTERNS = [
+  /(?:from|remitter|sender|by\s+transfer\s+from)\s+(?!(?:your|ur)\b)[^.;\n]{0,30}?(?:a\/c|account)?\s*[:\s]*[*xX.\d]*?(\d{3,4})\b/gi,
+];
+
+// Masked mobile numbers: e.g. "mobile 98XXXX5678" or "linked to mobile"
+const MOBILE_PATTERNS = [
+  /(?:mobile|phone|mob)\s*(?:no\.?|number)?\s*[:\s]*[*xX\d]*?(\d{4})\b/gi,
+  /linked\s+to\s+mobile\s*[*xX\d]*?(\d{4})\b/gi,
+];
+
+// User own card patterns
+const CARD_PATTERNS = [
+  /(?:credit\s*card|card)\s*(?:ending\s*(?:with|in)?|no\.?|number)?\s*[:\s]*[*xX.\d]*?(\d{4})\b/gi,
+  /(?:spent\s+on|used\s+on)\s+[^.]+?card\s+[*xX.\d]*?(\d{4})\b/gi,
+  /\b[*xX.]{2,}\s*(\d{4})\s*(?:credit\s*card|card)\b/gi,
+  /received\s+towards\s+(?:your\s+)?(?:card|account|sbi\s+card)\s*(?:ending\s*)?[:\s]*[*xX.\d]*?(\d{4})\b/gi,
+  /\b(?:ending|ending\s+in)\s+(\d{4})\b/gi,
+];
+
+// User own bank account patterns
+const BANK_OWN_PATTERNS = [
+  // debited from your / ur a/c or debited from a/c
+  /(?:debited\s+from|deducted\s+from|withdrawn\s+(?:at\s+atm\s+)?from|paid\s+from|drawn\s+on)\s+(?:your\s+|ur\s+)?(?:a\/c|account)\s*[:\s]*[*xX.\d]*?(\d{3,4})\b/gi,
+  // from your a/c ...
+  /from\s+(?:your\s+|ur\s+)?(?:a\/c|account)\s*(?:ending\s*(?:with|in)?\s*)?[:\s]*[*xX.\d]*?(\d{3,4})\b/gi,
+  // your a/c 1234 is debited / credited
+  /(?:your|ur)\s+(?:a\/c|account)\s*(?:ending\s*(?:with|in)?\s*)?[:\s]*[*xX.\d]*?(\d{3,4})\s+(?:is|has\s+been|was)?\s*(?:debited|credited)/gi,
+  // a/c 1234 debited / credited / for ...
+  /(?:a\/c|acct?|account)\s*[:\s]*[*xX.\d]*?(\d{3,4})\s+(?:is|has\s+been|was)?\s*(?:debited|credited|for)/gi,
+  // credited to your a/c / deposited in your a/c
+  /(?:credited\s+with\s+[^.]+?to|credited\s+to|deposited\s+in|received\s+in)\s+(?:your\s+|ur\s+)?(?:a\/c|account)\s*[:\s]*[*xX.\d]*?(\d{3,4})\b/gi,
+  // Standard a/c pattern (disambiguated by counterparty filtering)
+  /(?:a\/c|acct?|account)\s*(?:no\.?|number)?\s*(?:ending\s*(?:with|in)?|with\s*no\.?)?\s*[:\s]*[*xX.\d]*?(\d{3,4})\b/gi,
+  // Masked run with 2+ mask characters (*, x, X, .)
+  /\b[*xX.]{2,}(\d{3,4})\b/gi,
+];
+
 /**
- * Extracts candidate 3-4 digit account identifiers from an SMS body
+ * Extracts candidate 3-4 digit account identifiers belonging to the USER from an SMS body,
+ * rigorously filtering out beneficiary, payee, and receiving accounts.
  */
 function extractAccountDigits(
   body: string,
   isCc: boolean
 ): Array<{ digits: string; type: 'bank' | 'credit_card' }> {
-  const results: Array<{ digits: string; type: 'bank' | 'credit_card' }> = [];
+  const isCredit = isCreditSms(body);
+  const counterpartySet = new Set<string>();
+  const mobileSet = new Set<string>();
 
-  // 1. Credit Card specific patterns
-  const cardPatterns = [
-    /(?:credit\s*card|card)\s*(?:ending\s*(?:with|in)?|no\.?|number)?\s*[:\s]*[*xX\d]*?(\d{4})\b/gi,
-    /(?:spent\s+on|used\s+on)\s+[^.]+?card\s+[*xX\d]*?(\d{4})\b/gi,
-    /\b[*xX]{2,}\s*(\d{4})\s*(?:credit\s*card|card)\b/gi,
-    /\b(?:ending|ending\s+in)\s+(\d{4})\b/gi,
-  ];
+  // 1. Collect masked mobile numbers so they are never treated as accounts
+  for (const pat of MOBILE_PATTERNS) {
+    pat.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = pat.exec(body)) !== null) {
+      if (m[1]) mobileSet.add(m[1]);
+    }
+  }
 
-  for (const pat of cardPatterns) {
+  // 2. Identify counterparty (beneficiary in debit, remitter in credit)
+  const cpPatterns = isCredit ? REMITTER_PATTERNS : BENEFICIARY_PATTERNS;
+  for (const pat of cpPatterns) {
+    pat.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = pat.exec(body)) !== null) {
+      if (m[1]) counterpartySet.add(m[1]);
+    }
+  }
+
+  const rawCandidates: Array<{ digits: string; type: 'bank' | 'credit_card' }> = [];
+
+  // 3. Extract Credit Card candidates
+  for (const pat of CARD_PATTERNS) {
     pat.lastIndex = 0;
     let m: RegExpExecArray | null;
     while ((m = pat.exec(body)) !== null) {
       if (m[1] && m[1].length === 4) {
-        results.push({ digits: m[1], type: 'credit_card' });
+        rawCandidates.push({ digits: m[1], type: 'credit_card' });
       }
     }
   }
 
-  // 2. Bank Account specific patterns
-  const bankPatterns = [
-    /(?:a\/c|acct?|account)\s*(?:no\.?|number)?\s*(?:ending\s*(?:with|in)?|with\s*no\.?)?\s*[:\s]*[*xX\d]*?(\d{3,4})\b/gi,
-    /(?:debited\s+from|credited\s+to|deposited\s+in|transfer(?:red)?\s+to)\s+(?:a\/c|account)\s*[*xX\d]*?(\d{3,4})\b/gi,
-  ];
-
-  for (const pat of bankPatterns) {
+  // 4. Extract Bank Account candidates
+  for (const pat of BANK_OWN_PATTERNS) {
     pat.lastIndex = 0;
     let m: RegExpExecArray | null;
     while ((m = pat.exec(body)) !== null) {
       if (m[1] && m[1].length >= 3 && m[1].length <= 4) {
-        results.push({ digits: m[1], type: 'bank' });
+        rawCandidates.push({ digits: m[1], type: isCc ? 'credit_card' : 'bank' });
       }
     }
   }
 
-  // 3. General masked runs like XX1234 or *4092
-  const maskedRun = /\b[*xX]{2,}(\d{3,4})\b/gi;
-  let rm: RegExpExecArray | null;
-  while ((rm = maskedRun.exec(body)) !== null) {
-    if (rm[1] && rm[1].length >= 3) {
-      results.push({ digits: rm[1], type: isCc ? 'credit_card' : 'bank' });
+  // 5. Filter out:
+  //    - Any number identified as a receiving / counterparty account
+  //    - Any number identified as a mobile phone suffix
+  //    - Calendar years (2023, 2024, 2025, 2026, 2027)
+  const INVALID_YEARS = new Set(['2023', '2024', '2025', '2026', '2027']);
+  const seen = new Set<string>();
+  const filtered: Array<{ digits: string; type: 'bank' | 'credit_card' }> = [];
+
+  for (const item of rawCandidates) {
+    if (
+      !counterpartySet.has(item.digits) &&
+      !mobileSet.has(item.digits) &&
+      !INVALID_YEARS.has(item.digits) &&
+      !seen.has(item.digits)
+    ) {
+      seen.add(item.digits);
+      filtered.push(item);
     }
   }
 
-  // Filter out false positives like years
-  return results.filter(
-    (r) => r.digits !== '2024' && r.digits !== '2025' && r.digits !== '2026'
-  );
+  return filtered;
 }
 
 /**
