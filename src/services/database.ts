@@ -1445,6 +1445,8 @@ export const updateTransaction = async (id: number, fields: Partial<Omit<Transac
   const newTx = await db.getFirstAsync<Transaction>('SELECT * FROM transactions WHERE id = ?', id);
   if (newTx && newTx.isConfirmed) {
     await applyTransactionImpact(newTx, true);
+    if (newTx.accountId) await recalculateAccountBalance(newTx.accountId);
+    if (newTx.toAccountId) await recalculateAccountBalance(newTx.toAccountId);
   }
 };
 
@@ -1456,6 +1458,8 @@ export const confirmTransaction = async (id: number) => {
     // Confirming is what makes a linked charge count — an unconfirmed row must
     // never move a subscription's schedule.
     await syncSubscriptionFromTransaction(id);
+    if (tx.accountId) await recalculateAccountBalance(tx.accountId);
+    if (tx.toAccountId) await recalculateAccountBalance(tx.toAccountId);
   }
 };
 
@@ -1470,6 +1474,8 @@ export const deleteTransaction = async (id: number) => {
   // schedule keeps a lastPaidDate for a payment that no longer exists.
   await revertSubscriptionCycleFor(id);
   await db.runAsync('DELETE FROM transactions WHERE id = ?', id);
+  if (tx?.accountId) await recalculateAccountBalance(tx.accountId);
+  if (tx?.toAccountId) await recalculateAccountBalance(tx.toAccountId);
 };
 
 export const getTransactionById = async (id: number): Promise<Transaction | null> => {
@@ -1990,7 +1996,7 @@ export const updateAccountBalance = async (
   balanceAfter?: number
 ) => {
   if (balanceAfter !== undefined && balanceAfter !== null) {
-    await db.runAsync('UPDATE accounts SET balance = ? WHERE id = ?', balanceAfter, id);
+    await syncAccountBalanceFromSms(id);
     return;
   }
   const account = await db.getFirstAsync<{ balance: number; accountType: string }>(
@@ -2021,49 +2027,90 @@ export const updateAccountLastScanned = async (id: number, date: string) => {
 };
 
 /**
- * Uses the most recent transaction with a 'balanceAfter' (bank reported available balance)
- * to correct the account's current balance, accounting for any newer confirmed transactions.
+ * Reconciles the account balance with the most recent bank-reported 'balanceAfter'.
+ * Instead of silently overriding the balance or distorting forward queries, it:
+ * 1. Computes the ledger running balance up to the checkpoint
+ * 2. If a difference exists, creates or updates an explicit [⚖️ Balance Adjustment] transaction
+ * 3. Recalculates current balance from all confirmed transactions in the ledger
  */
 export const syncAccountBalanceFromSms = async (accountId: number) => {
+  const account = await db.getFirstAsync<Account>('SELECT * FROM accounts WHERE id = ?', accountId);
+  if (!account) return false;
+
   const lastWithBalance = await db.getFirstAsync<Transaction>(
-    'SELECT * FROM transactions WHERE accountId = ? AND balanceAfter IS NOT NULL AND isConfirmed = 1 ORDER BY date DESC LIMIT 1',
+    'SELECT * FROM transactions WHERE accountId = ? AND balanceAfter IS NOT NULL AND isConfirmed = 1 ORDER BY date DESC, id DESC LIMIT 1',
     accountId
   );
 
   if (!lastWithBalance || lastWithBalance.balanceAfter === null || lastWithBalance.balanceAfter === undefined) {
+    await recalculateAccountBalance(accountId);
     return false;
   }
 
-  let currentBal = lastWithBalance.balanceAfter;
-  
-  // Find all confirmed transactions that happened AFTER this checkpoint (involving the account as sender or receiver)
-  const newerTxs = await db.getAllAsync<Transaction>(
-    'SELECT * FROM transactions WHERE (accountId = ? OR toAccountId = ?) AND isConfirmed = 1 AND date > ? ORDER BY date ASC',
-    accountId,
-    accountId,
-    lastWithBalance.date
-  );
-
-  const account = await db.getFirstAsync<{ accountType: string }>(
-    'SELECT accountType FROM accounts WHERE id = ?',
-    accountId
-  );
-  if (!account) return false;
-
+  const targetBal = lastWithBalance.balanceAfter;
   const isCC = account.accountType === 'credit_card';
 
-  for (const tx of newerTxs) {
+  // Calculate the running balance up to and including the checkpoint transaction,
+  // excluding any auto-reconcile adjustments.
+  const priorTxs = await db.getAllAsync<Transaction>(
+    `SELECT * FROM transactions 
+     WHERE (accountId = ? OR toAccountId = ?) 
+       AND isConfirmed = 1 
+       AND (date < ? OR (date = ? AND id <= ?))
+       AND (notes NOT LIKE '%[auto_reconcile]%' OR notes IS NULL)
+     ORDER BY date ASC, id ASC`,
+    accountId, accountId, lastWithBalance.date, lastWithBalance.date, lastWithBalance.id
+  );
+
+  let runningBal = account.startingBalance;
+  for (const tx of priorTxs) {
     const isIncoming = tx.type === 'credit' || (tx.type === 'transfer' && tx.toAccountId === accountId);
     if (isCC) {
-      // CC: credit/incoming reduces debt, debit/outgoing increases it
-      currentBal = isIncoming ? currentBal - tx.amount : currentBal + tx.amount;
+      runningBal = isIncoming ? runningBal - tx.amount : runningBal + tx.amount;
     } else {
-      // Bank: credit/incoming adds, debit/outgoing/transfer-out subtracts
-      currentBal = isIncoming ? currentBal + tx.amount : currentBal - tx.amount;
+      runningBal = isIncoming ? runningBal + tx.amount : runningBal - tx.amount;
     }
   }
 
-  await db.runAsync('UPDATE accounts SET balance = ? WHERE id = ?', currentBal, accountId);
+  const diff = targetBal - runningBal;
+
+  // Check if an auto-reconcile adjustment already exists for this checkpoint
+  const existingAdj = await db.getFirstAsync<Transaction>(
+    `SELECT * FROM transactions 
+     WHERE accountId = ? 
+       AND isAdjustment = 1 
+       AND notes LIKE '%[auto_reconcile]%'
+       AND date = ?
+     LIMIT 1`,
+    accountId, lastWithBalance.date
+  );
+
+  if (Math.abs(diff) >= 0.5) {
+    const adjAmount = Math.round(Math.abs(diff) * 100) / 100;
+    const adjType: 'credit' | 'debit' = isCC
+      ? (diff > 0 ? 'debit' : 'credit') // CC: higher debt is debit
+      : (diff > 0 ? 'credit' : 'debit'); // Bank: higher balance is credit
+
+    const noteText = `Auto-reconciled to match bank balance (₹${targetBal.toLocaleString('en-IN')}) [auto_reconcile]`;
+
+    if (existingAdj) {
+      await db.runAsync(
+        'UPDATE transactions SET amount = ?, type = ?, notes = ? WHERE id = ?',
+        adjAmount, adjType, noteText, existingAdj.id
+      );
+    } else {
+      await db.runAsync(
+        `INSERT INTO transactions (amount, category, merchant, type, date, accountId, isConfirmed, isAdjustment, source, notes, tags, confidence)
+         VALUES (?, 'Others', 'Balance Adjustment', ?, ?, ?, 1, 1, 'system', ?, '["auto-reconciled"]', 'high')`,
+        adjAmount, adjType, lastWithBalance.date, accountId, noteText
+      );
+    }
+  } else if (existingAdj) {
+    await db.runAsync('DELETE FROM transactions WHERE id = ?', existingAdj.id);
+  }
+
+  // Recalculate balance strictly from all confirmed transactions in the ledger
+  await recalculateAccountBalance(accountId);
   return true;
 };
 
@@ -2076,7 +2123,7 @@ export const recalculateAccountBalance = async (accountId: number) => {
   if (!account) return false;
 
   const txs = await db.getAllAsync<Transaction>(
-    'SELECT * FROM transactions WHERE (accountId = ? OR toAccountId = ?) AND isConfirmed = 1 ORDER BY date ASC',
+    'SELECT * FROM transactions WHERE (accountId = ? OR toAccountId = ?) AND isConfirmed = 1 ORDER BY date ASC, id ASC',
     accountId,
     accountId
   );

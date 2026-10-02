@@ -29,6 +29,7 @@ import {
   LucideZap,
   LucideUsers,
   LucideExternalLink,
+  LucideScale,
 } from 'lucide-react-native';
 import { ThemedSafeAreaView, ThemedText } from '../components/ThemedSafeAreaView';
 import { useTheme } from '../theme/ThemeProvider';
@@ -285,6 +286,20 @@ const TransactionDetailScreen = () => {
             </View>
           )}
         </View>
+
+        {Boolean(transaction.isAdjustment) && (
+          <View style={[s.card, { backgroundColor: colors.accent + '15', borderColor: colors.accent + '33', marginBottom: 16, flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14 }]}>
+            <LucideScale color={colors.accent} size={22} />
+            <View style={{ flex: 1 }}>
+              <ThemedText style={{ fontSize: 14, fontWeight: '700', color: colors.accent }}>
+                Balance Adjustment
+              </ThemedText>
+              <ThemedText type="secondary" style={{ fontSize: 12, marginTop: 2 }}>
+                This is a balance correction to reconcile with bank statements or alerts. It moves your account balance without impacting monthly spend totals or budgets.
+              </ThemedText>
+            </View>
+          </View>
+        )}
 
         {/* Core details */}
         <View style={[s.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>

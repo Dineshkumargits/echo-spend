@@ -35,6 +35,7 @@ import {
   LucidePenLine,
   LucideZap,
   LucideRadio,
+  LucideScale,
 } from "lucide-react-native";
 import { FlashList } from "@shopify/flash-list";
 import {
@@ -771,6 +772,30 @@ const TransactionsScreen = () => {
         nodeColor={nodeColor}
         badges={
           <>
+            {tx.isAdjustment ? (
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 3,
+                  backgroundColor: colors.accent + "20",
+                  paddingHorizontal: 5,
+                  paddingVertical: 1,
+                  borderRadius: 4,
+                }}
+              >
+                <LucideScale color={colors.accent} size={10} />
+                <ThemedText
+                  style={{
+                    fontSize: 9,
+                    color: colors.accent,
+                    fontFamily: fonts.textMedium,
+                  }}
+                >
+                  Adjusted
+                </ThemedText>
+              </View>
+            ) : null}
             {sourceGlyph(tx.source)}
             {tx.isRecurring || tx.subscriptionId ? (
               <LucideRepeat color={colors.ai} size={11} />
